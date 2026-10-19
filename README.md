@@ -13,7 +13,7 @@ over MCP.
 | Tool | Does |
 |---|---|
 | `write(ops)` | `put {id, md}` creates or replaces a card; `remove {id}` deletes one. All or nothing. |
-| `read()` | every card with its markdown |
+| `read()` | the board as JSON: `{"cards": {"plan": {"md": "1. a"}}}` |
 
 ## Layout
 

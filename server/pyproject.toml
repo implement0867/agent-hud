@@ -18,6 +18,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "basedpyright>=1.40.2",
+    "hypothesis>=6.170.3",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.17.1",
@@ -31,7 +32,7 @@ filterwarnings = ["error"]
 
 [tool.basedpyright]
 pythonVersion = "3.12"
-include = ["src", "tests"]
+include = ["src"]
 typeCheckingMode = "recommended"
 enableTypeIgnoreComments = false
 reportAny = "hint"

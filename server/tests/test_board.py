@@ -1,39 +1,78 @@
+import string
+
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
 from agent_hud.board import Board
 from agent_hud.card import Card
-from agent_hud.ops import Op
+from agent_hud.ops import Op, PutOp, RemoveOp
 from tests.factories import put, remove
 
 
-@pytest.mark.parametrize(
-    ("ops", "cards"),
-    [
-        ([put("plan", "1. a")], {"plan": "1. a"}),
-        ([put("plan", "old"), put("plan", "new")], {"plan": "new"}),
-        ([put("a", "x"), put("b", "y")], {"a": "x", "b": "y"}),
-        ([put("a", "x"), remove("a")], {}),
-    ],
-    ids=["put", "replace", "two-cards", "remove"],
-)
-def test_apply_runs_ops_in_order(ops: list[Op], cards: dict[str, str]) -> None:
-    """Assemble: an empty board.
+@st.composite
+def valid_ops(draw: st.DrawFn) -> list[Op]:
+    """Puts on a few ids, so that ops often hit the same card, and removes of cards that exist at that point."""
+    present: set[str] = set()
+    ops: list[Op] = []
+    for _ in range(draw(st.integers(min_value=0, max_value=12))):
+        if present and draw(st.booleans()):
+            card_id = draw(st.sampled_from(sorted(present)))
+            present.remove(card_id)
+            ops.append(remove(card_id))
+        else:
+            card_id = draw(st.sampled_from(["a", "b", "c"]))
+            present.add(card_id)
+            ops.append(put(card_id, draw(st.text(string.printable, min_size=1))))
+    return ops
+
+
+@st.composite
+def ops_with_a_missing_remove(draw: st.DrawFn) -> list[Op]:
+    return [*draw(valid_ops()), remove("missing"), *draw(valid_ops())]
+
+
+@given(valid_ops())
+def test_apply_leaves_each_card_as_its_last_op_set_it(ops: list[Op]) -> None:
+    """Assemble: an empty board and ops that remove only cards that exist.
     Act: apply the ops.
-    Assert: the new board holds the expected cards."""
-    board = Board().apply(ops)
-    expected = {card_id: Card(md=md) for card_id, md in cards.items()}
-    assert board.cards == expected, f"{ops} gave {board.cards}, not {expected}"
+    Assert: each card has the markdown of its last put, or is gone after its last remove."""
+    board = Board()
+    board.apply(ops)
+    for card_id, op in {op.id: op for op in ops}.items():
+        match op:
+            case PutOp(md=md):
+                assert board.cards[card_id] == Card(md=md), f"{card_id} must hold its last put"
+            case RemoveOp():
+                assert card_id not in board.cards, f"{card_id} was removed last"
+    assert set(board.cards) <= {op.id for op in ops}, "apply must not create cards that no op names"
 
 
-def test_apply_rejects_a_missing_card() -> None:
-    """Assemble: a board with card a.
-    Act: apply a put, then a remove of a card that does not exist.
-    Assert: ValueError, and the board still holds only card a."""
-    board = Board().apply([put("a", "x")])
+@given(valid_ops(), st.data())
+def test_apply_in_two_parts_equals_apply_in_one(ops: list[Op], data: st.DataObject) -> None:
+    """Assemble: valid ops and a point that splits them in two.
+    Act: apply all ops to one board, and the two parts in turn to another.
+    Assert: the two boards are equal."""
+    split = data.draw(st.integers(min_value=0, max_value=len(ops)))
+    whole, parts = Board(), Board()
+    whole.apply(ops)
+    parts.apply(ops[:split])
+    parts.apply(ops[split:])
+    assert parts == whole
+
+
+@given(valid_ops(), ops_with_a_missing_remove())
+def test_failed_apply_changes_nothing(setup: list[Op], ops: list[Op]) -> None:
+    """Assemble: a board built from valid ops.
+    Act: apply ops that include a remove of a card that does not exist.
+    Assert: ValueError, and the board is equal to before."""
+    board = Board()
+    board.apply(setup)
+    before = board.model_copy(deep=True)
     with pytest.raises(ValueError):
-        board.apply([put("b", "y"), remove("missing")])
-    assert board.cards == {"a": Card(md="x")}, "a failed apply must not change the board"
+        board.apply(ops)
+    assert board == before, "a failed apply must not change the board"
 
 
 @pytest.mark.parametrize(
@@ -52,18 +91,3 @@ def test_invalid_op_is_rejected(raw: dict[str, str]) -> None:
     Assert: ValidationError."""
     with pytest.raises(ValidationError):
         TypeAdapter(Op).validate_python(raw)
-
-
-@pytest.mark.parametrize(
-    ("ops", "text"),
-    [
-        ([], ""),
-        ([put("a", "x"), put("b", "1. y\n2. z")], "a:\nx\n\nb:\n1. y\n2. z"),
-    ],
-    ids=["no-cards", "two-cards"],
-)
-def test_render_lists_each_card_with_its_markdown(ops: list[Op], text: str) -> None:
-    """Assemble: a board with the given cards.
-    Act: render it.
-    Assert: each card is its id line, then its markdown, with a blank line between cards."""
-    assert Board().apply(ops).render() == text

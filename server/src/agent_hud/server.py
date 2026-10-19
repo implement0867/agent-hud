@@ -8,31 +8,24 @@ from agent_hud.board import Board
 from agent_hud.ops import Op
 
 
-class Canvas:
-    def __init__(self) -> None:
-        self.board: Board = Board()
+def build(board: Board) -> FastMCP:
+    mcp = FastMCP("agent-hud")
 
-    # Async tools run on the event loop, one at a time, so two writes cannot interleave.
-    async def write(self, ops: Annotated[list[Op], Field(min_length=1)]) -> str:
-        """Change the cards on the canvas. Ops run in order, all or nothing.
+    async def write(ops: Annotated[list[Op], Field(min_length=1)]) -> None:
+        """Change the cards on the board. Ops run in order, all or nothing.
 
         put {id, md}: create a card, or replace the card with that id. remove {id}: delete a card.
         """
-        self.board = self.board.apply(ops)
-        return "ok"
+        board.apply(ops)
 
-    async def read(self) -> str:
-        """Every card on the canvas with its markdown."""
-        return self.board.render()
+    async def read() -> Board:
+        """Every card on the board with its markdown."""
+        return board
 
-
-def build() -> FastMCP:
-    canvas = Canvas()
-    mcp = FastMCP("agent-hud")
-    mcp.tool(canvas.write, output_schema=None)
-    mcp.tool(canvas.read, output_schema=None, annotations=ToolAnnotations(read_only_hint=True))
+    mcp.tool(write)
+    mcp.tool(read, annotations=ToolAnnotations(read_only_hint=True))
     return mcp
 
 
 def main() -> None:
-    build().run(show_banner=False)
+    build(Board()).run(show_banner=False)
