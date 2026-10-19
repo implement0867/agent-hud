@@ -5,6 +5,7 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
+from agent_hud.changes import Changes
 from agent_hud.models.board import Board
 from agent_hud.models.ops import Op
 from agent_hud.server import build
@@ -13,7 +14,7 @@ from tests.factories import as_json, put, remove
 
 @pytest.fixture
 async def client() -> AsyncIterator[Client[Any]]:
-    async with Client(build(Board())) as client:
+    async with Client(build(Board(), Changes())) as client:
         yield client
 
 

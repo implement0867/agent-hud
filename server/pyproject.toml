@@ -4,8 +4,12 @@ version = "0.1.0"
 description = "Shared browser canvas between a coding agent and its user, over MCP"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.150.0",
     "fastmcp>=4.1.1",
     "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.0",
+    "uvicorn>=0.54.0",
+    "websockets>=17.3",
 ]
 
 [project.scripts]
