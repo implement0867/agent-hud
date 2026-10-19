@@ -1,3 +1,5 @@
+from typing import assert_never
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_hud.models.card import Card, CardId
@@ -20,4 +22,6 @@ class Board(BaseModel):
                     del cards[card_id]
                 case RemoveOp(id=card_id):
                     raise ValueError(f"op {n} ({op.op}): no card '{card_id}'. Nothing was applied.")
+                case _:
+                    assert_never(op)
         self.cards = cards
