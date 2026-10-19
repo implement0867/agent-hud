@@ -1,0 +1,194 @@
+import { memo, useCallback, useState } from "react";
+import type { MouseEvent, ReactNode } from "react";
+
+import { Icon } from "~/chrome/icons";
+import type { IconName } from "~/chrome/icons";
+import { Thread } from "~/feedback/Thread";
+import { cx } from "~/lib/cx";
+import { useStore } from "~/lib/store";
+import { Reaction } from "~/protocol/schema";
+import type { Element } from "~/protocol/schema";
+import { useSend } from "~/store/socket";
+import { anchorKey, pickAnchor, uiStore } from "~/store/ui";
+
+const verdicts: readonly {
+  reaction: Reaction;
+  icon: IconName;
+  label: string;
+}[] = [
+  { reaction: "approve", icon: "check", label: "Approve" },
+  { reaction: "reject", icon: "x", label: "Reject" },
+  { reaction: "question", icon: "question", label: "Question" },
+];
+
+type AnchorProps = {
+  el: Element;
+  /** Anchor key inside the element; empty for the whole element. */
+  anchor: string;
+  children: ReactNode;
+  /** `popover` keeps comments out of the layout, for table cells. */
+  thread?: "inline" | "popover";
+  onRemove?: () => void;
+  className?: string;
+};
+
+/**
+ * A part of an element the user can react to, comment on, or link from.
+ * Every primitive wraps its addressable parts in an Anchor and gets feedback for free.
+ */
+export const Anchor = memo(
+  ({
+    el,
+    anchor,
+    children,
+    thread = "inline",
+    onRemove,
+    className,
+  }: AnchorProps) => {
+    const send = useSend();
+    const fb = el.feedback[anchor];
+    const linking = useStore(uiStore, (s) => s.tool === "link");
+    const isSource = useStore(
+      uiStore,
+      (s) => s.linkFrom?.id === el.id && s.linkFrom.anchor === anchor,
+    );
+    const [composing, setComposing] = useState(false);
+    const [open, setOpen] = useState(false);
+
+    const react = useCallback(
+      (e: MouseEvent<HTMLButtonElement>) => {
+        const reaction = Reaction.parse(e.currentTarget.dataset["reaction"]);
+        send({
+          t: "react",
+          id: el.id,
+          anchor,
+          reaction: fb?.reaction === reaction ? null : reaction,
+        });
+      },
+      [send, el.id, anchor, fb?.reaction],
+    );
+    const compose = useCallback(() => {
+      setComposing(true);
+      setOpen(true);
+    }, []);
+    const doneComposing = useCallback(() => {
+      setComposing(false);
+      if (thread === "popover") setOpen(false);
+    }, [thread]);
+    const toggleOpen = useCallback(() => {
+      setOpen((o) => !o);
+    }, []);
+    const pick = useCallback(
+      (e: MouseEvent) => {
+        if (uiStore.get().tool !== "link") return;
+        e.preventDefault();
+        e.stopPropagation();
+        pickAnchor({ id: el.id, anchor }, e.clientX, e.clientY);
+      },
+      [el.id, anchor],
+    );
+
+    const comments = fb?.comments ?? [];
+    const reaction = fb?.reaction ?? null;
+    return (
+      <div
+        className={cx(
+          "anchor",
+          linking && "anchor-linkable",
+          isSource && "anchor-source",
+          className,
+        )}
+        data-anchor={anchorKey(el.id, anchor)}
+        data-reaction={reaction ?? undefined}
+        onClickCapture={pick}
+      >
+        <div className="anchor-content">{children}</div>
+        <div className="anchor-marks">
+          {reaction === null ? null : (
+            <span className={`mark mark-${reaction}`} title={reaction}>
+              <Icon
+                name={
+                  verdicts.find((v) => v.reaction === reaction)?.icon ?? "check"
+                }
+                size={12}
+              />
+            </span>
+          )}
+          {fb?.revised === true ? (
+            <span
+              className="mark-revised"
+              title="The agent changed this after your feedback"
+            >
+              revised
+            </span>
+          ) : null}
+          {thread === "popover" && comments.length > 0 ? (
+            <button
+              type="button"
+              className="mark-count"
+              onClick={toggleOpen}
+              title="Show comments"
+            >
+              <Icon name="message" size={11} />
+              {comments.length}
+            </button>
+          ) : null}
+        </div>
+        {linking ? null : (
+          <div className="anchor-actions">
+            {verdicts.map((v) => (
+              <button
+                key={v.reaction}
+                type="button"
+                className={cx(
+                  "act",
+                  `act-${v.reaction}`,
+                  reaction === v.reaction && "act-on",
+                )}
+                data-reaction={v.reaction}
+                onClick={react}
+                title={v.label}
+              >
+                <Icon name={v.icon} size={13} />
+              </button>
+            ))}
+            <button
+              type="button"
+              className="act"
+              onClick={compose}
+              title="Comment"
+            >
+              <Icon name="message" size={13} />
+            </button>
+            {onRemove === undefined ? null : (
+              <button
+                type="button"
+                className="act act-reject"
+                onClick={onRemove}
+                title="Remove"
+              >
+                <Icon name="trash" size={13} />
+              </button>
+            )}
+          </div>
+        )}
+        {thread === "inline" || open ? (
+          <div
+            className={
+              thread === "popover" ? "thread-popover" : "anchor-thread"
+            }
+          >
+            <Thread
+              id={el.id}
+              anchor={anchor}
+              comments={comments}
+              composing={composing}
+              onDone={doneComposing}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  },
+);
+Anchor.displayName = "Anchor";

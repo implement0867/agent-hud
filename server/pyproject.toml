@@ -1,0 +1,132 @@
+[project]
+name = "agent-hud"
+version = "0.1.0"
+description = "Shared browser canvas between a coding agent and its user, over MCP"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.148.0",
+    "fastmcp>=4.1.1",
+    "markdown-it-py>=4.2.0",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+agent-hud = "agent_hud:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_hud"]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.basedpyright]
+pythonVersion = "3.12"
+include = ["src", "tests"]
+exclude = ["src/agent_hud/static"]
+typeCheckingMode = "all"
+reportAny = "hint"
+reportConstantRedefinition = "none"
+reportExplicitAny = "none"
+reportImplicitOverride = "none"
+reportImplicitStringConcatenation = "none"
+reportInvalidCast = "none"
+reportMissingModuleSource = "none"
+reportMissingSuperCall = "none"
+reportMissingTypeStubs = "hint"
+reportUnknownLambdaType = "none"
+reportUnknownMemberType = "information"
+reportUnnecessaryComparison = "hint"
+reportUnsafeMultipleInheritance = "none"
+reportUnusedCallResult = "none"
+reportUnusedImport = "none"
+reportUnusedParameter = "none"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["src/agent_hud/static"]
+
+[tool.ruff.lint]
+select = [
+    "A",
+    "ANN001",
+    "ANN201",
+    "ANN205",
+    "ANN206",
+    "ASYNC",
+    "B",
+    "BLE",
+    "C4",
+    "DTZ",
+    "ERA",
+    "F",
+    "FA",
+    "FAST",
+    "FBT",
+    "FLY",
+    "FURB",
+    "I",
+    "INP",
+    "N",
+    "NPY",
+    "PD",
+    "PERF",
+    "PIE",
+    "PLC0105",
+    "PLC0131",
+    "PLC0132",
+    "PLC0207",
+    "PLC0208",
+    "PLE",
+    "PLR",
+    "PLW",
+    "PYI",
+    "RET",
+    "RUF",
+    "SIM",
+    "TRY",
+    "UP",
+    "YTT",
+]
+ignore = [
+    "A002",
+    "ASYNC119",
+    "N818",
+    "PLR0904",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR0917",
+    "PLR2004",
+    "PLW0603",
+    "RET504",
+    "RUF001",
+    "RUF077",
+    "RUF105",
+    "RUF106",
+    "RUF201",
+    "TRY003",
+    "UP048",
+    "UP051",
+    "UP052",
+]

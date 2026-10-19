@@ -1,0 +1,12 @@
+# Normalize text to LF everywhere; git detects binaries.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+
+# Built canvas UI, committed so the plugin runs without Node.
+server/src/agent_hud/static/** linguist-generated=true -diff
+uv.lock linguist-generated=true -diff
+package-lock.json linguist-generated=true -diff

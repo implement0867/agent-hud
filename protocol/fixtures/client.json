@@ -1,0 +1,25 @@
+[
+  { "t": "move", "id": "plan", "x": 120, "y": 80.5 },
+  { "t": "place", "id": "plan", "x": 40, "y": 40 },
+  { "t": "resize", "id": "plan", "w": 480 },
+  { "t": "react", "id": "plan", "anchor": "k3", "reaction": "approve" },
+  { "t": "react", "id": "plan", "anchor": "", "reaction": null },
+  { "t": "comment", "id": "plan", "anchor": "k2", "text": "Wording is unclear" },
+  { "t": "uncomment", "id": "plan", "anchor": "k2", "cid": "c9" },
+  { "t": "edit", "id": "opts", "anchor": "k10:pick", "value": true },
+  { "t": "edit", "id": "opts", "anchor": "k10:cost", "value": 12.5 },
+  { "t": "edit", "id": "opts", "anchor": "k10:effort", "value": null },
+  { "t": "edit", "id": "plan", "anchor": "k2", "value": "Backfill in 10k-row batches" },
+  { "t": "add", "id": "plan", "value": "Write a rollback runbook" },
+  { "t": "remove", "id": "plan", "anchor": "k4" },
+  { "t": "note", "x": 300, "y": 200, "text": "Consider caching" },
+  {
+    "t": "link",
+    "src": { "id": "plan", "anchor": "k6" },
+    "dst": { "id": "plan", "anchor": "k1" },
+    "text": "entails?"
+  },
+  { "t": "delete", "id": "n4" },
+  { "t": "submit", "message": "Mostly fine, fix 2" },
+  { "t": "submit", "message": null }
+]

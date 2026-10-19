@@ -1,0 +1,299 @@
+[
+  {
+    "t": "hello",
+    "project": "test",
+    "elements": [
+      {
+        "id": "plan",
+        "author": "agent",
+        "feedback": {
+          "k3": {
+            "reaction": "approve",
+            "revised": false,
+            "comments": []
+          },
+          "k4": {
+            "reaction": "approve",
+            "revised": false,
+            "comments": []
+          },
+          "k2": {
+            "reaction": "question",
+            "revised": false,
+            "comments": [
+              {
+                "id": "c13",
+                "author": "user",
+                "text": "Wording is unclear",
+                "seq": 4
+              },
+              {
+                "id": "c14",
+                "author": "agent",
+                "text": "Batches of 10k rows; see risk card",
+                "seq": 4
+              }
+            ]
+          }
+        },
+        "title": "Migration plan",
+        "x": 40.0,
+        "y": 40.0,
+        "w": 460.0,
+        "kind": "list",
+        "ordered": true,
+        "items": [
+          {
+            "id": "k1",
+            "author": "agent",
+            "text": "Freeze writes to the legacy `orders` table"
+          },
+          {
+            "id": "k2",
+            "author": "agent",
+            "text": "Backfill the new schema in batches"
+          },
+          {
+            "id": "k3",
+            "author": "agent",
+            "text": "Dual-write from the API for one release"
+          },
+          {
+            "id": "k4",
+            "author": "agent",
+            "text": "Compare row counts and checksums nightly"
+          },
+          {
+            "id": "k5",
+            "author": "agent",
+            "text": "Switch reads to the new schema behind a flag"
+          },
+          {
+            "id": "k6",
+            "author": "agent",
+            "text": "Drop the legacy table after two clean weeks\n- keep a cold backup in S3"
+          }
+        ]
+      },
+      {
+        "id": "opts",
+        "author": "agent",
+        "feedback": {},
+        "title": "Queue options",
+        "x": null,
+        "y": null,
+        "w": null,
+        "columns": [
+          {
+            "key": "option",
+            "title": "Option",
+            "type": "static",
+            "options": []
+          },
+          {
+            "key": "latency",
+            "title": "Latency",
+            "type": "static",
+            "options": []
+          },
+          {
+            "key": "ops_cost",
+            "title": "Ops cost",
+            "type": "static",
+            "options": []
+          },
+          {
+            "key": "pick",
+            "title": "Pick",
+            "type": "check",
+            "options": []
+          },
+          {
+            "key": "effort",
+            "title": "Effort",
+            "type": "select",
+            "options": [
+              "low",
+              "med",
+              "high"
+            ]
+          },
+          {
+            "key": "notes",
+            "title": "Notes",
+            "type": "text",
+            "options": []
+          }
+        ],
+        "rows": [
+          {
+            "id": "k7",
+            "author": "agent",
+            "cells": {
+              "option": "Redis Streams",
+              "latency": "~1 ms",
+              "ops_cost": "low",
+              "pick": true,
+              "effort": "med",
+              "notes": ""
+            }
+          },
+          {
+            "id": "k8",
+            "author": "agent",
+            "cells": {
+              "option": "SQS",
+              "latency": "~20 ms",
+              "ops_cost": "none",
+              "pick": false,
+              "effort": "low",
+              "notes": "no ordering"
+            }
+          },
+          {
+            "id": "k9",
+            "author": "agent",
+            "cells": {
+              "option": "Kafka",
+              "latency": "~5 ms",
+              "ops_cost": "high",
+              "pick": false,
+              "effort": "high",
+              "notes": ""
+            }
+          },
+          {
+            "id": "k15",
+            "author": "user",
+            "cells": {
+              "option": "NATS",
+              "latency": "",
+              "ops_cost": "",
+              "pick": false,
+              "effort": null,
+              "notes": ""
+            }
+          }
+        ],
+        "kind": "itable"
+      },
+      {
+        "id": "risk",
+        "author": "agent",
+        "feedback": {},
+        "title": "Open risk",
+        "x": null,
+        "y": null,
+        "w": null,
+        "kind": "text",
+        "body": "The backfill holds a **share lock** per batch. With 40M rows and 10k-row batches\nthat is ~4,000 short locks. We expect p99 write latency to rise by 5-10 ms during\nthe window."
+      },
+      {
+        "id": "env",
+        "author": "agent",
+        "feedback": {},
+        "title": "Environments",
+        "x": null,
+        "y": null,
+        "w": null,
+        "columns": [
+          {
+            "key": "env",
+            "title": "Env"
+          },
+          {
+            "key": "region",
+            "title": "Region"
+          },
+          {
+            "key": "replicas",
+            "title": "Replicas"
+          }
+        ],
+        "rows": [
+          {
+            "id": "k10",
+            "author": "agent",
+            "cells": {
+              "env": "staging",
+              "region": "eu-west-1",
+              "replicas": "1"
+            }
+          },
+          {
+            "id": "k11",
+            "author": "agent",
+            "cells": {
+              "env": "prod",
+              "region": "eu-west-1",
+              "replicas": "3"
+            }
+          }
+        ],
+        "kind": "table"
+      },
+      {
+        "id": "l12",
+        "author": "agent",
+        "feedback": {},
+        "kind": "link",
+        "src": {
+          "id": "plan",
+          "anchor": "k4"
+        },
+        "dst": {
+          "id": "plan",
+          "anchor": "k3"
+        },
+        "text": "needs"
+      },
+      {
+        "id": "n16",
+        "author": "user",
+        "feedback": {},
+        "title": null,
+        "x": 640.0,
+        "y": 420.0,
+        "w": null,
+        "kind": "text",
+        "body": "Consider **rollback**"
+      },
+      {
+        "id": "l17",
+        "author": "user",
+        "feedback": {},
+        "kind": "link",
+        "src": {
+          "id": "plan",
+          "anchor": "k6"
+        },
+        "dst": {
+          "id": "plan",
+          "anchor": "k1"
+        },
+        "text": "entails?"
+      }
+    ],
+    "status": {
+      "waiting": false,
+      "pending": 9,
+      "viewers": 0
+    }
+  },
+  {
+    "t": "status",
+    "status": {
+      "waiting": true,
+      "pending": 3,
+      "viewers": 2
+    }
+  },
+  {
+    "t": "gone",
+    "id": "risk"
+  },
+  {
+    "t": "error",
+    "message": "plan has no item 'k99'"
+  }
+]

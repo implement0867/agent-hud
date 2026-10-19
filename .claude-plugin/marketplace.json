@@ -1,0 +1,12 @@
+{
+  "name": "agent-hud",
+  "owner": { "name": "implement0867" },
+  "description": "Agent HUD: a shared canvas between Claude Code and you.",
+  "plugins": [
+    {
+      "name": "agent-hud",
+      "source": ".",
+      "description": "Shared browser canvas with item-level feedback over MCP."
+    }
+  ]
+}
