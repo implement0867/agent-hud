@@ -4,7 +4,6 @@
 !.gitattributes
 !.github/
 !.claude-plugin/
-!.mcp.json
 !.prettierrc.json
 !.prettierignore
 

@@ -2,8 +2,30 @@
   "name": "agent-hud",
   "displayName": "Agent HUD",
   "description": "A shared browser canvas for reviewing agent plans item by item: approve, reject, question, comment, draw arrows, fill interactive tables, then Send.",
-  "author": { "name": "implement0867" },
+  "author": {
+    "name": "implement0867"
+  },
   "homepage": "https://github.com/implement0867/agent-hud",
   "repository": "https://github.com/implement0867/agent-hud",
-  "keywords": ["canvas", "review", "plan", "mcp", "whiteboard"]
+  "keywords": [
+    "canvas",
+    "review",
+    "plan",
+    "mcp",
+    "whiteboard"
+  ],
+  "mcpServers": {
+    "canvas": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--quiet",
+        "--frozen",
+        "--no-dev",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "agent-hud"
+      ]
+    }
+  }
 }

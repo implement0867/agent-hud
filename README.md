@@ -164,8 +164,7 @@ Every setting is a flag (`agent-hud --help`) and an environment variable.
 ## Development
 
 ```text
-.claude-plugin/   plugin and marketplace manifests
-.mcp.json         how Claude Code starts the server (uv run)
+.claude-plugin/   plugin and marketplace manifests; plugin.json also starts the server (uv run)
 skills/ commands/ agent guidance and the /agent-hud:canvas command
 server/           Python: FastMCP tools, board, FastAPI app, primitives (uv, ruff, basedpyright, pytest)
 ui/               React + Vite + strict TypeScript + Zod + ESLint (typescript-eslint strictTypeChecked)
