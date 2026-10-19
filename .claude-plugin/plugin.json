@@ -1,0 +1,19 @@
+{
+  "name": "agent-hud",
+  "description": "Markdown cards that Claude Code writes and reads over MCP.",
+  "author": { "name": "implement0867" },
+  "mcpServers": {
+    "canvas": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--quiet",
+        "--frozen",
+        "--no-dev",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}/server",
+        "agent-hud"
+      ]
+    }
+  }
+}

@@ -2,6 +2,7 @@
 .*
 !.gitignore
 !.gitattributes
+!.claude-plugin/
 !.prettierrc.json
 !.prettierignore
 

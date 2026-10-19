@@ -3,7 +3,13 @@ name = "agent-hud"
 version = "0.1.0"
 description = "Shared browser canvas between a coding agent and its user, over MCP"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastmcp>=4.1.1",
+    "pydantic>=2.14.1",
+]
+
+[project.scripts]
+agent-hud = "agent_hud.server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
@@ -12,12 +18,20 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "basedpyright>=1.40.2",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.17.1",
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
 [tool.basedpyright]
 pythonVersion = "3.12"
-include = ["src"]
+include = ["src", "tests"]
 typeCheckingMode = "recommended"
 enableTypeIgnoreComments = false
 reportAny = "hint"
