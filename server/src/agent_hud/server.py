@@ -44,9 +44,10 @@ def build(settings: HudSettings, hub: Hub | None = None) -> FastMCP:
         reply {at, text} answers a comment; link {src, dst, text} draws an arrow; clear.
         """
         try:
-            hub.publish(apply(hub.state, ops))
+            hub.state, delta = apply(hub.state, ops)
         except OpError as exc:
             raise ToolError(str(exc)) from None
+        hub.publish(delta)
         return "ok" + await canvas.viewer_hint()
 
     async def read(

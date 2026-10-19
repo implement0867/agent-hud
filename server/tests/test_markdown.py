@@ -112,3 +112,8 @@ def test_split_row(line: str, cells: list[str]) -> None:
 def test_table_row_wider_than_header_is_an_error() -> None:
     with pytest.raises(MarkdownError, match="row 1"):
         parse("| A |\n|---|\n| 1 | 2 |")
+
+
+def test_list_item_without_text_is_an_error() -> None:
+    with pytest.raises(MarkdownError, match="must start with text"):
+        parse("1. a\n2.\n3. c")

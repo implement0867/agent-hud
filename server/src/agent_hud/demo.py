@@ -3,7 +3,7 @@ from agent_hud.ops import ClearOp, LinkOp, Op, OpKind, PutOp
 from agent_hud.state import BoardState
 
 
-def seed(state: BoardState) -> None:
+def seed(state: BoardState) -> BoardState:
     ops: list[Op] = [
         ClearOp(op=OpKind.CLEAR),
         PutOp(
@@ -47,4 +47,5 @@ the window.""",
         ),
         LinkOp(op=OpKind.LINK, src="plan.4", dst="plan.3", text="needs"),
     ]
-    apply(state, ops)
+    seeded, _ = apply(state, ops)
+    return seeded

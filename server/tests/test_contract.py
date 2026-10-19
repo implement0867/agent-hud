@@ -17,7 +17,7 @@ def _fixtures() -> Path:
 
 
 def _server_messages(hub: Hub, write: Write, act: Act) -> list[dict[str, Any]]:
-    seed(hub.state)
+    hub.state = seed(hub.state)
     for label, reaction in [("plan.3", "approve"), ("plan.4", "approve"), ("plan.2", "question")]:
         el_id, key = anchor(hub, label)
         act(t="react", id=el_id, anchor=key, reaction=reaction)

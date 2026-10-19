@@ -16,9 +16,10 @@ router = APIRouter(prefix="/debug", dependencies=[Depends(require_debug_header)]
 @router.post("/write", status_code=status.HTTP_204_NO_CONTENT)
 async def debug_write(ops: Annotated[list[Op], Body(min_length=1)], hub: HubDep) -> None:
     try:
-        hub.publish(apply(hub.state, ops))
+        hub.state, delta = apply(hub.state, ops)
     except OpError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    hub.publish(delta)
 
 
 @router.get("/read")

@@ -25,7 +25,8 @@ def write(hub: Hub) -> Write:
     """Apply agent ops given as plain dicts, as the MCP tool receives them."""
 
     def _write(*ops: dict[str, Any]) -> None:
-        hub.publish(apply(hub.state, TypeAdapter(list[Op]).validate_python(list(ops))))
+        hub.state, delta = apply(hub.state, TypeAdapter(list[Op]).validate_python(list(ops)))
+        hub.publish(delta)
 
     return _write
 

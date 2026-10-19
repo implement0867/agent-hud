@@ -93,11 +93,13 @@ def _span(node: SyntaxTreeNode, lines: list[str]) -> list[str]:
 
 
 def _item_source(item: SyntaxTreeNode, lines: list[str]) -> str:
-    """An item's own markdown: the marker removed, sub-points kept and dedented."""
-    first, *rest = _span(item, lines)
-    head = re.sub(r"^\s*(?:[-*+]|\d{1,9}[.)])[ \t]?", "", first, count=1)
-    tail = textwrap.dedent("\n".join(rest)).strip("\n")
-    return f"{head}\n{tail}".strip() if tail else head.strip()
+    """An item's own markdown: its first paragraph, then its sub-blocks dedented."""
+    match item.map, item.children:
+        case (_, item_end), [SyntaxTreeNode(type="paragraph", map=(_, end)) as first, *_]:
+            tail = textwrap.dedent("\n".join(lines[end:item_end])).strip("\n")
+            return f"{_inline(first)}\n{tail}" if tail else _inline(first)
+        case _:
+            raise MarkdownError("each list item must start with text")
 
 
 def _table(node: SyntaxTreeNode, lines: list[str]) -> TableContent:

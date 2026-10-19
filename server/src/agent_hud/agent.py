@@ -11,9 +11,9 @@ class OpError(ValueError):
     pass
 
 
-def apply(state: BoardState, ops: list[Op]) -> Delta:
-    """Apply agent ops to the state, all or nothing."""
-    draft = state.model_copy(update={"elements": {k: v.model_copy(deep=True) for k, v in state.elements.items()}})
+def apply(state: BoardState, ops: list[Op]) -> tuple[BoardState, Delta]:
+    """Apply agent ops to a copy of the state, all or nothing."""
+    draft = state.model_copy(deep=True)
     touched: list[str] = []
     for n, op in enumerate(ops, start=1):
         try:
@@ -24,8 +24,7 @@ def apply(state: BoardState, ops: list[Op]) -> Delta:
     gone += draft.drop_dangling()
     for el in draft.elements.values():
         el.prune_feedback()
-    state.elements, state.next_id = draft.elements, draft.next_id
-    return Delta(upserted=[t for t in touched if t in state.elements], gone=gone)
+    return draft, Delta(upserted=[t for t in touched if t in draft.elements], gone=gone)
 
 
 def _apply_op(draft: BoardState, op: Op) -> list[str]:

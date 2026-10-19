@@ -12,5 +12,5 @@ def open_board(settings: HudSettings) -> Hub:
     if settings.state_file is not None:
         Persistence(settings.state_file).attach(hub)
     if settings.demo:
-        seed(hub.state)
+        hub.state = seed(hub.state)
     return hub
