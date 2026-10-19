@@ -5,8 +5,8 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from agent_hud.board import Board
-from agent_hud.ops import Op
+from agent_hud.models.board import Board
+from agent_hud.models.ops import Op
 from agent_hud.server import build
 from tests.factories import as_json, put, remove
 

@@ -4,8 +4,8 @@ from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from agent_hud.board import Board
-from agent_hud.ops import Op
+from agent_hud.models.board import Board
+from agent_hud.models.ops import Op
 
 
 def build(board: Board) -> FastMCP:

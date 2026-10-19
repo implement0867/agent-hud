@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_hud.card import Card, CardId
-from agent_hud.ops import Op, PutOp, RemoveOp
+from agent_hud.models.card import Card, CardId
+from agent_hud.models.ops import Op, PutOp, RemoveOp
 
 
 class Board(BaseModel):

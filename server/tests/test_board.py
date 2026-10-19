@@ -5,9 +5,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
-from agent_hud.board import Board
-from agent_hud.card import Card
-from agent_hud.ops import Op, PutOp, RemoveOp
+from agent_hud.models.board import Board
+from agent_hud.models.card import Card
+from agent_hud.models.ops import Op, PutOp, RemoveOp
 from tests.factories import put, remove
 
 

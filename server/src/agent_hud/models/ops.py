@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field
 
-from agent_hud.card import CardId
+from agent_hud.models.card import CardId
 
 
 class OpKind(StrEnum):

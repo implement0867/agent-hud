@@ -1,6 +1,6 @@
 from typing import Any
 
-from agent_hud.ops import Op, OpKind, PutOp, RemoveOp
+from agent_hud.models.ops import Op, OpKind, PutOp, RemoveOp
 
 
 def put(card_id: str, md: str) -> PutOp:
