@@ -1,0 +1,12 @@
+# Dotfiles are private by default; opt in the ones the repository needs.
+.*
+!.gitignore
+!.gitattributes
+!.prettierrc.json
+!.prettierignore
+
+__pycache__/
+node_modules/
+*.egg-info/
+*.tsbuildinfo
+dist/

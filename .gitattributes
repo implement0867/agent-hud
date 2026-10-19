@@ -1,0 +1,5 @@
+# Normalize text to LF everywhere; git detects binaries.
+* text=auto eol=lf
+
+uv.lock linguist-generated=true
+package-lock.json linguist-generated=true
