@@ -4,6 +4,7 @@ import json
 import pytest
 from fastmcp import Client
 from websockets.asyncio.client import connect
+from websockets.typing import Origin
 
 from agent_hud.board import Board
 from agent_hud.server import build
@@ -64,8 +65,8 @@ async def test_browser_tab_round_trip_over_a_real_socket(board: Board, settings:
     async with Client(build(settings, board)) as client:
         result = await client.call_tool("write", {"ops": [{"op": "put", "id": "plan", "md": "1. a\n2. b"}]})
         url = _text(result).split("open ")[1].rstrip(")")
-        origin = url.rstrip("/")
-        async with connect(url.replace("http", "ws") + "ws", origin=origin) as ws:  # pyright: ignore[reportArgumentType]
+        origin = Origin(url.rstrip("/"))
+        async with connect(url.replace("http", "ws") + "ws", origin=origin) as ws:
             hello = json.loads(await ws.recv())
             assert hello["elements"][0]["id"] == "plan"
             key = hello["elements"][0]["items"][1]["id"]
