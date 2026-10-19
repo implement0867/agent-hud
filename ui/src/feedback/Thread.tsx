@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 
 import { Icon } from "~/chrome/icons";
+import { Author } from "~/protocol/schema";
 import type { Comment } from "~/protocol/schema";
 import { useSend } from "~/store/socket";
 
@@ -21,10 +22,10 @@ export const Thread = memo(
         {comments.map((c) => (
           <div key={c.id} className={`comment comment-${c.author}`}>
             <span className="comment-author">
-              {c.author === "user" ? "You" : "Agent"}
+              {c.author === Author.enum.user ? "You" : "Agent"}
             </span>
             <span className="comment-text">{c.text}</span>
-            {c.author === "user" ? (
+            {c.author === Author.enum.user ? (
               <button
                 type="button"
                 className="comment-remove"

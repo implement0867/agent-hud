@@ -7,6 +7,7 @@ import { Anchor } from "~/feedback/Anchor";
 import { cx } from "~/lib/cx";
 import { useStore } from "~/lib/store";
 import { Body } from "~/primitives/Body";
+import { Author } from "~/protocol/schema";
 import type { BoxEl } from "~/protocol/schema";
 import { boardStore, updateBox } from "~/store/board";
 import { useSend } from "~/store/socket";
@@ -66,7 +67,7 @@ const CardFrame = ({ el }: { el: BoxEl }) => {
           top: el.y,
           ...(el.w === null ? {} : { width: el.w, maxWidth: "none" }),
         };
-  const note = el.kind === "text" && el.author === "user";
+  const note = el.kind === "text" && el.author === Author.enum.user;
 
   return (
     <div
@@ -113,11 +114,11 @@ const CardFrame = ({ el }: { el: BoxEl }) => {
           <div className="card-title">
             <span className="card-id">{el.id}</span>
             <span className="card-name">
-              {el.title ?? (note ? "Note" : kindLabel[el.kind])}
+              {el.title || (note ? "Note" : kindLabel[el.kind])}
             </span>
           </div>
         </Anchor>
-        {el.author === "user" ? (
+        {el.author === Author.enum.user ? (
           <button
             type="button"
             className="card-delete"

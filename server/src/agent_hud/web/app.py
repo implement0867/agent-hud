@@ -16,15 +16,12 @@ def _not_built() -> HTMLResponse:
     )
 
 
-def create_app(
-    hub: Hub, settings: HudSettings, *, debug_api: bool = False, allowed_hosts: list[str] | None = None
-) -> FastAPI:
+def create_app(hub: Hub, settings: HudSettings, *, debug_api: bool = False) -> FastAPI:
     app = FastAPI(title="agent-hud", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.hub = hub
     app.state.settings = settings
     # Rejects DNS-rebinding requests that reach this loopback server under a foreign name.
-    hosts = allowed_hosts or ["127.0.0.1", "localhost", settings.host]
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", settings.host])
     app.include_router(socket_router)
     if debug_api:
         app.include_router(debug_router)

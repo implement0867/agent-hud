@@ -19,7 +19,7 @@ __all__ = ["AnchorRef", "Box", "BoxKind", "Element", "LinkEl", "ListEl", "TableE
 def build_box(*, id: str, md: str, title: str | None, kind: BoxKind | None, ids: IdSource, author: Author) -> Box:
     """Build a card from markdown, inferring the kind unless one is given."""
     parsed = parse(md, heading_is_title=title is None)
-    heading = title if title is not None else parsed.title
+    heading = parsed.title if title is None else title
     match kind, parsed.content:
         case (ElementKind.TEXT, _) | (None, TextContent()):
             return TextEl(id=id, author=author, title=heading, body=parsed.body)

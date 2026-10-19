@@ -64,11 +64,14 @@ export const labelBox = (label: Arrow["label"], w: number, h = 14): Rect => ({
 });
 
 /** Move boxes down, in order, until none overlaps one placed before it. */
-export const separate = (boxes: readonly Rect[], step = 14): Rect[] =>
-  boxes.reduce<Rect[]>((placed, box) => {
-    let moved = box;
-    while (placed.some((p) => intersects(p, moved))) {
-      moved = { ...moved, y: moved.y + step };
+export const separate = <T extends { box: Rect }>(
+  items: readonly T[],
+  step = 14,
+): T[] =>
+  items.reduce<T[]>((placed, item) => {
+    let box = item.box;
+    while (placed.some((p) => intersects(p.box, box))) {
+      box = { ...box, y: box.y + step };
     }
-    return [...placed, moved];
+    return [...placed, { ...item, box }];
   }, []);

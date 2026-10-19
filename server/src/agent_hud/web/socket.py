@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from agent_hud.hub import Hub
 from agent_hud.page import UserError, handle
-from agent_hud.protocol import ErrorMsg, ServerMsg, ServerType, client_messages
+from agent_hud.protocol import ClientMessage, ErrorMsg, ServerMsg, ServerType
 from agent_hud.web.deps import HubDep, require_same_origin
 
 router = APIRouter()
@@ -14,7 +14,7 @@ router = APIRouter()
 
 def _receive(hub: Hub, raw: str, queue: asyncio.Queue[ServerMsg]) -> None:
     try:
-        hub.publish(handle(hub.state, client_messages().validate_json(raw)))
+        hub.publish(handle(hub.state, ClientMessage.model_validate_json(raw).root))
     except ValidationError as exc:
         queue.put_nowait(ErrorMsg(t=ServerType.ERROR, message=f"bad message: {exc.errors()[0]['msg']}"))
     except UserError as exc:

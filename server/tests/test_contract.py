@@ -8,7 +8,7 @@ from pydantic import TypeAdapter
 
 from agent_hud.demo import seed
 from agent_hud.hub import Hub
-from agent_hud.protocol import ErrorMsg, GoneMsg, ServerMsg, ServerType, Status, StatusMsg, client_messages
+from agent_hud.protocol import ClientMessage, ErrorMsg, GoneMsg, ServerMsg, ServerType, Status, StatusMsg
 from tests.conftest import Act, Write, anchor
 
 
@@ -57,4 +57,4 @@ def test_server_fixture_is_current(hub: Hub, write: Write, act: Act) -> None:
 
 @pytest.mark.parametrize("msg", json.loads((_fixtures() / "client.json").read_text()), ids=lambda m: m["t"])
 def test_client_fixture_validates(msg: dict[str, Any]) -> None:
-    assert client_messages().validate_python(msg).t == msg["t"]
+    assert ClientMessage.model_validate(msg).root.t == msg["t"]

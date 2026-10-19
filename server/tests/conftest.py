@@ -8,7 +8,7 @@ from agent_hud.agent import apply
 from agent_hud.hub import Hub
 from agent_hud.ops import Op
 from agent_hud.page import handle
-from agent_hud.protocol import client_messages
+from agent_hud.protocol import ClientMessage
 from agent_hud.state import BoardState
 
 type Write = Callable[..., None]
@@ -35,7 +35,7 @@ def act(hub: Hub) -> Act:
     """Apply a page message given as a plain dict, as the websocket receives it."""
 
     def _act(**msg: Any) -> None:
-        hub.publish(handle(hub.state, client_messages().validate_python(msg)))
+        hub.publish(handle(hub.state, ClientMessage.model_validate(msg).root))
 
     return _act
 

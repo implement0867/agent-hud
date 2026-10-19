@@ -1,5 +1,6 @@
 import { createStore } from "~/lib/store";
 import { assertNever } from "~/lib/assertNever";
+import { Author } from "~/protocol/schema";
 import type { BoxEl, Element, ServerMsg, Status } from "~/protocol/schema";
 
 export type Connection = "connecting" | "open" | "closed";
@@ -46,7 +47,7 @@ export const reduceBoard = (state: BoardState, msg: ServerMsg): BoardState => {
         order: known ? state.order : [...state.order, element.id],
         elements: { ...state.elements, [element.id]: element },
         fresh:
-          !known && element.author === "agent"
+          !known && element.author === Author.enum.agent
             ? [...state.fresh, element.id]
             : state.fresh,
       };

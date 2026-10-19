@@ -7,7 +7,7 @@ from agent_hud.web import CanvasServer
 async def serve(settings: HudSettings) -> None:
     """Canvas without MCP, for UI work and browser tests; `/debug/*` drives the agent side."""
     canvas = CanvasServer(open_board(settings), settings, debug_api=True)
-    url = await canvas.ensure_started()
+    running = await canvas.start()
     if settings.open_browser:
-        open_browser(url)
-    await canvas.serve_forever()
+        open_browser(running.url)
+    await running.task

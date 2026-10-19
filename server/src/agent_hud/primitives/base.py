@@ -60,7 +60,7 @@ class AnchorRef(BaseModel):
     anchor: str
 
 
-type LabelOf = Callable[[AnchorRef], str | None]
+type LabelOf = Callable[[AnchorRef], str]
 
 
 class Comment(BaseModel):
@@ -109,42 +109,46 @@ class ElementBase(BaseModel):
     def parts(self) -> list[Part]:
         raise NotImplementedError
 
-    def part(self, anchor: str) -> Part | None:
-        return next((p for p in self.parts() if p.anchor == anchor), None)
+    def has(self, anchor: str) -> bool:
+        return any(p.anchor == anchor for p in self.parts())
+
+    def part(self, anchor: str) -> Part:
+        match [p for p in self.parts() if p.anchor == anchor]:
+            case [part]:
+                return part
+            case _:
+                raise PathError(f"{self.id} has no anchor '{anchor}'")
 
     def resolve(self, label: str) -> str:
-        part = next((p for p in self.parts() if p.label == label), None)
-        if part is None:
-            raise PathError(f"{self.id} has no part '{label}'")
-        return part.anchor
+        match [p for p in self.parts() if p.label == label]:
+            case [part]:
+                return part.anchor
+            case _:
+                raise PathError(f"{self.id} has no part '{label}'")
 
-    def label(self, anchor: str) -> str | None:
-        match self.part(anchor):
-            case None:
-                return None
-            case Part(label=""):
+    def label(self, anchor: str) -> str:
+        match self.part(anchor).label:
+            case "":
                 return self.id
-            case Part(label=label):
+            case label:
                 return f"{self.id}.{label}"
 
     def ends(self) -> tuple[AnchorRef, ...]:
         return ()
 
     def set_value(self, anchor: str, value: CellValue) -> None:
-        raise PathError(f"{self.label(anchor) or self.id} cannot be set")
+        raise PathError(f"{self.label(anchor)} cannot be set")
 
-    def insert(self, before: str | None, value: str, new_id: str, author: Author) -> None:
-        """Insert before the part at anchor `before`, or append when it is None."""
+    def insert(self, at: str, value: str, new_id: str, author: Author) -> None:
+        """Insert before the part at anchor `at`; at the element itself (`""`), append."""
         raise PathError(f"{self.id} does not take inserts")
 
     def remove(self, anchor: str) -> str:
         """Remove a part and return its text."""
-        raise PathError(f"{self.label(anchor) or self.id} cannot be removed")
+        raise PathError(f"{self.label(anchor)} cannot be removed")
 
     def feedback_at(self, anchor: str) -> Feedback:
-        if self.part(anchor) is None:
-            raise PathError(f"{self.id} has no anchor '{anchor}'")
-        return self.feedback.setdefault(anchor, Feedback())
+        return self.feedback.setdefault(self.part(anchor).anchor, Feedback())
 
     def mark_revised(self, anchor: str) -> None:
         if (fb := self.feedback.get(anchor)) is not None and not fb.is_empty():
@@ -163,7 +167,7 @@ class ElementBase(BaseModel):
 
 
 class BoxBase(ElementBase):
-    title: str | None = None
+    title: str = ""
     x: float | None = None
     y: float | None = None
     w: float | None = Field(default=None, gt=0)

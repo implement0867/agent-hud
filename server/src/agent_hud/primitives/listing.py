@@ -29,7 +29,7 @@ class ListEl(BoxBase):
 
     def parts(self) -> list[Part]:
         items = (Part(item.id, str(n), item.text) for n, item in enumerate(self.items, start=1))
-        return [Part("", "", self.title or ""), *items]
+        return [Part("", "", self.title), *items]
 
     def _item(self, anchor: str) -> ListItem:
         item = next((item for item in self.items if item.id == anchor), None)
@@ -42,12 +42,16 @@ class ListEl(BoxBase):
             case str() as text if text.strip():
                 self._item(anchor).text = text.strip()
             case _:
-                raise PathError(f"{self.label(anchor) or self.id} takes non-empty text")
+                raise PathError(f"{self.label(anchor)} takes non-empty text")
 
-    def insert(self, before: str | None, value: str, new_id: str, author: Author) -> None:
+    def insert(self, at: str, value: str, new_id: str, author: Author) -> None:
         if not value.strip():
             raise PathError("list items need text")
-        position = len(self.items) if before is None else self.items.index(self._item(before))
+        match at:
+            case "":
+                position = len(self.items)
+            case anchor:
+                position = self.items.index(self._item(anchor))
         self.items.insert(position, ListItem(id=new_id, author=author, text=value.strip()))
 
     def remove(self, anchor: str) -> str:

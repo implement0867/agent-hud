@@ -3,6 +3,7 @@ import { memo } from "react";
 import { Anchor } from "~/feedback/Anchor";
 import { AddRow } from "~/primitives/AddRow";
 import { Cell } from "~/primitives/cells";
+import { Author } from "~/protocol/schema";
 import type { Column, ColumnType, Row, TableEl } from "~/protocol/schema";
 import { useSend } from "~/store/socket";
 
@@ -71,7 +72,9 @@ const TableRow = memo(({ el, row, n }: RowProps) => {
           }}
         >
           <span className="row-label">r{n}</span>
-          {row.author === "user" ? <span className="by-user">you</span> : null}
+          {row.author === Author.enum.user ? (
+            <span className="by-user">you</span>
+          ) : null}
         </Anchor>
       </td>
       {el.columns.map((col) => (

@@ -12,7 +12,7 @@ async def test_wait_returns_when_the_user_submits(hub: Hub, act: Act) -> None:
     waiter = asyncio.create_task(hub.wait_for_submit(5, _noop, interval=0.01))
     await asyncio.sleep(0.03)
     assert hub.status().waiting, "the page is told the agent is waiting"
-    act(t="submit", message=None)
+    act(t="submit", message="")
     assert await waiter is True
     assert not hub.status().waiting
 

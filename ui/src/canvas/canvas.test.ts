@@ -99,11 +99,11 @@ describe("arrows", () => {
 
 describe("arrow texts", () => {
   it("moves overlapping boxes down and leaves clear ones alone", () => {
-    const boxes = separate([
-      { x: 0, y: 0, w: 40, h: 14 },
-      { x: 20, y: 4, w: 40, h: 14 },
-      { x: 200, y: 0, w: 40, h: 14 },
+    const items = separate([
+      { box: { x: 0, y: 0, w: 40, h: 14 } },
+      { box: { x: 20, y: 4, w: 40, h: 14 } },
+      { box: { x: 200, y: 0, w: 40, h: 14 } },
     ]);
-    expect(boxes.map((b) => b.y)).toEqual([0, 18, 0]);
+    expect(items.map((i) => i.box.y)).toEqual([0, 18, 0]);
   });
 });

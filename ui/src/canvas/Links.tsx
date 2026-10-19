@@ -3,6 +3,7 @@ import { memo, useCallback } from "react";
 import type { LinkLayer, Register } from "~/canvas/useLinkLayer";
 import { cx } from "~/lib/cx";
 import { useStore } from "~/lib/store";
+import { Author } from "~/protocol/schema";
 import type { LinkEl } from "~/protocol/schema";
 import { select, uiStore } from "~/store/ui";
 
@@ -11,7 +12,7 @@ export const LinkPaths = ({ links, register }: LinkLayer) => {
   return (
     <svg className="links" width={1} height={1}>
       <defs>
-        {(["agent", "user"] as const).map((author) => (
+        {Author.options.map((author) => (
           <marker
             key={author}
             id={`arrowhead-${author}`}
@@ -41,7 +42,7 @@ export const LinkPaths = ({ links, register }: LinkLayer) => {
 export const LinkTexts = ({ links, register }: LinkLayer) => (
   <svg className="links links-text" width={1} height={1}>
     {links.map((link) =>
-      link.text === null ? null : (
+      link.text === "" ? null : (
         <LinkText key={link.id} link={link} register={register} />
       ),
     )}

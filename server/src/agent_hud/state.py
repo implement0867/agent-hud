@@ -34,9 +34,7 @@ class BoardState(BaseModel):
             if (candidate := f"{prefix}{self.next_id}") not in self.elements:
                 return candidate
 
-    def log(
-        self, kind: ChangeKind, el_id: str = "", anchor: str = "", *, label: str | None = None, text: str | None = None
-    ) -> int:
+    def log(self, kind: ChangeKind, el_id: str = "", anchor: str = "", *, label: str = "", text: str = "") -> int:
         self.seq += 1
         self.changes.append(Change(seq=self.seq, kind=kind, id=el_id, anchor=anchor, label=label, text=text))
         return self.seq
@@ -48,9 +46,11 @@ class BoardState(BaseModel):
     def unread_submit(self) -> bool:
         return any(c.kind == ChangeKind.SUBMIT and c.seq > self.cursor for c in self.changes)
 
-    def label_of(self, ref: AnchorRef) -> str | None:
-        el = self.elements.get(ref.id)
-        return None if el is None else el.label(ref.anchor)
+    def label_of(self, ref: AnchorRef) -> str:
+        return self.find(ref.id).label(ref.anchor)
+
+    def exists(self, ref: AnchorRef) -> bool:
+        return ref.id in self.elements and self.elements[ref.id].has(ref.anchor)
 
     def find(self, el_id: str) -> Element:
         if (el := self.elements.get(el_id)) is None:
@@ -71,7 +71,7 @@ class BoardState(BaseModel):
 
     def drop_dangling(self) -> list[str]:
         """Remove elements, such as links, whose ends are gone."""
-        dead = [el.id for el in self.elements.values() if any(self.label_of(ref) is None for ref in el.ends())]
+        dead = [el.id for el in self.elements.values() if not all(self.exists(ref) for ref in el.ends())]
         for el_id in dead:
             del self.elements[el_id]
         return dead

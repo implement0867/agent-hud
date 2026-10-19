@@ -71,7 +71,7 @@ async def test_browser_tab_round_trip_over_a_real_socket(hub: Hub, settings: Hud
             assert hello["elements"][0]["id"] == "plan"
             key = hello["elements"][0]["items"][1]["id"]
             await ws.send(json.dumps({"t": "comment", "id": "plan", "anchor": key, "text": "why?"}))
-            await ws.send(json.dumps({"t": "submit", "message": None}))
+            await ws.send(json.dumps({"t": "submit", "message": ""}))
             result = await client.call_tool("read", {"wait": 5})
             assert _text(result) == 'plan.2 "why?"\nsubmit'
 

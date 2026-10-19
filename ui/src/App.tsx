@@ -11,6 +11,7 @@ import { SendPanel } from "~/chrome/SendPanel";
 import { TopBar } from "~/chrome/Toolbar";
 import { ZoomControls } from "~/chrome/ZoomControls";
 import { isTyping } from "~/lib/dom";
+import { Author } from "~/protocol/schema";
 import { boardStore } from "~/store/board";
 import { connect, socketUrl } from "~/store/connection";
 import type { Socket } from "~/store/connection";
@@ -72,7 +73,7 @@ const useShortcuts = (world: World, send: Send) => {
         case "Backspace": {
           const el =
             selected === null ? undefined : boardStore.get().elements[selected];
-          if (el?.author === "user") {
+          if (el?.author === Author.enum.user) {
             send({ t: "delete", id: el.id });
             select(null);
           }

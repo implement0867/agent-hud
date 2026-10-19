@@ -26,10 +26,7 @@ export const SendPanel = () => {
   }, [sent]);
 
   const submit = () => {
-    send({
-      t: "submit",
-      message: message.trim() === "" ? null : message.trim(),
-    });
+    send({ t: "submit", message: message.trim() });
     setMessage("");
     setSent(true);
   };

@@ -1,8 +1,7 @@
 from enum import StrEnum
-from functools import cache
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, RootModel
 
 from agent_hud.primitives import AnchorRef, Element
 from agent_hud.primitives.base import CellValue, ElementId, Reaction
@@ -101,7 +100,7 @@ class LinkMsg(Message):
     t: Literal[ClientType.LINK]
     src: AnchorRef
     dst: AnchorRef
-    text: str | None
+    text: str
 
 
 class DeleteMsg(Message):
@@ -111,7 +110,7 @@ class DeleteMsg(Message):
 
 class SubmitMsg(Message):
     t: Literal[ClientType.SUBMIT]
-    message: str | None
+    message: str
 
 
 type ClientMsg = Annotated[
@@ -132,9 +131,8 @@ type ClientMsg = Annotated[
 ]
 
 
-@cache
-def client_messages() -> TypeAdapter[ClientMsg]:
-    return TypeAdapter(ClientMsg)
+class ClientMessage(RootModel[ClientMsg]):
+    pass
 
 
 class ServerType(StrEnum):

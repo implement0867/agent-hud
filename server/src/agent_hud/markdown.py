@@ -2,7 +2,6 @@ import re
 import textwrap
 from dataclasses import dataclass, field
 from enum import StrEnum
-from functools import cache
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_block.table import escapedSplit
@@ -50,15 +49,10 @@ type Content = TextContent | ListContent | TableContent
 
 @dataclass(frozen=True, slots=True)
 class Parsed:
-    title: str | None
+    title: str
     content: Content
     body: str
     """The markdown after the title heading."""
-
-
-@cache
-def _parser() -> MarkdownIt:
-    return MarkdownIt("commonmark", {"html": False}).enable("table")
 
 
 def split_row(line: str) -> list[str]:
@@ -91,13 +85,16 @@ def _inline(node: SyntaxTreeNode) -> str:
 
 
 def _span(node: SyntaxTreeNode, lines: list[str]) -> list[str]:
-    start, end = node.map or (0, 0)
-    return lines[start:end]
+    match node.map:
+        case (start, end):
+            return lines[start:end]
+        case None:
+            raise MarkdownError(f"{node.type} has no source lines")
 
 
 def _item_source(item: SyntaxTreeNode, lines: list[str]) -> str:
     """An item's own markdown: the marker removed, sub-points kept and dedented."""
-    first, *rest = _span(item, lines) or [""]
+    first, *rest = _span(item, lines)
     head = re.sub(r"^\s*(?:[-*+]|\d{1,9}[.)])[ \t]?", "", first, count=1)
     tail = textwrap.dedent("\n".join(rest)).strip("\n")
     return f"{head}\n{tail}".strip() if tail else head.strip()
@@ -108,10 +105,10 @@ def _table(node: SyntaxTreeNode, lines: list[str]) -> TableContent:
     header_row = sections["thead"].children[0]
     headers = [parse_header(_inline(cell)) for cell in header_row.children]
     rows: list[list[str]] = []
-    body = sections.get("tbody")
-    for n, row in enumerate(body.children if body is not None else [], start=1):
+    body_rows = [row for section in node.children if section.type == "tbody" for row in section.children]
+    for n, row in enumerate(body_rows, start=1):
         # GFM drops surplus cells silently; the agent should hear about them.
-        written = split_row(_span(row, lines)[0]) if row.map else []
+        written = split_row(_span(row, lines)[0])
         if len(written) > len(headers):
             raise MarkdownError(f"table row {n} has {len(written)} cells but the header has {len(headers)}")
         rows.append([_inline(cell) for cell in row.children])
@@ -120,13 +117,13 @@ def _table(node: SyntaxTreeNode, lines: list[str]) -> TableContent:
 
 def parse(md: str, *, heading_is_title: bool = True) -> Parsed:
     lines = md.splitlines()
-    blocks = SyntaxTreeNode(_parser().parse(md)).children
-    title: str | None = None
+    blocks = SyntaxTreeNode(MarkdownIt("commonmark", {"html": False}).enable("table").parse(md)).children
+    title = ""
     body = md.strip("\n")
     match blocks:
-        case [heading, first, *_] if heading_is_title and heading.type == "heading" and first.map is not None:
+        case [SyntaxTreeNode(type="heading") as heading, SyntaxTreeNode(map=(start, _)), *_] if heading_is_title:
             title, blocks = _inline(heading), blocks[1:]
-            body = "\n".join(lines[first.map[0] :]).strip("\n")
+            body = "\n".join(lines[start:]).strip("\n")
         case _:
             pass
     match blocks:

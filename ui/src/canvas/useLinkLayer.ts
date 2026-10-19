@@ -57,15 +57,15 @@ export const useLinkLayer = (): LinkLayer => {
           const text = parts.get("text");
           const width =
             text instanceof SVGTextElement ? text.getComputedTextLength() : 0;
-          return [{ parts, arrow, text, box: labelBox(arrow.label, width) }];
+          const box = labelBox(arrow.label, width);
+          return [{ parts, arrow, text, box, top: box.y }];
         });
-        const boxes = separate(drawn.map((item) => item.box));
-        drawn.forEach(({ parts, arrow, text, box }, i) => {
+        separate(drawn).forEach(({ parts, arrow, text, box, top }) => {
           if (parts.get("line")?.getAttribute("d") !== arrow.d) {
             parts.get("line")?.setAttribute("d", arrow.d);
             parts.get("hit")?.setAttribute("d", arrow.d);
           }
-          const y = String(arrow.label.y + (boxes[i]?.y ?? box.y) - box.y);
+          const y = String(arrow.label.y + box.y - top);
           if (text !== undefined && text.getAttribute("y") !== y) {
             text.setAttribute("x", String(arrow.label.x));
             text.setAttribute("y", y);

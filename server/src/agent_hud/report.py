@@ -6,13 +6,13 @@ from agent_hud.state import BoardState
 
 def _part_line(el: Element, anchor: str, group: list[Change], since: int) -> str | None:
     kinds = {c.kind for c in group}
+    if not el.has(anchor):
+        match [c for c in group if c.kind == ChangeKind.REMOVE]:
+            case [removed, *_] if ChangeKind.ADD not in kinds:
+                return f"{removed.label} removed {quote(removed.text, 60)}"
+            case _:
+                return None
     part = el.part(anchor)
-    label = el.label(anchor)
-    if part is None or label is None:
-        removed = next((c for c in group if c.kind == ChangeKind.REMOVE), None)
-        if removed is None or ChangeKind.ADD in kinds:
-            return None
-        return f"{removed.label} removed {quote(removed.text or '', 60)}"
     parts: list[str] = []
     if ChangeKind.ADD in kinds:
         parts.append(f"added {quote(part.text)}")
@@ -23,7 +23,7 @@ def _part_line(el: Element, anchor: str, group: list[Change], since: int) -> str
         parts.append(fb.reaction if fb is not None and fb.reaction else "cleared reaction")
     if fb is not None:
         parts += [quote(c.text) for c in fb.comments if c.author == Author.USER and c.seq > since]
-    return f"{label} {'; '.join(parts)}" if parts else None
+    return f"{el.label(anchor)} {'; '.join(parts)}" if parts else None
 
 
 def summarize(state: BoardState, since: int) -> list[str]:
@@ -41,12 +41,12 @@ def summarize(state: BoardState, since: int) -> list[str]:
                 touched.setdefault((change.id, change.anchor), []).append(change)
     lines: list[str] = []
     for el_id, changes in lifecycle.items():
-        deleted = next((c for c in changes if c.kind == ChangeKind.DELETE), None)
-        if deleted is not None:
-            if changes[0].kind != ChangeKind.CREATE:
-                lines.append(f"deleted {deleted.text or el_id}")
-        elif (el := state.elements.get(el_id)) is not None:
-            lines.append(el.render(state.label_of))
+        match [c for c in changes if c.kind == ChangeKind.DELETE]:
+            case [deleted, *_]:
+                if changes[0].kind != ChangeKind.CREATE:
+                    lines.append(f"deleted {deleted.text}")
+            case _:
+                lines.append(state.find(el_id).render(state.label_of))
     for (el_id, anchor), group in touched.items():
         el = state.elements.get(el_id)
         if el_id in lifecycle or el is None:

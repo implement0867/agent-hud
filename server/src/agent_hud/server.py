@@ -64,7 +64,7 @@ def build(settings: HudSettings, hub: Hub | None = None) -> FastMCP:
         hint = await canvas.viewer_hint()
         if wait > 0 and not hub.state.unread_submit():
             if not await hub.wait_for_viewer(15):
-                return f"no canvas tab is open, so nobody can press Send: ask the user to open {canvas.url}"
+                return f"no canvas tab is open, so nobody can press Send: ask the user to open {(await canvas.start()).url}"
 
             async def tick(elapsed: float) -> None:
                 await ctx.report_progress(elapsed, wait, "waiting for the user to press Send")

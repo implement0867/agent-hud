@@ -47,6 +47,11 @@ class Row(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class TableRef:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
 class ColumnRef:
     key: str
 
@@ -135,7 +140,7 @@ class TableEl(BoxBase):
     rows: list[Row]
 
     @classmethod
-    def from_content(cls, *, id: str, title: str | None, content: TableContent, ids: IdSource, author: Author) -> Self:
+    def from_content(cls, *, id: str, title: str, content: TableContent, ids: IdSource, author: Author) -> Self:
         keys = column_keys([h.title for h in content.headers])
         columns = [
             Column(key=key, title=h.title, type=h.type, options=list(h.options))
@@ -156,38 +161,40 @@ class TableEl(BoxBase):
         """Keep the rows whose first cell survives, with the user's input in typed columns."""
         match old:
             case TableEl(columns=[old_first, *_] as old_columns, rows=old_rows) if self.columns:
-                by_key = {cell_text(row.cells.get(old_first.key)): row for row in old_rows}
+                by_key = {cell_text(row.cells[old_first.key]): row for row in old_rows}
             case _:
                 return
         first = self.columns[0].key
         typed_kept = {c.key for c in old_columns} & {c.key for c in self.columns if c.type != ColumnType.STATIC}
         for row in self.rows:
-            if (kept := by_key.pop(cell_text(row.cells.get(first)), None)) is None:
+            if (kept := by_key.pop(cell_text(row.cells[first]), None)) is None:
                 continue
             row.id, row.author = kept.id, kept.author
             for key in typed_kept:
-                if not row.cells.get(key):
-                    row.cells[key] = kept.cells.get(key)
+                if not row.cells[key]:
+                    row.cells[key] = kept.cells[key]
 
     def parts(self) -> list[Part]:
         numbered = list(enumerate(self.rows, start=1))
         columns = [Part(f"col:{c.key}", c.key, c.title) for c in self.columns]
         rows = [Part(r.id, f"r{n}", self._row_text(r)) for n, r in numbered]
         cells = [
-            Part(f"{r.id}:{c.key}", f"r{n}.{c.key}", cell_text(r.cells.get(c.key)))
+            Part(f"{r.id}:{c.key}", f"r{n}.{c.key}", cell_text(r.cells[c.key]))
             for n, r in numbered
             for c in self.columns
         ]
-        return [Part("", "", self.title or ""), *columns, *rows, *cells]
+        return [Part("", "", self.title), *columns, *rows, *cells]
 
     def _row_text(self, row: Row) -> str:
-        return " | ".join(cell_text(row.cells.get(c.key)) for c in self.columns)
+        return " | ".join(cell_text(row.cells[c.key]) for c in self.columns)
 
-    def _target(self, anchor: str) -> ColumnRef | RowRef | CellRef:
+    def _target(self, anchor: str) -> TableRef | ColumnRef | RowRef | CellRef:
         match anchor.split(":"):
+            case [""]:
+                return TableRef()
             case ["col", key]:
                 return ColumnRef(key)
-            case [row_id] if row_id:
+            case [row_id]:
                 return RowRef(row_id)
             case [row_id, key]:
                 return CellRef(row_id, key)
@@ -214,13 +221,11 @@ class TableEl(BoxBase):
                 row = self._row(row_id)
                 row.cells = self.make_row(split_row(line), row.id, row.author).cells
             case _:
-                raise PathError(
-                    f"{self.label(anchor) or self.id}: set a row (`r2`, value `a | b`) or a cell (`r2.key`)"
-                )
+                raise PathError(f"{self.label(anchor)}: set a row (`r2`, value `a | b`) or a cell (`r2.key`)")
 
-    def insert(self, before: str | None, value: str, new_id: str, author: Author) -> None:
-        match None if before is None else self._target(before):
-            case None:
+    def insert(self, at: str, value: str, new_id: str, author: Author) -> None:
+        match self._target(at):
+            case TableRef():
                 position = len(self.rows)
             case RowRef(row_id=row_id):
                 position = self.rows.index(self._row(row_id))
@@ -235,7 +240,7 @@ class TableEl(BoxBase):
                 self.rows.remove(row)
                 return self._row_text(row)
             case _:
-                raise PathError(f"{self.label(anchor) or self.id}: only rows can be removed")
+                raise PathError(f"{self.label(anchor)}: only rows can be removed")
 
     def render(self, label_of: LabelOf) -> str:
         lines = [
@@ -244,7 +249,7 @@ class TableEl(BoxBase):
             "|---" * (len(self.columns) + 1) + "|",
         ]
         for n, row in enumerate(self.rows, start=1):
-            cells = (cell_text(row.cells.get(c.key)).replace("|", "\\|") for c in self.columns)
+            cells = (cell_text(row.cells[c.key]).replace("|", "\\|") for c in self.columns)
             by = " (user)" if row.author == Author.USER else ""
             lines.append(f"| r{n}{by} | " + " | ".join(cells) + " |")
         notes = [f"{p.label}{note}" for p in self.parts()[1:] if (note := self.feedback_note(p.anchor))]

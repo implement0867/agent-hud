@@ -59,7 +59,7 @@ class LinkOp(OpBase):
     op: Literal[OpKind.LINK] = Field(description="Draw an arrow between parts")
     src: Label = Field(description="Arrow tail")
     dst: Label = Field(description="Arrow head")
-    text: str | None = Field(default=None, description="Arrow text")
+    text: str = Field(default="", description="Arrow text")
     id: ElementId | None = Field(default=None, description="Arrow id; default generated")
 
 

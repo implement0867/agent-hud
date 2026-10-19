@@ -17,7 +17,7 @@ ORIGIN = "http://localhost:5173"
 @pytest.fixture
 def client(hub: Hub) -> TestClient:
     settings = HudSettings(extra_origins=[ORIGIN], open_browser=False)
-    return TestClient(create_app(hub, settings, debug_api=True, allowed_hosts=["testserver"]))
+    return TestClient(create_app(hub, settings, debug_api=True), base_url="http://127.0.0.1")
 
 
 def _recv(ws: Any) -> dict[str, Any]:
@@ -26,7 +26,7 @@ def _recv(ws: Any) -> dict[str, Any]:
 
 def test_socket_sends_hello_then_live_updates(client: TestClient, hub: Hub, write: Write) -> None:
     write({"op": "put", "id": "plan", "md": "1. a\n2. b"})
-    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws:
+    with client.websocket_connect("ws://127.0.0.1/ws", headers={"origin": ORIGIN}) as ws:
         hello = _recv(ws)
         assert hello["t"] == "hello"
         assert [el["id"] for el in hello["elements"]] == ["plan"]
@@ -51,7 +51,7 @@ def test_rejected_messages_come_back_as_errors(
     client: TestClient, write: Write, payload: dict[str, Any], reason: str
 ) -> None:
     write({"op": "put", "id": "plan", "md": "1. a"})
-    with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws:
+    with client.websocket_connect("ws://127.0.0.1/ws", headers={"origin": ORIGIN}) as ws:
         for _ in range(2):  # hello, status
             _recv(ws)
         ws.send_text(json.dumps(payload))
@@ -63,7 +63,7 @@ def test_rejected_messages_come_back_as_errors(
 def test_foreign_origin_is_refused(client: TestClient) -> None:
     with (
         pytest.raises(WebSocketDisconnect),
-        client.websocket_connect("/ws", headers={"origin": "https://evil.example"}),
+        client.websocket_connect("ws://127.0.0.1/ws", headers={"origin": "https://evil.example"}),
     ):
         pass
 
@@ -87,12 +87,12 @@ def test_debug_write(client: TestClient, ops: list[dict[str, Any]], headers: dic
 
 
 def test_same_origin_page_may_connect(client: TestClient) -> None:
-    with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+    with client.websocket_connect("ws://127.0.0.1/ws", headers={"origin": "http://127.0.0.1"}) as ws:
         assert _recv(ws)["t"] == "hello"
 
 
 def test_debug_read_returns_the_agent_report(client: TestClient, write: Write, act: Act) -> None:
     write({"op": "put", "id": "plan", "md": "1. a"})
-    act(t="submit", message=None)
+    act(t="submit", message="")
     response = client.get("/debug/read", params={"show": "plan"}, headers={"x-agent-hud": "1"})
     assert response.text.splitlines()[:3] == ["submit", "", "plan: list"]

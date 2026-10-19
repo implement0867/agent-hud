@@ -4,6 +4,7 @@ import { Anchor } from "~/feedback/Anchor";
 import { AddRow } from "~/primitives/AddRow";
 import { Editable } from "~/primitives/Editable";
 import { Markdown } from "~/primitives/Markdown";
+import { Author } from "~/protocol/schema";
 import type { ListEl, ListItem } from "~/protocol/schema";
 import { useSend } from "~/store/socket";
 
@@ -57,7 +58,9 @@ const Item = memo(({ el, item, marker }: ItemProps) => {
           >
             <Markdown text={item.text} inline />
           </Editable>
-          {item.author === "user" ? <span className="by-user">you</span> : null}
+          {item.author === Author.enum.user ? (
+            <span className="by-user">you</span>
+          ) : null}
         </div>
       </Anchor>
     </li>

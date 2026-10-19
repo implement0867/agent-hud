@@ -17,7 +17,8 @@ export const fitView = ({ containerRef, layerRef }: World) => {
 /** Zoom around the middle of the canvas; a factor of 0 resets to 100%. */
 export const zoomBy = ({ containerRef }: World, factor: number) => {
   const box = containerRef.current;
-  const size = { w: box?.clientWidth ?? 0, h: box?.clientHeight ?? 0 };
+  if (box === null) return;
+  const size = { w: box.clientWidth, h: box.clientHeight };
   uiStore.set((s) => ({
     ...s,
     viewport: zoomAtCenter(

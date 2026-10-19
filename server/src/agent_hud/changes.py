@@ -22,7 +22,7 @@ class Change(BaseModel):
     kind: ChangeKind
     id: str = ""
     anchor: str = ""
-    label: str | None = None
+    label: str = ""
     """Label of a removed part, which can no longer be computed."""
-    text: str | None = None
+    text: str = ""
     """Removed text, deleted element, or submit message."""

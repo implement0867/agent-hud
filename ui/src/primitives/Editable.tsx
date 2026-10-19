@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { cx } from "~/lib/cx";
 import { stop } from "~/lib/dom";
 
 type EditableProps = {
@@ -43,7 +44,7 @@ export const Editable = ({
   if (draft === null) {
     return (
       <div
-        className={`editable ${className ?? ""}`}
+        className={cx("editable", className)}
         onDoubleClick={eager ? undefined : start}
         onClick={eager ? start : undefined}
         title={eager ? "Click to edit" : "Double-click to edit"}
@@ -59,7 +60,7 @@ export const Editable = ({
   return (
     <textarea
       ref={ref}
-      className={`editor ${className ?? ""}`}
+      className={cx("editor", className)}
       value={draft}
       onChange={(e) => {
         setDraft(e.target.value);

@@ -33,7 +33,7 @@ const base = {
 
 const box = {
   ...base,
-  title: z.string().nullable(),
+  title: z.string(),
   x: z.number().nullable(),
   y: z.number().nullable(),
   w: z.number().positive().nullable(),
@@ -97,7 +97,7 @@ export const LinkEl = z.strictObject({
   kind: z.literal("link"),
   src: AnchorRef,
   dst: AnchorRef,
-  text: z.string().nullable(),
+  text: z.string(),
 });
 
 export const Element = z.discriminatedUnion("kind", [
@@ -170,10 +170,10 @@ export const ClientMsg = z.discriminatedUnion("t", [
     t: z.literal("link"),
     src: AnchorRef,
     dst: AnchorRef,
-    text: z.string().nullable(),
+    text: z.string(),
   }),
   z.strictObject({ t: z.literal("delete"), id: ElementId }),
-  z.strictObject({ t: z.literal("submit"), message: z.string().nullable() }),
+  z.strictObject({ t: z.literal("submit"), message: z.string() }),
 ]);
 
 export type Author = z.infer<typeof Author>;

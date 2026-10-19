@@ -6,19 +6,19 @@ import type { IconName } from "~/chrome/icons";
 import { Thread } from "~/feedback/Thread";
 import { cx } from "~/lib/cx";
 import { useStore } from "~/lib/store";
-import type { Element, Reaction } from "~/protocol/schema";
+import { Reaction } from "~/protocol/schema";
+import type { Element, Feedback } from "~/protocol/schema";
 import { useSend } from "~/store/socket";
 import { anchorKey, pickAnchor, uiStore } from "~/store/ui";
 
-const verdicts: readonly {
-  reaction: Reaction;
-  icon: IconName;
-  label: string;
-}[] = [
-  { reaction: "approve", icon: "check", label: "Approve" },
-  { reaction: "reject", icon: "x", label: "Reject" },
-  { reaction: "question", icon: "question", label: "Question" },
-];
+const verdicts: Readonly<Record<Reaction, { icon: IconName; label: string }>> =
+  {
+    approve: { icon: "check", label: "Approve" },
+    reject: { icon: "x", label: "Reject" },
+    question: { icon: "question", label: "Question" },
+  };
+
+const noFeedback: Feedback = { reaction: null, revised: false, comments: [] };
 
 type AnchorProps = {
   el: Element;
@@ -42,7 +42,6 @@ export const Anchor = memo(
     className,
   }: AnchorProps) => {
     const send = useSend();
-    const fb = el.feedback[anchor];
     const linking = useStore(uiStore, (s) => s.tool === "link");
     const isSource = useStore(
       uiStore,
@@ -50,8 +49,7 @@ export const Anchor = memo(
     );
     const [composing, setComposing] = useState(false);
     const [open, setOpen] = useState(false);
-    const comments = fb?.comments ?? [];
-    const reaction = fb?.reaction ?? null;
+    const { reaction, revised, comments } = el.feedback[anchor] ?? noFeedback;
 
     return (
       <div
@@ -74,15 +72,10 @@ export const Anchor = memo(
         <div className="anchor-marks">
           {reaction === null ? null : (
             <span className={`mark mark-${reaction}`} title={reaction}>
-              <Icon
-                name={
-                  verdicts.find((v) => v.reaction === reaction)?.icon ?? "check"
-                }
-                size={12}
-              />
+              <Icon name={verdicts[reaction].icon} size={12} />
             </span>
           )}
-          {fb?.revised === true ? (
+          {revised ? (
             <span
               className="mark-revised"
               title="The agent changed this after your feedback"
@@ -106,26 +99,26 @@ export const Anchor = memo(
         </div>
         {linking ? null : (
           <div className="anchor-actions">
-            {verdicts.map((v) => (
+            {Reaction.options.map((option) => (
               <button
-                key={v.reaction}
+                key={option}
                 type="button"
                 className={cx(
                   "act",
-                  `act-${v.reaction}`,
-                  reaction === v.reaction && "act-on",
+                  `act-${option}`,
+                  reaction === option && "act-on",
                 )}
-                title={v.label}
+                title={verdicts[option].label}
                 onClick={() => {
                   send({
                     t: "react",
                     id: el.id,
                     anchor,
-                    reaction: reaction === v.reaction ? null : v.reaction,
+                    reaction: reaction === option ? null : option,
                   });
                 }}
               >
-                <Icon name={v.icon} size={13} />
+                <Icon name={verdicts[option].icon} size={13} />
               </button>
             ))}
             <button

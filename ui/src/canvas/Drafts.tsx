@@ -88,7 +88,7 @@ const LinkEditor = ({ draft }: { draft: LinkDraftState }) => {
               t: "link",
               src: draft.src,
               dst: draft.dst,
-              text: text.trim() === "" ? null : text.trim(),
+              text: text.trim(),
             });
             cancel();
           }

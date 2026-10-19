@@ -72,7 +72,7 @@ def _handle(state: BoardState, msg: ClientMsg) -> Delta:
             return Delta(upserted=[el_id])
         case AddMsg(id=el_id, value=value):
             item_id = state.new_id("k")
-            state.find(el_id).insert(None, value, item_id, Author.USER)
+            state.find(el_id).insert("", value, item_id, Author.USER)
             state.log(ChangeKind.ADD, el_id, item_id)
             return Delta(upserted=[el_id])
         case RemoveMsg(id=el_id, anchor=anchor):
@@ -89,7 +89,7 @@ def _handle(state: BoardState, msg: ClientMsg) -> Delta:
             return Delta(upserted=[note.id])
         case LinkMsg(src=src, dst=dst, text=text):
             for ref in (src, dst):
-                if state.label_of(ref) is None:
+                if not state.exists(ref):
                     raise PathError(f"{ref.id} has no anchor '{ref.anchor}'")
             link = LinkEl(id=state.new_id("l"), author=Author.USER, src=src, dst=dst, text=text)
             state.elements[link.id] = link
@@ -104,5 +104,5 @@ def _handle(state: BoardState, msg: ClientMsg) -> Delta:
             state.log(ChangeKind.DELETE, el_id, text=snapshot)
             return Delta(gone=[el_id, *state.drop_dangling()])
         case SubmitMsg(message=message):
-            state.log(ChangeKind.SUBMIT, text=(message or "").strip() or None)
+            state.log(ChangeKind.SUBMIT, text=message.strip())
             return Delta(submitted=True)

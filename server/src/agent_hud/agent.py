@@ -43,7 +43,7 @@ def _apply_op(draft: BoardState, op: Op) -> list[str]:
             return [el.id]
         case InsertOp(at=at, value=value):
             el, anchor = draft.resolve(at)
-            el.insert(anchor or None, value, draft.new_id("k"), Author.AGENT)
+            el.insert(anchor, value, draft.new_id("k"), Author.AGENT)
             return [el.id]
         case RemoveOp(at=at):
             el, anchor = draft.resolve(at)
@@ -60,7 +60,7 @@ def _apply_op(draft: BoardState, op: Op) -> list[str]:
         case LinkOp(src=src, dst=dst, text=text, id=link_id):
             (a, a_anchor), (b, b_anchor) = draft.resolve(src), draft.resolve(dst)
             link = LinkEl(
-                id=link_id or draft.new_id("l"),
+                id=draft.new_id("l") if link_id is None else link_id,
                 author=Author.AGENT,
                 src=AnchorRef(id=a.id, anchor=a_anchor),
                 dst=AnchorRef(id=b.id, anchor=b_anchor),

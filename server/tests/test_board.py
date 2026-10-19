@@ -35,11 +35,11 @@ def test_put_builds_the_inferred_primitive(hub: Hub, write: Write, md: str, kind
     [
         ("Plan\n====\nSome text\n\n- x", "Plan", "Some text\n\n- x"),
         ("## Plan\n\nSome text", "Plan", "Some text"),
-        ("Some text", None, "Some text"),
+        ("Some text", "", "Some text"),
     ],
     ids=["setext", "atx", "no-heading"],
 )
-def test_forced_text_takes_the_heading_as_title(hub: Hub, write: Write, md: str, title: str | None, body: str) -> None:
+def test_forced_text_takes_the_heading_as_title(hub: Hub, write: Write, md: str, title: str, body: str) -> None:
     write({"op": "put", "id": "t", "md": md, "kind": "text"})
     el = hub.state.elements["t"]
     assert isinstance(el, TextEl)
