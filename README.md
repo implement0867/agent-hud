@@ -4,6 +4,17 @@ A shared browser canvas for Claude Code. The agent puts plans, options and table
 canvas. The user approves, rejects or questions each item, and the agent reads that feedback
 over MCP.
 
+## Run
+
+`uv run --project server agent-hud` starts the MCP server on stdio.
+
+## Tools
+
+| Tool | Does |
+|---|---|
+| `write(ops)` | `put {id, md}` creates or replaces a card; `remove {id}` deletes one. All or nothing. |
+| `read()` | the board as JSON: `{"cards": {"plan": {"md": "1. a"}}}` |
+
 ## Layout
 
 ```text
