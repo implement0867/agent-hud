@@ -4,15 +4,9 @@ A shared browser canvas for Claude Code. The agent puts plans, options and table
 canvas. The user approves, rejects or questions each item, and the agent reads that feedback
 over MCP.
 
-## Install
+## Run
 
-Requires [uv](https://docs.astral.sh/uv/) on `PATH`. In Claude Code:
-
-```text
-/plugin install agent-hud --marketplace implement0867/agent-hud
-```
-
-To try a local checkout: `claude --plugin-dir /path/to/agent-hud`.
+`uv run --project server agent-hud` starts the MCP server on stdio.
 
 ## Tools
 

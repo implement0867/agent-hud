@@ -1,5 +1,0 @@
-{
-  "name": "agent-hud",
-  "owner": { "name": "implement0867" },
-  "plugins": [{ "name": "agent-hud", "source": "." }]
-}

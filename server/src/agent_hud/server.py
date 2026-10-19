@@ -1,11 +1,11 @@
 from typing import Annotated
 
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from agent_hud.board import Board, Op, OpError
+from agent_hud.board import Board
+from agent_hud.ops import Op
 
 
 class Canvas:
@@ -18,10 +18,7 @@ class Canvas:
 
         put {id, md}: create a card, or replace the card with that id. remove {id}: delete a card.
         """
-        try:
-            self.board = self.board.apply(ops)
-        except OpError as exc:
-            raise ToolError(str(exc)) from None
+        self.board = self.board.apply(ops)
         return "ok"
 
     async def read(self) -> str:
