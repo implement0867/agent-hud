@@ -1,13 +1,12 @@
-import { memo, useCallback, useState } from "react";
-import type { MouseEvent, ReactNode } from "react";
+import { memo, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Icon } from "~/chrome/icons";
 import type { IconName } from "~/chrome/icons";
 import { Thread } from "~/feedback/Thread";
 import { cx } from "~/lib/cx";
 import { useStore } from "~/lib/store";
-import { Reaction } from "~/protocol/schema";
-import type { Element } from "~/protocol/schema";
+import type { Element, Reaction } from "~/protocol/schema";
 import { useSend } from "~/store/socket";
 import { anchorKey, pickAnchor, uiStore } from "~/store/ui";
 
@@ -23,7 +22,7 @@ const verdicts: readonly {
 
 type AnchorProps = {
   el: Element;
-  /** Anchor key inside the element; empty for the whole element. */
+  /** Empty for the whole element. */
   anchor: string;
   children: ReactNode;
   /** `popover` keeps comments out of the layout, for table cells. */
@@ -32,10 +31,7 @@ type AnchorProps = {
   className?: string;
 };
 
-/**
- * A part of an element the user can react to, comment on, or link from.
- * Every primitive wraps its addressable parts in an Anchor and gets feedback for free.
- */
+/** A part the user can react to, comment on, or draw an arrow from. */
 export const Anchor = memo(
   ({
     el,
@@ -54,42 +50,9 @@ export const Anchor = memo(
     );
     const [composing, setComposing] = useState(false);
     const [open, setOpen] = useState(false);
-
-    const react = useCallback(
-      (e: MouseEvent<HTMLButtonElement>) => {
-        const reaction = Reaction.parse(e.currentTarget.dataset["reaction"]);
-        send({
-          t: "react",
-          id: el.id,
-          anchor,
-          reaction: fb?.reaction === reaction ? null : reaction,
-        });
-      },
-      [send, el.id, anchor, fb?.reaction],
-    );
-    const compose = useCallback(() => {
-      setComposing(true);
-      setOpen(true);
-    }, []);
-    const doneComposing = useCallback(() => {
-      setComposing(false);
-      if (thread === "popover") setOpen(false);
-    }, [thread]);
-    const toggleOpen = useCallback(() => {
-      setOpen((o) => !o);
-    }, []);
-    const pick = useCallback(
-      (e: MouseEvent) => {
-        if (uiStore.get().tool !== "link") return;
-        e.preventDefault();
-        e.stopPropagation();
-        pickAnchor({ id: el.id, anchor }, e.clientX, e.clientY);
-      },
-      [el.id, anchor],
-    );
-
     const comments = fb?.comments ?? [];
     const reaction = fb?.reaction ?? null;
+
     return (
       <div
         className={cx(
@@ -100,7 +63,12 @@ export const Anchor = memo(
         )}
         data-anchor={anchorKey(el.id, anchor)}
         data-reaction={reaction ?? undefined}
-        onClickCapture={pick}
+        onClickCapture={(e) => {
+          if (uiStore.get().tool !== "link") return;
+          e.preventDefault();
+          e.stopPropagation();
+          pickAnchor({ id: el.id, anchor }, e.clientX, e.clientY);
+        }}
       >
         <div className="anchor-content">{children}</div>
         <div className="anchor-marks">
@@ -126,8 +94,10 @@ export const Anchor = memo(
             <button
               type="button"
               className="mark-count"
-              onClick={toggleOpen}
               title="Show comments"
+              onClick={() => {
+                setOpen((o) => !o);
+              }}
             >
               <Icon name="message" size={11} />
               {comments.length}
@@ -145,9 +115,15 @@ export const Anchor = memo(
                   `act-${v.reaction}`,
                   reaction === v.reaction && "act-on",
                 )}
-                data-reaction={v.reaction}
-                onClick={react}
                 title={v.label}
+                onClick={() => {
+                  send({
+                    t: "react",
+                    id: el.id,
+                    anchor,
+                    reaction: reaction === v.reaction ? null : v.reaction,
+                  });
+                }}
               >
                 <Icon name={v.icon} size={13} />
               </button>
@@ -155,8 +131,11 @@ export const Anchor = memo(
             <button
               type="button"
               className="act"
-              onClick={compose}
               title="Comment"
+              onClick={() => {
+                setComposing(true);
+                setOpen(true);
+              }}
             >
               <Icon name="message" size={13} />
             </button>
@@ -183,7 +162,10 @@ export const Anchor = memo(
               anchor={anchor}
               comments={comments}
               composing={composing}
-              onDone={doneComposing}
+              onDone={() => {
+                setComposing(false);
+                if (thread === "popover") setOpen(false);
+              }}
             />
           </div>
         ) : null}

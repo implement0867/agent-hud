@@ -1,22 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
-const stop = (e: { stopPropagation: () => void }) => {
-  e.stopPropagation();
-};
+import { stop } from "~/lib/dom";
 
 type EditableProps = {
   value: string;
   onCommit: (value: string) => void;
-  /** Rendered while not editing. */
   children: ReactNode;
-  /** Start editing on a single click instead of a double click. */
+  /** Edit on a single click instead of a double click. */
   eager?: boolean;
   placeholder?: string;
   className?: string;
 };
 
-/** Double-click to edit; Enter commits, Shift+Enter adds a line, Escape cancels. */
+/** Enter commits, Shift+Enter adds a line, Escape cancels. */
 export const Editable = ({
   value,
   onCommit,
@@ -35,37 +32,13 @@ export const Editable = ({
     area.style.height = `${String(area.scrollHeight)}px`;
   }, [draft]);
 
-  const start = useCallback(() => {
+  const finish = (commit: boolean) => {
+    if (commit && draft !== null && draft !== value) onCommit(draft);
+    setDraft(null);
+  };
+  const start = () => {
     setDraft(value);
-  }, [value]);
-
-  const finish = useCallback(
-    (commit: boolean) => {
-      if (commit && draft !== null && draft !== value) onCommit(draft);
-      setDraft(null);
-    },
-    [draft, value, onCommit],
-  );
-
-  const onChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    setDraft(e.target.value);
-  }, []);
-
-  const onKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Escape") finish(false);
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        finish(true);
-      }
-      e.stopPropagation();
-    },
-    [finish],
-  );
-
-  const onBlur = useCallback(() => {
-    finish(true);
-  }, [finish]);
+  };
 
   if (draft === null) {
     return (
@@ -88,9 +61,20 @@ export const Editable = ({
       ref={ref}
       className={`editor ${className ?? ""}`}
       value={draft}
-      onChange={onChange}
-      onKeyDown={onKeyDown}
-      onBlur={onBlur}
+      onChange={(e) => {
+        setDraft(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Escape") finish(false);
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          finish(true);
+        }
+      }}
+      onBlur={() => {
+        finish(true);
+      }}
       onPointerDown={stop}
       autoFocus
       rows={1}

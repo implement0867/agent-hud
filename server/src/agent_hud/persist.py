@@ -1,38 +1,43 @@
-"""Optional board persistence to a JSON file, debounced."""
-
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
 
-from agent_hud.board import Board, BoardState
+from agent_hud.hub import Hub
+from agent_hud.state import BoardState
 
 log = logging.getLogger(__name__)
 
 
 class Persistence:
-    def __init__(self, board: Board, path: Path, delay: float = 0.5) -> None:
-        self.board: Board = board
+    """Keeps the board in a JSON file: loads it on attach, then saves shortly after each change."""
+
+    def __init__(self, path: Path, delay: float = 0.5) -> None:
         self.path: Path = path
         self.delay: float = delay
-        self._handle: asyncio.TimerHandle | None = None
+        self._pending: asyncio.TimerHandle | None = None
 
-    def load(self) -> None:
+    def attach(self, hub: Hub) -> None:
         if self.path.is_file():
-            self.board.restore(BoardState.model_validate_json(self.path.read_bytes()))
+            hub.state = BoardState.model_validate_json(self.path.read_bytes())
+        hub.listen(lambda _: self._schedule(hub.state))
 
-    def attach(self) -> None:
-        self.board.on_persist = self.schedule
+    def _schedule(self, state: BoardState) -> None:
+        if self._pending is not None:
+            return
+        try:
+            self._pending = asyncio.get_running_loop().call_later(self.delay, self.save, state)
+        except RuntimeError:
+            self.save(state)
 
-    def schedule(self) -> None:
-        if self._handle is None:
-            self._handle = asyncio.get_running_loop().call_later(self.delay, self.save)
-
-    def save(self) -> None:
-        self._handle = None
+    def save(self, state: BoardState) -> None:
+        self._pending = None
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(self.board.dump().model_dump_json())
+            tmp.write_text(state.model_dump_json())
             tmp.replace(self.path)
         except OSError:
             log.exception("could not save board to %s", self.path)
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()

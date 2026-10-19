@@ -1,13 +1,3 @@
-"""Turn the markdown an agent writes into primitive content.
-
-Parsing is markdown-it-py (CommonMark plus GFM tables). A body that is one list becomes a
-list primitive, one table becomes a table, and anything else stays markdown text. A leading
-heading becomes the card title. Column headers may carry a type in braces to make a table
-interactive; that annotation is agent-hud syntax, not markdown:
-
-    | Option | Pick {check} | Effort {low,med,high} | Notes {text} | Cost {number} |
-"""
-
 import re
 import textwrap
 from dataclasses import dataclass, field
@@ -28,12 +18,12 @@ class ColumnType(StrEnum):
 
 
 class MarkdownError(ValueError):
-    """The markdown does not fit the requested primitive."""
+    pass
 
 
 @dataclass(frozen=True, slots=True)
 class TextContent:
-    body: str
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,10 +44,6 @@ class TableContent:
     headers: list[HeaderSpec]
     rows: list[list[str]]
 
-    @property
-    def interactive(self) -> bool:
-        return any(h.type != ColumnType.STATIC for h in self.headers)
-
 
 type Content = TextContent | ListContent | TableContent
 
@@ -66,6 +52,8 @@ type Content = TextContent | ListContent | TableContent
 class Parsed:
     title: str | None
     content: Content
+    body: str
+    """The markdown after the title heading."""
 
 
 @cache
@@ -74,7 +62,6 @@ def _parser() -> MarkdownIt:
 
 
 def split_row(line: str) -> list[str]:
-    """Cells of one table row, split the way the GFM table rule splits them (`\\|` escapes)."""
     cells = escapedSplit(line.strip())
     if cells and cells[0] == "":
         cells = cells[1:]
@@ -100,7 +87,6 @@ def parse_header(cell: str) -> HeaderSpec:
 
 
 def _inline(node: SyntaxTreeNode) -> str:
-    """Raw markdown of a block's inline content, such as a heading or a table cell."""
     return "".join(child.content for child in node.children if child.type == "inline").strip()
 
 
@@ -132,20 +118,22 @@ def _table(node: SyntaxTreeNode, lines: list[str]) -> TableContent:
     return TableContent(headers=headers, rows=rows)
 
 
-def parse(md: str) -> Parsed:
-    """Infer the primitive content of a markdown body."""
+def parse(md: str, *, heading_is_title: bool = True) -> Parsed:
     lines = md.splitlines()
     blocks = SyntaxTreeNode(_parser().parse(md)).children
     title: str | None = None
-    if len(blocks) > 1 and blocks[0].type == "heading":
-        title, blocks = _inline(blocks[0]), blocks[1:]
+    body = md.strip("\n")
+    match blocks:
+        case [heading, first, *_] if heading_is_title and heading.type == "heading" and first.map is not None:
+            title, blocks = _inline(heading), blocks[1:]
+            body = "\n".join(lines[first.map[0] :]).strip("\n")
+        case _:
+            pass
     match blocks:
         case [node] if node.type in {"bullet_list", "ordered_list"}:
             items = [_item_source(item, lines) for item in node.children]
-            return Parsed(title=title, content=ListContent(ordered=node.type == "ordered_list", items=items))
+            return Parsed(title, ListContent(ordered=node.type == "ordered_list", items=items), body)
         case [node] if node.type == "table":
-            return Parsed(title=title, content=_table(node, lines))
-        case [first, *_] if title is not None and first.map is not None:
-            return Parsed(title=title, content=TextContent(body="\n".join(lines[first.map[0] :]).strip("\n")))
+            return Parsed(title, _table(node, lines), body)
         case _:
-            return Parsed(title=None, content=TextContent(body=md.strip("\n")))
+            return Parsed(title, TextContent(), body)

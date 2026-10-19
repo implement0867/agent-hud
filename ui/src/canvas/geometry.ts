@@ -1,3 +1,4 @@
+import { intersects } from "~/canvas/viewport";
 import type { Point, Rect } from "~/canvas/viewport";
 
 /** Path data, plus where its text goes and how the text aligns there. */
@@ -53,9 +54,6 @@ export const arrowBetween = (a: Rect, b: Rect, gap = 16): Arrow => {
     label: { x: mid.x + 6, y: mid.y + 4, align: "start" },
   };
 };
-
-const intersects = (a: Rect, b: Rect) =>
-  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 /** Box of an arrow text of width `w`, from its anchor point and alignment. */
 export const labelBox = (label: Arrow["label"], w: number, h = 14): Rect => ({

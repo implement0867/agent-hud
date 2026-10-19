@@ -1,10 +1,9 @@
-"""Sample board for UI development (`agent-hud --mode serve --demo`)."""
-
-from agent_hud.board import Board
+from agent_hud.agent import apply
 from agent_hud.ops import ClearOp, LinkOp, Op, OpKind, PutOp
+from agent_hud.state import BoardState
 
 
-def seed(board: Board) -> None:
+def seed(state: BoardState) -> None:
     ops: list[Op] = [
         ClearOp(op=OpKind.CLEAR),
         PutOp(
@@ -48,4 +47,4 @@ the window.""",
         ),
         LinkOp(op=OpKind.LINK, src="plan.4", dst="plan.3", text="needs"),
     ]
-    board.apply(ops)
+    apply(state, ops)

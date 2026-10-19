@@ -1,7 +1,4 @@
-/**
- * Wire schema between the canvas page and the agent-hud server.
- * Mirrors `server/src/agent_hud/{primitives,protocol}`; `protocol/fixtures/*.json` keeps both sides honest.
- */
+// Mirrors the server models; protocol/fixtures/*.json keeps both sides in step.
 import { z } from "zod";
 
 export const ElementId = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,31}$/);
@@ -61,25 +58,6 @@ export const ListEl = z.strictObject({
   items: z.array(ListItem),
 });
 
-export const Column = z.strictObject({
-  key: z.string(),
-  title: z.string(),
-});
-
-const row = <V extends z.ZodType>(cell: V) =>
-  z.strictObject({
-    id: z.string(),
-    author: Author,
-    cells: z.record(z.string(), cell),
-  });
-
-export const TableEl = z.strictObject({
-  ...box,
-  kind: z.literal("table"),
-  columns: z.array(Column),
-  rows: z.array(row(z.string())),
-});
-
 export const ColumnType = z.enum([
   "static",
   "text",
@@ -88,16 +66,25 @@ export const ColumnType = z.enum([
   "select",
 ]);
 
-export const IColumn = Column.extend({
+export const Column = z.strictObject({
+  key: z.string(),
+  title: z.string(),
   type: ColumnType,
   options: z.array(z.string()),
 });
 
-export const ITableEl = z.strictObject({
+export const Row = z.strictObject({
+  id: z.string(),
+  author: Author,
+  cells: z.record(z.string(), CellValue),
+});
+
+/** Columns typed other than `static` take user input. */
+export const TableEl = z.strictObject({
   ...box,
-  kind: z.literal("itable"),
-  columns: z.array(IColumn),
-  rows: z.array(row(CellValue)),
+  kind: z.literal("table"),
+  columns: z.array(Column),
+  rows: z.array(Row),
 });
 
 export const AnchorRef = z.strictObject({
@@ -117,7 +104,6 @@ export const Element = z.discriminatedUnion("kind", [
   TextEl,
   ListEl,
   TableEl,
-  ITableEl,
   LinkEl,
 ]);
 
@@ -201,8 +187,7 @@ export type ListItem = z.infer<typeof ListItem>;
 export type Column = z.infer<typeof Column>;
 export type TableEl = z.infer<typeof TableEl>;
 export type ColumnType = z.infer<typeof ColumnType>;
-export type IColumn = z.infer<typeof IColumn>;
-export type ITableEl = z.infer<typeof ITableEl>;
+export type Row = z.infer<typeof Row>;
 export type AnchorRef = z.infer<typeof AnchorRef>;
 export type LinkEl = z.infer<typeof LinkEl>;
 export type Element = z.infer<typeof Element>;

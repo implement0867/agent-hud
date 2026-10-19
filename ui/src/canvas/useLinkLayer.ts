@@ -16,11 +16,7 @@ export type Register = (
 
 export type LinkLayer = { links: readonly LinkEl[]; register: Register };
 
-/**
- * Arrows between anchors. Anchor boxes come from layout, so a frame loop re-measures them
- * and writes path data straight to the DOM instead of re-rendering React. Paths draw under
- * the cards and texts over them; both register their nodes here.
- */
+/** Anchor boxes come from layout, so a frame loop measures them and writes the arrows to the DOM. */
 export const useLinkLayer = (): LinkLayer => {
   const order = useStore(boardStore, (s) => s.order);
   const elements = useStore(boardStore, (s) => s.elements);

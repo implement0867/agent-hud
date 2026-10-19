@@ -2,41 +2,44 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from pydantic import TypeAdapter
 
-from agent_hud.board import Board
-from agent_hud.ops import op_list
+from agent_hud.agent import apply
+from agent_hud.hub import Hub
+from agent_hud.ops import Op
+from agent_hud.page import handle
 from agent_hud.protocol import client_messages
+from agent_hud.state import BoardState
 
 type Write = Callable[..., None]
 type Act = Callable[..., None]
 
 
 @pytest.fixture
-def board() -> Board:
-    return Board(project="test")
+def hub() -> Hub:
+    return Hub(BoardState(), project="test")
 
 
 @pytest.fixture
-def write(board: Board) -> Write:
+def write(hub: Hub) -> Write:
     """Apply agent ops given as plain dicts, as the MCP tool receives them."""
 
     def _write(*ops: dict[str, Any]) -> None:
-        board.apply(op_list().validate_python(list(ops)))
+        hub.publish(apply(hub.state, TypeAdapter(list[Op]).validate_python(list(ops))))
 
     return _write
 
 
 @pytest.fixture
-def act(board: Board) -> Act:
+def act(hub: Hub) -> Act:
     """Apply a page message given as a plain dict, as the websocket receives it."""
 
     def _act(**msg: Any) -> None:
-        board.handle(client_messages().validate_python(msg))
+        hub.publish(handle(hub.state, client_messages().validate_python(msg)))
 
     return _act
 
 
-def anchor(board: Board, label: str) -> tuple[str, str]:
-    """Element id and anchor key for an agent label such as `plan.3`."""
-    el_id, _, suffix = label.partition(".")
-    return el_id, board.elements[el_id].resolve(suffix)
+def anchor(hub: Hub, label: str) -> tuple[str, str]:
+    el, key = hub.state.resolve(label)
+    return el.id, key

@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { Canvas } from "~/canvas/Canvas";
 import { LinkDraft } from "~/canvas/Drafts";
-import { fitView } from "~/canvas/fitView";
+import { fitView, zoomBy } from "~/canvas/view";
 import { tidy } from "~/canvas/tidy";
-import { zoomAt } from "~/canvas/viewport";
 import { WorldContext } from "~/canvas/world";
 import type { World } from "~/canvas/world";
 import { EmptyState, Toast, ToolHint } from "~/chrome/Overlays";
 import { SendPanel } from "~/chrome/SendPanel";
 import { TopBar } from "~/chrome/Toolbar";
 import { ZoomControls } from "~/chrome/ZoomControls";
+import { isTyping } from "~/lib/dom";
 import { boardStore } from "~/store/board";
 import { connect, socketUrl } from "~/store/connection";
 import type { Socket } from "~/store/connection";
@@ -18,30 +18,14 @@ import { SocketContext } from "~/store/socket";
 import type { Send } from "~/store/socket";
 import { select, setTool, uiStore } from "~/store/ui";
 
-const typing = (target: EventTarget | null) =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable ||
-    target.closest("input, textarea, select") !== null);
-
 const useShortcuts = (world: World, send: Send) => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (typing(e.target)) return;
+      if (isTyping(e.target)) return;
       const { selected, linkFrom, linkDraft, noteDraft } = uiStore.get();
-      const box = world.containerRef.current;
-      const center =
-        box === null
-          ? { x: 0, y: 0 }
-          : { x: box.clientWidth / 2, y: box.clientHeight / 2 };
-      const zoomBy = (factor: number) => {
-        uiStore.set((s) => ({
-          ...s,
-          viewport: zoomAt(s.viewport, center, factor),
-        }));
-      };
       if ((e.ctrlKey || e.metaKey) && e.key === "0") {
         e.preventDefault();
-        zoomBy(1 / uiStore.get().viewport.zoom);
+        zoomBy(world, 0);
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -71,10 +55,10 @@ const useShortcuts = (world: World, send: Send) => {
           break;
         case "+":
         case "=":
-          zoomBy(1.2);
+          zoomBy(world, 1.2);
           break;
         case "-":
-          zoomBy(1 / 1.2);
+          zoomBy(world, 1 / 1.2);
           break;
         case "Escape":
           if (linkFrom !== null || linkDraft !== null || noteDraft !== null)

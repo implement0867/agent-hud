@@ -14,6 +14,13 @@ export const toWorld = (v: Viewport, screen: Point): Point => ({
   y: (screen.y - v.y) / v.zoom,
 });
 
+/** Rectangles overlap, or come closer than `gap`. */
+export const intersects = (a: Rect, b: Rect, gap = 0): boolean =>
+  a.x < b.x + b.w + gap &&
+  b.x < a.x + a.w + gap &&
+  a.y < b.y + b.h + gap &&
+  b.y < a.y + a.h + gap;
+
 /** Zoom by a factor while keeping the world point under `screen` fixed. */
 export const zoomAt = (
   v: Viewport,
@@ -81,3 +88,10 @@ export const reveal = (
   if (top + dy < pad) dy = pad - top;
   return dx === 0 && dy === 0 ? null : { ...v, x: v.x + dx, y: v.y + dy };
 };
+
+/** Zoom by a factor around the middle of a screen of `size`. */
+export const zoomAtCenter = (
+  v: Viewport,
+  size: { w: number; h: number },
+  factor: number,
+): Viewport => zoomAt(v, { x: size.w / 2, y: size.h / 2 }, factor);

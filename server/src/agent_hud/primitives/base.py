@@ -1,14 +1,7 @@
-"""Shared vocabulary for canvas primitives.
-
-Every primitive is a Pydantic model with a `kind` discriminator. A primitive exposes
-*anchors*: stable keys for the parts a user can react to or comment on (a list item,
-a table row, a cell). Anchors keep their key when items move, while the agent sees
-positional *labels* (`plan.3`, `opts.r2.pick`) that are cheap to read and write.
-"""
-
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import StrEnum
-from typing import Annotated, ClassVar, Protocol
+from typing import Annotated, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -24,71 +17,67 @@ class Reaction(StrEnum):
     QUESTION = "question"
 
 
-class BoxKind(StrEnum):
-    """Element kinds that occupy a card; the agent may force one on `put`."""
-
-    TEXT = "text"
-    LIST = "list"
-    TABLE = "table"
-    ITABLE = "itable"
-
-
 class ElementKind(StrEnum):
     TEXT = "text"
     LIST = "list"
     TABLE = "table"
-    ITABLE = "itable"
     LINK = "link"
 
 
 type ElementId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
 type CellValue = str | float | bool | None
 type IdSource = Callable[[str], str]
-"""Returns a fresh board-unique id that starts with the given prefix."""
-
-
-class AnchorRefLike(Protocol):
-    @property
-    def id(self) -> str: ...
-    @property
-    def anchor(self) -> str: ...
 
 
 class PathError(ValueError):
-    """A label or anchor does not name a part of the element."""
+    pass
 
 
 def quote(text: str, limit: int | None = None) -> str:
-    """Quote text for the agent on one line, optionally truncated."""
+    """One line in double quotes, optionally truncated."""
     flat = " / ".join(line.strip() for line in text.strip().splitlines() if line.strip())
     if limit is not None and len(flat) > limit:
         flat = flat[: limit - 1] + "…"
     return '"' + flat.replace('"', "'") + '"'
 
 
+def cell_text(value: CellValue) -> str:
+    match value:
+        case None:
+            return ""
+        case bool() as flag:
+            return "x" if flag else ""
+        case int() | float() as number:
+            return f"{number:g}"
+        case str() as text:
+            return text
+
+
+class AnchorRef(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True)
+
+    id: ElementId
+    anchor: str
+
+
+type LabelOf = Callable[[AnchorRef], str | None]
+
+
 class Comment(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True, use_enum_values=True)
 
-    id: str = Field(description="Board-unique comment id", examples=["c12"])
-    author: Author = Field(description="Who wrote the comment", examples=[Author.USER])
-    text: str = Field(min_length=1, description="Comment body", examples=["Wording is unclear"])
-    seq: int = Field(ge=0, description="Board change sequence when posted", examples=[7])
+    id: str
+    author: Author
+    text: str = Field(min_length=1)
+    seq: int = Field(ge=0)
 
 
 class Feedback(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", use_enum_values=True)
 
-    reaction: Reaction | None = Field(
-        default=None, description="User verdict on the anchor", examples=[Reaction.APPROVE]
-    )
-    revised: bool = Field(
-        default=False,
-        description="The agent changed the anchor content after the user reacted or commented",
-        examples=[True],
-    )
-    comments: list[Comment] = Field(
-        default_factory=list, description="Thread on the anchor, oldest first", examples=[[]]
-    )
+    reaction: Reaction | None = None
+    revised: bool = False
+    comments: list[Comment] = Field(default_factory=list)
 
     def is_empty(self) -> bool:
         return self.reaction is None and not self.comments
@@ -101,73 +90,59 @@ class Feedback(BaseModel):
         return "; ".join(parts)
 
 
-class ElementBase(BaseModel):
-    """Behaviour every element shares. Primitives override the anchor and mutation hooks."""
+@dataclass(frozen=True, slots=True)
+class Part:
+    """An addressable part. `anchor` is stable; `label` is the positional name the agent uses."""
 
+    anchor: str
+    label: str
+    text: str
+
+
+class ElementBase(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", use_enum_values=True)
 
-    id: ElementId = Field(description="Board-unique element id", examples=["plan"])
-    author: Author = Field(description="Who created the element", examples=[Author.AGENT])
-    feedback: dict[str, Feedback] = Field(
-        default_factory=dict,
-        description="Feedback keyed by anchor; the empty key is the whole element",
-        examples=[{"": {"reaction": "approve", "revised": False, "comments": []}}],
-    )
+    id: ElementId
+    author: Author
+    feedback: dict[str, Feedback] = Field(default_factory=dict)
 
-    # -- anchors -----------------------------------------------------------------------------
+    def parts(self) -> list[Part]:
+        raise NotImplementedError
 
-    def anchor_keys(self) -> list[str]:
-        """All anchors in display order. The empty anchor is the element itself."""
-        return [""]
+    def part(self, anchor: str) -> Part | None:
+        return next((p for p in self.parts() if p.anchor == anchor), None)
 
-    def suffix(self, anchor: str) -> str | None:
-        """Agent-facing label suffix for an anchor, or None when the anchor no longer exists."""
-        return "" if anchor == "" else None
-
-    def resolve(self, suffix: str) -> str:
-        """Anchor key for an agent-facing label suffix."""
-        if suffix == "":
-            return ""
-        raise PathError(f"{self.id} has no part '{suffix}'")
+    def resolve(self, label: str) -> str:
+        part = next((p for p in self.parts() if p.label == label), None)
+        if part is None:
+            raise PathError(f"{self.id} has no part '{label}'")
+        return part.anchor
 
     def label(self, anchor: str) -> str | None:
-        match self.suffix(anchor):
+        match self.part(anchor):
             case None:
                 return None
-            case "":
+            case Part(label=""):
                 return self.id
-            case suffix:
-                return f"{self.id}.{suffix}"
+            case Part(label=label):
+                return f"{self.id}.{label}"
 
-    def anchor_text(self, anchor: str) -> str | None:
-        """Current text content at the anchor, used in reports."""
-        return None
-
-    def value_text(self, anchor: str) -> str:
-        """Current value at the anchor as the agent reads it after a user edit."""
-        return quote(self.anchor_text(anchor) or "")
-
-    def ends(self) -> tuple[AnchorRefLike, ...]:
-        """Anchors this element points at; an element whose ends vanish is removed."""
+    def ends(self) -> tuple[AnchorRef, ...]:
         return ()
-
-    # -- mutations ---------------------------------------------------------------------------
 
     def set_value(self, anchor: str, value: CellValue) -> None:
         raise PathError(f"{self.label(anchor) or self.id} cannot be set")
 
-    def insert(self, at: str, value: str, ids: IdSource, author: Author) -> str:
-        """Insert before the part at label suffix `at` (append when empty). Returns the new anchor."""
+    def insert(self, before: str | None, value: str, new_id: str, author: Author) -> None:
+        """Insert before the part at anchor `before`, or append when it is None."""
         raise PathError(f"{self.id} does not take inserts")
 
     def remove(self, anchor: str) -> str:
-        """Remove a part. Returns its text for the change log."""
+        """Remove a part and return its text."""
         raise PathError(f"{self.label(anchor) or self.id} cannot be removed")
 
-    # -- feedback ----------------------------------------------------------------------------
-
     def feedback_at(self, anchor: str) -> Feedback:
-        if anchor not in self.anchor_keys():
+        if self.part(anchor) is None:
             raise PathError(f"{self.id} has no anchor '{anchor}'")
         return self.feedback.setdefault(anchor, Feedback())
 
@@ -176,38 +151,27 @@ class ElementBase(BaseModel):
             fb.revised = True
 
     def prune_feedback(self) -> None:
-        """Drop feedback whose anchor is gone or that holds nothing."""
-        live = set(self.anchor_keys())
+        live = {p.anchor for p in self.parts()}
         self.feedback = {k: v for k, v in self.feedback.items() if k in live and not v.is_empty()}
 
     def feedback_note(self, anchor: str) -> str:
         fb = self.feedback.get(anchor)
         return f"  [{fb.render()}]" if fb is not None and not fb.is_empty() else ""
 
-    # -- rendering ---------------------------------------------------------------------------
-
-    def render(self) -> str:
-        """Full state for the agent, feedback inline."""
+    def render(self, label_of: LabelOf) -> str:
         raise NotImplementedError
 
 
 class BoxBase(ElementBase):
-    """An element that occupies a box on the canvas."""
+    title: str | None = None
+    x: float | None = None
+    y: float | None = None
+    w: float | None = Field(default=None, gt=0)
 
-    title: str | None = Field(default=None, description="Card heading", examples=["Plan"])
-    x: float | None = Field(default=None, description="Left edge in canvas units; null until placed", examples=[40.0])
-    y: float | None = Field(default=None, description="Top edge in canvas units; null until placed", examples=[40.0])
-    w: float | None = Field(
-        default=None, gt=0, description="Width set by the user; null for automatic", examples=[420.0]
-    )
-
-    def header(self) -> str:
+    def header(self, kind: ElementKind) -> str:
         title = f" {quote(self.title)}" if self.title else ""
         by = " by user" if self.author == Author.USER else ""
-        return f"{self.id}: {self.kind_name()}{title}{by}{self.feedback_note('')}"
-
-    def kind_name(self) -> str:
-        raise NotImplementedError
+        return f"{self.id}: {kind}{title}{by}{self.feedback_note('')}"
 
     def succeed(self, old: ElementBase) -> None:
         """Take over the position, anchors and feedback of the element this one replaces."""
@@ -218,13 +182,13 @@ class BoxBase(ElementBase):
                 pass
         if type(old) is not type(self):
             return
-        before = {anchor: old.anchor_text(anchor) for anchor in old.anchor_keys()}
+        before = {p.anchor: p.text for p in old.parts()}
         self.adopt(old)
         self.feedback.clear()
         self.feedback.update({k: v.model_copy(deep=True) for k, v in old.feedback.items()})
-        for anchor, text in before.items():
-            if anchor in self.anchor_keys() and self.anchor_text(anchor) != text:
-                self.mark_revised(anchor)
+        for part in self.parts():
+            if part.anchor in before and before[part.anchor] != part.text:
+                self.mark_revised(part.anchor)
 
     def adopt(self, old: ElementBase) -> None:
-        """Carry anchor keys over from a replaced element of the same kind."""
+        """Reuse the anchors of `old`, the element of the same kind this one replaces."""

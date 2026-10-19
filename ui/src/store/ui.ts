@@ -5,6 +5,14 @@ export type Tool = "select" | "hand" | "note" | "link";
 
 export type Viewport = { x: number; y: number; zoom: number };
 
+export type LinkDraft = {
+  src: AnchorRef;
+  dst: AnchorRef;
+  /** Screen point to show the text input at. */
+  sx: number;
+  sy: number;
+};
+
 export type UiState = {
   tool: Tool;
   /** Selected element id (card or link). */
@@ -12,12 +20,9 @@ export type UiState = {
   viewport: Viewport;
   /** First end of an arrow being drawn. */
   linkFrom: AnchorRef | null;
-  /** Arrow waiting for its text, with the screen point to show the input at. */
-  linkDraft: { src: AnchorRef; dst: AnchorRef; sx: number; sy: number } | null;
+  linkDraft: LinkDraft | null;
   /** Sticky note being typed at a world position. */
   noteDraft: { x: number; y: number } | null;
-  /** Local positions for cards this tab placed, until the server echoes them. */
-  placed: Readonly<Record<string, { x: number; y: number }>>;
 };
 
 export const uiStore = createStore<UiState>({
@@ -27,7 +32,6 @@ export const uiStore = createStore<UiState>({
   linkFrom: null,
   linkDraft: null,
   noteDraft: null,
-  placed: {},
 });
 
 export const setTool = (tool: Tool) => {

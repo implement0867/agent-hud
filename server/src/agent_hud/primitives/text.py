@@ -1,23 +1,14 @@
 from typing import Literal
 
-from pydantic import Field
-
-from agent_hud.primitives.base import Author, BoxBase, CellValue, ElementKind, PathError
+from agent_hud.primitives.base import Author, BoxBase, CellValue, ElementKind, LabelOf, Part, PathError, quote
 
 
 class TextEl(BoxBase):
-    """A markdown block. The user can react to, comment on, or rewrite the whole body."""
+    kind: Literal[ElementKind.TEXT] = ElementKind.TEXT
+    body: str
 
-    kind: Literal[ElementKind.TEXT] = Field(
-        default=ElementKind.TEXT, description="Discriminator", examples=[ElementKind.TEXT]
-    )
-    body: str = Field(description="Markdown source", examples=["Caching moves to the edge."])
-
-    def kind_name(self) -> str:
-        return "note" if self.author == Author.USER else "text"
-
-    def anchor_text(self, anchor: str) -> str | None:
-        return self.body if anchor == "" else None
+    def parts(self) -> list[Part]:
+        return [Part("", "", self.body)]
 
     def set_value(self, anchor: str, value: CellValue) -> None:
         match anchor, value:
@@ -26,5 +17,7 @@ class TextEl(BoxBase):
             case _:
                 raise PathError(f"{self.id} takes a markdown string")
 
-    def render(self) -> str:
-        return f"{self.header()}\n{self.body}"
+    def render(self, label_of: LabelOf) -> str:
+        if self.author == Author.USER:
+            return f"{self.id}: note {quote(self.body)}{self.feedback_note('')}"
+        return f"{self.header(self.kind)}\n{self.body}"

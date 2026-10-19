@@ -1,15 +1,12 @@
-import { useCallback, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import { useState } from "react";
 
+import { stop } from "~/lib/dom";
 import { useStore } from "~/lib/store";
 import { useSend } from "~/store/socket";
 import { setTool, uiStore } from "~/store/ui";
+import type { LinkDraft as LinkDraftState } from "~/store/ui";
 
-const stop = (e: { stopPropagation: () => void }) => {
-  e.stopPropagation();
-};
-
-/** Sticky note being typed, positioned in world units inside the canvas layer. */
+/** A sticky note being typed, in world units inside the canvas layer. */
 export const NoteDraft = () => {
   const draft = useStore(uiStore, (s) => s.noteDraft);
   if (draft === null) return null;
@@ -25,31 +22,26 @@ export const NoteDraft = () => {
 const NoteEditor = ({ x, y }: { x: number; y: number }) => {
   const send = useSend();
   const [text, setText] = useState("");
-  const onChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
-  }, []);
-  const finish = useCallback(() => {
+  const finish = () => {
     if (text.trim() !== "") send({ t: "note", x, y, text: text.trim() });
     setTool("select");
-  }, [send, x, y, text]);
-  const onKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      e.stopPropagation();
-      if (e.key === "Escape") setTool("select");
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        finish();
-      }
-    },
-    [finish],
-  );
+  };
   return (
     <textarea
       className="note-draft"
       style={{ left: x, top: y }}
       value={text}
-      onChange={onChange}
-      onKeyDown={onKeyDown}
+      onChange={(e) => {
+        setText(e.target.value);
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Escape") setTool("select");
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          finish();
+        }
+      }}
       onBlur={finish}
       onPointerDown={stop}
       placeholder="Note for the agent… Enter to place"
@@ -58,46 +50,25 @@ const NoteEditor = ({ x, y }: { x: number; y: number }) => {
   );
 };
 
-/** Text prompt for a new arrow, shown in screen space near the arrow head. */
+/** The text prompt for a new arrow, in screen space near the arrow head. */
 export const LinkDraft = () => {
   const draft = useStore(uiStore, (s) => s.linkDraft);
   if (draft === null) return null;
+  const { src, dst } = draft;
   return (
     <LinkEditor
-      key={`${draft.src.id}|${draft.src.anchor}|${draft.dst.id}|${draft.dst.anchor}`}
+      key={`${src.id}|${src.anchor}|${dst.id}|${dst.anchor}`}
+      draft={draft}
     />
   );
 };
 
-const LinkEditor = () => {
+const LinkEditor = ({ draft }: { draft: LinkDraftState }) => {
   const send = useSend();
   const [text, setText] = useState("");
-  const draft = useStore(uiStore, (s) => s.linkDraft);
-  const onChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    setText(e.target.value);
-  }, []);
-  const cancel = useCallback(() => {
+  const cancel = () => {
     uiStore.set((s) => ({ ...s, linkDraft: null }));
-  }, []);
-  const finish = useCallback(() => {
-    if (draft !== null)
-      send({
-        t: "link",
-        src: draft.src,
-        dst: draft.dst,
-        text: text.trim() === "" ? null : text.trim(),
-      });
-    cancel();
-  }, [send, draft, text, cancel]);
-  const onKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      e.stopPropagation();
-      if (e.key === "Escape") cancel();
-      if (e.key === "Enter") finish();
-    },
-    [finish, cancel],
-  );
-  if (draft === null) return null;
+  };
   return (
     <div
       className="link-draft"
@@ -106,8 +77,22 @@ const LinkEditor = () => {
     >
       <input
         value={text}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
+        onChange={(e) => {
+          setText(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Escape") cancel();
+          if (e.key === "Enter") {
+            send({
+              t: "link",
+              src: draft.src,
+              dst: draft.dst,
+              text: text.trim() === "" ? null : text.trim(),
+            });
+            cancel();
+          }
+        }}
         placeholder="Arrow text, e.g. “entails?” — Enter"
         autoFocus
       />

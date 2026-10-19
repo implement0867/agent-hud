@@ -4,7 +4,7 @@ A shared browser canvas for Claude Code. The agent puts plans, options and table
 canvas. You approve, reject or question each item, comment, edit, draw arrows and fill in
 tables. Then you press **Send**, and the agent reads one short line per item you touched.
 
-![Canvas with a reviewed plan, an interactive options table and a note](docs/canvas.png)
+![Canvas with a reviewed plan, an options table with input columns and a note](docs/canvas.png)
 
 A chat reply such as "I like 3 and 4, 2 is unclear, and does 6 entail 1?" becomes this
 read result:
@@ -14,7 +14,7 @@ plan.3 approve
 plan.4 approve
 plan.2 question; "Wording is unclear: batches of what size?"
 link l14 plan.6 -> plan.1 "entails?" by user
-opts.r2.pick = yes
+opts.r2.pick = "x"
 submit "Mostly fine; fix 2 and check 6 vs 1"
 ```
 
@@ -80,12 +80,12 @@ tables):
 |---|---|
 | one list | list; items are `plan.1`, `plan.2`, … |
 | one table | table; rows `t.r1`, cells `t.r1.price`, columns `t.price` |
-| a table with `{check}`, `{text}`, `{number}` or `{a,b,c}` in header cells | interactive table; the user fills those columns |
+| a table with `{check}`, `{text}`, `{number}` or `{a,b,c}` in header cells | table with input columns; the user fills them |
 | anything else | markdown text |
 
 A leading heading becomes the title. Column keys are the header text in lower snake case.
 A re-`put` keeps the anchors and feedback of items whose text did not change, keeps user
-input in interactive columns, and marks feedback on changed items as `revised`.
+input in input columns, and marks feedback on changed items as `revised`.
 
 ### `read(wait=0, show=None)`
 
@@ -96,9 +96,9 @@ Returns the user's changes since the last read, one line per part, and then adva
 | `plan.3 approve` | verdict: `approve`, `reject`, `question`, `cleared reaction` |
 | `plan.2 question; "text"` | verdict plus new comments |
 | `plan.5 = "new text"` | the user edited the part |
-| `opts.r2.pick = yes` | the user filled a cell |
+| `opts.r2.pick = "x"` | the user filled a cell |
 | `plan.7 added "text"` / `plan.4 removed "text"` | the user added or removed an item or row |
-| `note n4 "text"` | the user added a sticky note |
+| `n4: note "text"` | the user added a sticky note |
 | `link l5 plan.6 -> plan.1 "text" by user` | the user drew an arrow |
 | `submit "message"` | the user pressed Send |
 
@@ -129,14 +129,14 @@ Each step adds to the one before it:
 1. **Text**: markdown block.
 2. **List**: numbered or bulleted; every item is an anchor.
 3. **Table**: every row, column and cell is an anchor.
-4. **Interactive table**: a table whose typed columns get editors (checkbox, choice, number,
-   text). It shares the table model (`TableBase`) and view (`TableBody`); only column types,
-   cell coercion and cell editors are new.
+4. **Table with input columns**: the same `TableEl`. A column whose type is not `static` gets
+   an editor (checkbox, choice, number, text) from `ui/src/primitives/cells.tsx`, and the
+   server coerces its values.
 
 Add a primitive:
 
-1. Python: subclass `BoxBase` (or `TableBase`) in `server/src/agent_hud/primitives/`, with a
-   `kind` literal and the anchor, mutation and `render` hooks. Add it to `Box` and `Element` in
+1. Python: subclass `BoxBase` in `server/src/agent_hud/primitives/`, with a `kind` literal,
+   `parts()` (one `Part` per addressable part), the mutation hooks it supports and `render`. Add it to `Box` and `Element` in
    `primitives/__init__.py`, and to `build_box` if markdown should infer it.
 2. UI: add its Zod schema to the `Element` union in `ui/src/protocol/schema.ts` and a case to
    `ui/src/primitives/Body.tsx`. Wrap each addressable part in `<Anchor>`; reactions, comments

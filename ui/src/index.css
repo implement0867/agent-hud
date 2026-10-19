@@ -130,8 +130,7 @@ kbd {
   box-shadow: var(--card-shadow);
   user-select: text;
 }
-.card-table,
-.card-itable {
+.card-table {
   max-width: 960px;
 }
 .card-selected {

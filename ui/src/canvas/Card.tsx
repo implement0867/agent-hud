@@ -1,13 +1,14 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 
+import type { Point } from "~/canvas/viewport";
 import { Icon } from "~/chrome/icons";
 import { Anchor } from "~/feedback/Anchor";
 import { cx } from "~/lib/cx";
 import { useStore } from "~/lib/store";
 import { Body } from "~/primitives/Body";
 import type { BoxEl } from "~/protocol/schema";
-import { boardStore } from "~/store/board";
+import { boardStore, updateBox } from "~/store/board";
 import { useSend } from "~/store/socket";
 import { select, uiStore } from "~/store/ui";
 
@@ -15,10 +16,7 @@ const kindLabel: Readonly<Record<BoxEl["kind"], string>> = {
   text: "Text",
   list: "List",
   table: "Table",
-  itable: "Table",
 };
-
-type Point = { x: number; y: number };
 
 export const Card = memo(({ id }: { id: string }) => {
   const el = useStore(boardStore, (s) => s.elements[id]);
@@ -32,118 +30,41 @@ const isControl = (target: EventTarget) =>
   target.closest("button, input, textarea, select, a, .anchor-actions") !==
     null;
 
+/** Distance the pointer moved since `from`, in world units. */
+const worldDelta = (e: PointerEvent, from: Point): Point => {
+  const { zoom } = uiStore.get().viewport;
+  return { x: (e.clientX - from.x) / zoom, y: (e.clientY - from.y) / zoom };
+};
+
 const CardFrame = ({ el }: { el: BoxEl }) => {
   const send = useSend();
-  const placed = useStore(uiStore, (s) => s.placed[el.id]);
   const selected = useStore(uiStore, (s) => s.selected === el.id);
   const fresh = useStore(boardStore, (s) => s.fresh.includes(el.id));
-  const [offset, setOffset] = useState<Point | null>(null);
-  // Local values after a move or resize, valid until the server echoes a new value.
-  const [moved, setMoved] = useState<{ to: Point; from: Point | null } | null>(
-    null,
-  );
-  const [sized, setSized] = useState<{
-    to: number;
-    from: number | null;
-  } | null>(null);
-  const [width, setWidth] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
   const drag = useRef<{ start: Point; base: Point } | null>(null);
-  const resize = useRef<{ start: number; base: number } | null>(null);
+  const resize = useRef<{ start: Point; base: number } | null>(null);
   const node = useRef<HTMLDivElement>(null);
 
-  const server = useMemo<Point | null>(
-    () => (el.x !== null && el.y !== null ? { x: el.x, y: el.y } : null),
-    [el.x, el.y],
-  );
-  const base = useMemo<Point | null>(() => {
-    if (
-      moved !== null &&
-      moved.from?.x === server?.x &&
-      moved.from?.y === server?.y
-    )
-      return moved.to;
-    return server ?? placed ?? null;
-  }, [moved, server, placed]);
-
-  const onPointerDown = useCallback(
-    (e: PointerEvent<HTMLDivElement>) => {
-      if (
-        e.button !== 0 ||
-        base === null ||
-        isControl(e.target) ||
-        uiStore.get().tool === "link"
-      )
-        return;
-      select(el.id);
-      drag.current = { start: { x: e.clientX, y: e.clientY }, base };
-      e.currentTarget.setPointerCapture(e.pointerId);
-      e.stopPropagation();
-    },
-    [el.id, base],
-  );
-  const onPointerMove = useCallback((e: PointerEvent<HTMLDivElement>) => {
+  const dragTo = (e: PointerEvent): Point | null => {
     const d = drag.current;
-    if (d === null) return;
-    const { zoom } = uiStore.get().viewport;
-    setOffset({
-      x: (e.clientX - d.start.x) / zoom,
-      y: (e.clientY - d.start.y) / zoom,
-    });
-  }, []);
-  const onPointerUp = useCallback(
-    (e: PointerEvent<HTMLDivElement>) => {
-      const d = drag.current;
-      drag.current = null;
-      if (d === null) return;
-      const { zoom } = uiStore.get().viewport;
-      const target = {
-        x: d.base.x + (e.clientX - d.start.x) / zoom,
-        y: d.base.y + (e.clientY - d.start.y) / zoom,
-      };
-      setOffset(null);
-      if (target.x !== d.base.x || target.y !== d.base.y) {
-        setMoved({ to: target, from: server });
-        send({ t: "move", id: el.id, ...target });
-      }
-    },
-    [send, el.id, server],
-  );
-
-  const onResizeDown = useCallback((e: PointerEvent<HTMLDivElement>) => {
-    const box = node.current;
-    if (box === null) return;
-    resize.current = { start: e.clientX, base: box.offsetWidth };
-    e.currentTarget.setPointerCapture(e.pointerId);
-    e.stopPropagation();
-  }, []);
-  const onResizeMove = useCallback((e: PointerEvent<HTMLDivElement>) => {
+    if (d === null) return null;
+    const delta = worldDelta(e, d.start);
+    return { x: d.base.x + delta.x, y: d.base.y + delta.y };
+  };
+  const resizeTo = (e: PointerEvent): number | null => {
     const r = resize.current;
-    if (r === null) return;
-    const { zoom } = uiStore.get().viewport;
-    setWidth(
-      Math.min(1600, Math.max(220, r.base + (e.clientX - r.start) / zoom)),
-    );
-  }, []);
-  const onResizeUp = useCallback(() => {
-    resize.current = null;
-    if (width === null) return;
-    setSized({ to: width, from: el.w });
-    setWidth(null);
-    send({ t: "resize", id: el.id, w: width });
-  }, [send, el.id, el.w, width]);
+    return r === null
+      ? null
+      : Math.min(1600, Math.max(220, r.base + worldDelta(e, r.start).x));
+  };
 
-  const remove = useCallback(() => {
-    send({ t: "delete", id: el.id });
-  }, [send, el.id]);
-
-  const w = width ?? (sized !== null && sized.from === el.w ? sized.to : el.w);
   const style: CSSProperties =
-    base === null
+    el.x === null || el.y === null
       ? { left: -100000, top: -100000, visibility: "hidden" }
       : {
-          left: base.x + (offset?.x ?? 0),
-          top: base.y + (offset?.y ?? 0),
-          ...(w === null ? {} : { width: w, maxWidth: "none" }),
+          left: el.x,
+          top: el.y,
+          ...(el.w === null ? {} : { width: el.w, maxWidth: "none" }),
         };
   const note = el.kind === "text" && el.author === "user";
 
@@ -156,17 +77,37 @@ const CardFrame = ({ el }: { el: BoxEl }) => {
         note && "card-note",
         selected && "card-selected",
         fresh && "card-fresh",
-        offset !== null && "card-dragging",
+        dragging && "card-dragging",
       )}
       style={style}
       data-card={el.id}
-      data-unplaced={base === null ? "" : undefined}
+      data-unplaced={el.x === null ? "" : undefined}
     >
       <div
         className="card-head"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
+        onPointerDown={(e) => {
+          const { x, y } = el;
+          if (e.button !== 0 || x === null || y === null) return;
+          if (isControl(e.target) || uiStore.get().tool === "link") return;
+          select(el.id);
+          drag.current = {
+            start: { x: e.clientX, y: e.clientY },
+            base: { x, y },
+          };
+          setDragging(true);
+          e.currentTarget.setPointerCapture(e.pointerId);
+          e.stopPropagation();
+        }}
+        onPointerMove={(e) => {
+          const to = dragTo(e);
+          if (to !== null) updateBox(el.id, to);
+        }}
+        onPointerUp={(e) => {
+          const to = dragTo(e);
+          drag.current = null;
+          setDragging(false);
+          if (to !== null) send({ t: "move", id: el.id, ...to });
+        }}
       >
         <Anchor el={el} anchor="" className="card-anchor">
           <div className="card-title">
@@ -180,8 +121,10 @@ const CardFrame = ({ el }: { el: BoxEl }) => {
           <button
             type="button"
             className="card-delete"
-            onClick={remove}
             title="Delete"
+            onClick={() => {
+              send({ t: "delete", id: el.id });
+            }}
           >
             <Icon name="trash" size={14} />
           </button>
@@ -192,10 +135,25 @@ const CardFrame = ({ el }: { el: BoxEl }) => {
       </div>
       <div
         className="card-resize"
-        onPointerDown={onResizeDown}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeUp}
         title="Drag to resize"
+        onPointerDown={(e) => {
+          if (node.current === null) return;
+          resize.current = {
+            start: { x: e.clientX, y: e.clientY },
+            base: node.current.offsetWidth,
+          };
+          e.currentTarget.setPointerCapture(e.pointerId);
+          e.stopPropagation();
+        }}
+        onPointerMove={(e) => {
+          const w = resizeTo(e);
+          if (w !== null) updateBox(el.id, { w });
+        }}
+        onPointerUp={(e) => {
+          const w = resizeTo(e);
+          resize.current = null;
+          if (w !== null) send({ t: "resize", id: el.id, w });
+        }}
       />
     </div>
   );

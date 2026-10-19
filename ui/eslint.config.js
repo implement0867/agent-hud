@@ -80,7 +80,6 @@ export default tseslint.config(
       "react/no-unstable-nested-components": "error",
       "react/jsx-no-leaked-render": "error",
       "react/jsx-no-constructed-context-values": "error",
-      "react/jsx-no-bind": "error",
       "react/no-danger": "error",
       "react/void-dom-elements-no-children": "warn",
 

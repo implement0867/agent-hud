@@ -1,43 +1,56 @@
-import { memo, useCallback, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import { memo, useState } from "react";
 
 import { assertNever } from "~/lib/assertNever";
+import { stop } from "~/lib/dom";
 import { Editable } from "~/primitives/Editable";
 import { Markdown } from "~/primitives/Markdown";
-import type { CellValue, ColumnType } from "~/protocol/schema";
-
-export type ViewColumn = {
-  key: string;
-  title: string;
-  type: ColumnType;
-  options: readonly string[];
-};
+import type { CellValue, Column } from "~/protocol/schema";
 
 type CellProps = {
-  column: ViewColumn;
+  column: Column;
   value: CellValue;
   onChange: (value: CellValue) => void;
 };
 
-const asText = (value: CellValue): string => {
+const cellText = (value: CellValue): string => {
   if (value === null) return "";
   if (typeof value === "boolean") return value ? "x" : "";
   return String(value);
 };
 
-const stop = (e: { stopPropagation: () => void }) => {
-  e.stopPropagation();
-};
-
-/** The editor for one cell, chosen by column type. Add a case here to add a column type. */
+/** The editor for one cell, chosen by column type. */
 export const Cell = memo(({ column, value, onChange }: CellProps) => {
   switch (column.type) {
     case "static":
-      return <StaticCell value={asText(value)} onChange={onChange} />;
+      return (
+        <Editable value={cellText(value)} onCommit={onChange}>
+          <Markdown text={cellText(value)} inline />
+        </Editable>
+      );
     case "text":
-      return <TextCell value={asText(value)} onChange={onChange} />;
+      return (
+        <Editable
+          value={cellText(value)}
+          onCommit={onChange}
+          eager
+          placeholder="—"
+          className="cell-input"
+        >
+          <span>{cellText(value)}</span>
+        </Editable>
+      );
     case "check":
-      return <CheckCell value={value === true} onChange={onChange} />;
+      return (
+        <input
+          type="checkbox"
+          className="cell-check"
+          checked={value === true}
+          onChange={() => {
+            onChange(value !== true);
+          }}
+          onPointerDown={stop}
+        />
+      );
     case "number":
       return (
         <NumberCell
@@ -47,11 +60,21 @@ export const Cell = memo(({ column, value, onChange }: CellProps) => {
       );
     case "select":
       return (
-        <SelectCell
+        <select
+          className="cell-select"
           value={typeof value === "string" ? value : ""}
-          options={column.options}
-          onChange={onChange}
-        />
+          onChange={(e) => {
+            onChange(e.target.value === "" ? null : e.target.value);
+          }}
+          onPointerDown={stop}
+        >
+          <option value="">—</option>
+          {column.options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
       );
     default:
       return assertNever(column.type);
@@ -59,95 +82,36 @@ export const Cell = memo(({ column, value, onChange }: CellProps) => {
 });
 Cell.displayName = "Cell";
 
-type Commit<V> = { value: V; onChange: (value: CellValue) => void };
-
-const StaticCell = ({ value, onChange }: Commit<string>) => (
-  <Editable value={value} onCommit={onChange}>
-    <Markdown text={value} inline />
-  </Editable>
-);
-
-const TextCell = ({ value, onChange }: Commit<string>) => (
-  <Editable
-    value={value}
-    onCommit={onChange}
-    eager
-    placeholder="—"
-    className="cell-input"
-  >
-    <span>{value}</span>
-  </Editable>
-);
-
-const CheckCell = ({ value, onChange }: Commit<boolean>) => {
-  const toggle = useCallback(() => {
-    onChange(!value);
-  }, [value, onChange]);
-  return (
-    <input
-      type="checkbox"
-      className="cell-check"
-      checked={value}
-      onChange={toggle}
-      onPointerDown={stop}
-    />
-  );
+type NumberProps = {
+  value: number | null;
+  onChange: (value: CellValue) => void;
 };
 
-const NumberCell = ({ value, onChange }: Commit<number | null>) => {
+const NumberCell = ({ value, onChange }: NumberProps) => {
   const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? (value === null ? "" : String(value));
-  const edit = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    setDraft(e.target.value);
-  }, []);
-  const commit = useCallback(() => {
+  const commit = () => {
     if (draft !== null) {
       const parsed = draft.trim() === "" ? null : Number(draft);
       if (parsed === null || Number.isFinite(parsed)) onChange(parsed);
     }
     setDraft(null);
-  }, [draft, onChange]);
-  const onKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    if (e.key === "Enter") e.currentTarget.blur();
-    if (e.key === "Escape") setDraft(null);
-  }, []);
+  };
   return (
     <input
       type="number"
       className="cell-number"
-      value={shown}
-      onChange={edit}
+      value={draft ?? (value === null ? "" : String(value))}
+      onChange={(e) => {
+        setDraft(e.target.value);
+      }}
       onBlur={commit}
-      onKeyDown={onKeyDown}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(null);
+      }}
       onPointerDown={stop}
       placeholder="—"
     />
-  );
-};
-
-type SelectProps = Commit<string> & { options: readonly string[] };
-
-const SelectCell = ({ value, options, onChange }: SelectProps) => {
-  const pick = useCallback(
-    (e: ChangeEvent<HTMLSelectElement>) => {
-      onChange(e.target.value === "" ? null : e.target.value);
-    },
-    [onChange],
-  );
-  return (
-    <select
-      className="cell-select"
-      value={value}
-      onChange={pick}
-      onPointerDown={stop}
-    >
-      <option value="">—</option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
   );
 };

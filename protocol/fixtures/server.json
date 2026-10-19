@@ -83,6 +83,7 @@
         "x": null,
         "y": null,
         "w": null,
+        "kind": "table",
         "columns": [
           {
             "key": "option",
@@ -174,8 +175,7 @@
               "notes": ""
             }
           }
-        ],
-        "kind": "itable"
+        ]
       },
       {
         "id": "risk",
@@ -196,18 +196,25 @@
         "x": null,
         "y": null,
         "w": null,
+        "kind": "table",
         "columns": [
           {
             "key": "env",
-            "title": "Env"
+            "title": "Env",
+            "type": "static",
+            "options": []
           },
           {
             "key": "region",
-            "title": "Region"
+            "title": "Region",
+            "type": "static",
+            "options": []
           },
           {
             "key": "replicas",
-            "title": "Replicas"
+            "title": "Replicas",
+            "type": "static",
+            "options": []
           }
         ],
         "rows": [
@@ -229,8 +236,7 @@
               "replicas": "3"
             }
           }
-        ],
-        "kind": "table"
+        ]
       },
       {
         "id": "l12",

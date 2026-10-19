@@ -1,5 +1,4 @@
 import { memo, useCallback } from "react";
-import type { PointerEvent } from "react";
 
 import type { LinkLayer, Register } from "~/canvas/useLinkLayer";
 import { cx } from "~/lib/cx";
@@ -12,28 +11,20 @@ export const LinkPaths = ({ links, register }: LinkLayer) => {
   return (
     <svg className="links" width={1} height={1}>
       <defs>
-        <marker
-          id="arrowhead-agent"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="7"
-          markerHeight="7"
-          orient="auto"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" className="arrowhead-agent" />
-        </marker>
-        <marker
-          id="arrowhead-user"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="7"
-          markerHeight="7"
-          orient="auto"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" className="arrowhead-user" />
-        </marker>
+        {(["agent", "user"] as const).map((author) => (
+          <marker
+            key={author}
+            id={`arrowhead-${author}`}
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" className={`arrowhead-${author}`} />
+          </marker>
+        ))}
       </defs>
       {links.map((link) => (
         <LinkPath
@@ -72,18 +63,18 @@ const LinkPath = memo(({ link, selected, register }: PathProps) => {
     },
     [register, link.id],
   );
-  const pick = useCallback(
-    (e: PointerEvent<SVGPathElement>) => {
-      e.stopPropagation();
-      select(link.id);
-    },
-    [link.id],
-  );
   return (
     <g
       className={cx("link", `link-${link.author}`, selected && "link-selected")}
     >
-      <path ref={setHit} className="link-hit" onPointerDown={pick} />
+      <path
+        ref={setHit}
+        className="link-hit"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          select(link.id);
+        }}
+      />
       <path
         ref={setLine}
         className="link-line"

@@ -1,6 +1,6 @@
 import { createStore } from "~/lib/store";
 import { assertNever } from "~/lib/assertNever";
-import type { Element, ServerMsg, Status } from "~/protocol/schema";
+import type { BoxEl, Element, ServerMsg, Status } from "~/protocol/schema";
 
 export type Connection = "connecting" | "open" | "closed";
 
@@ -71,3 +71,15 @@ export const reduceBoard = (state: BoardState, msg: ServerMsg): BoardState => {
 };
 
 export const boardStore = createStore<BoardState>(initialBoard);
+
+/** Change a card locally before the server confirms; the next `upsert` replaces it. */
+export const updateBox = (
+  id: string,
+  patch: Partial<Pick<BoxEl, "x" | "y" | "w">>,
+) => {
+  boardStore.set((s) => {
+    const el = s.elements[id];
+    if (el === undefined || el.kind === "link") return s;
+    return { ...s, elements: { ...s.elements, [id]: { ...el, ...patch } } };
+  });
+};

@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import { useEffect, useState } from "react";
 
 import { Icon } from "~/chrome/icons";
 import { cx } from "~/lib/cx";
@@ -7,7 +6,7 @@ import { useStore } from "~/lib/store";
 import { boardStore } from "~/store/board";
 import { useSend } from "~/store/socket";
 
-/** Hands the review back to the agent; its blocking `read` returns on Send. */
+/** Send returns the agent's blocking `read`. */
 export const SendPanel = () => {
   const send = useSend();
   const waiting = useStore(boardStore, (s) => s.status.waiting);
@@ -26,27 +25,14 @@ export const SendPanel = () => {
     };
   }, [sent]);
 
-  const onChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    setMessage(e.target.value);
-  }, []);
-  const submit = useCallback(() => {
+  const submit = () => {
     send({
       t: "submit",
       message: message.trim() === "" ? null : message.trim(),
     });
     setMessage("");
     setSent(true);
-  }, [send, message]);
-  const onKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      e.stopPropagation();
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
-        e.preventDefault();
-        submit();
-      }
-    },
-    [submit],
-  );
+  };
 
   return (
     <section
@@ -72,8 +58,16 @@ export const SendPanel = () => {
           className="send-message"
           placeholder="Optional message… Enter sends"
           value={message}
-          onChange={onChange}
-          onKeyDown={onKeyDown}
+          onChange={(e) => {
+            setMessage(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
           rows={1}
         />
         <button

@@ -16,16 +16,16 @@ from agent_hud.markdown import (
 @pytest.mark.parametrize(
     ("md", "title", "content"),
     [
-        ("Hello **there**", None, TextContent(body="Hello **there**")),
-        ("# Why\nBecause.", "Why", TextContent(body="Because.")),
+        ("Hello **there**", None, TextContent()),
+        ("# Why\nBecause.", "Why", TextContent()),
         ("1. a\n2. b", None, ListContent(ordered=True, items=["a", "b"])),
         ("- a\n- b", None, ListContent(ordered=False, items=["a", "b"])),
         ("## Plan\n\n1. a\n2. b", "Plan", ListContent(ordered=True, items=["a", "b"])),
         ("1. a\n   - sub\n2. b", None, ListContent(ordered=True, items=["a\n- sub", "b"])),
         ("1. a\n\n2. b", None, ListContent(ordered=True, items=["a", "b"])),
         ("1. a\nlazy line", None, ListContent(ordered=True, items=["a\nlazy line"])),
-        ("1. a\n\nplain line", None, TextContent(body="1. a\n\nplain line")),
-        ("intro\n1. a", None, TextContent(body="intro\n1. a")),
+        ("1. a\n\nplain line", None, TextContent()),
+        ("intro\n1. a", None, TextContent()),
         (
             "| A | B |\n|---|---|\n| 1 | 2 |",
             None,
@@ -36,7 +36,7 @@ from agent_hud.markdown import (
             None,
             TableContent(headers=[HeaderSpec("A"), HeaderSpec("B")], rows=[["1", ""]]),
         ),
-        ("", None, TextContent(body="")),
+        ("", None, TextContent()),
     ],
     ids=[
         "text",
@@ -58,6 +58,21 @@ def test_parse_infers_content(md: str, title: str | None, content: object) -> No
     parsed = parse(md)
     assert parsed.title == title, f"title of {md!r}"
     assert parsed.content == content, f"content of {md!r}"
+
+
+@pytest.mark.parametrize(
+    ("md", "heading_is_title", "title", "body"),
+    [
+        ("# Why\nBecause.", True, "Why", "Because."),
+        ("Why\n===\nBecause.", True, "Why", "Because."),
+        ("# Why\nBecause.", False, None, "# Why\nBecause."),
+        ("# Only a heading", True, None, "# Only a heading"),
+    ],
+    ids=["atx", "setext", "title-given", "heading-alone"],
+)
+def test_parse_splits_title_from_body(md: str, *, heading_is_title: bool, title: str | None, body: str) -> None:
+    parsed = parse(md, heading_is_title=heading_is_title)
+    assert (parsed.title, parsed.body) == (title, body)
 
 
 @pytest.mark.parametrize(

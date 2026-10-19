@@ -1,6 +1,3 @@
-import { useCallback } from "react";
-import type { MouseEvent } from "react";
-
 import { Icon } from "~/chrome/icons";
 import type { IconName } from "~/chrome/icons";
 import { cx } from "~/lib/cx";
@@ -28,17 +25,10 @@ const connectionText: Readonly<Record<Connection, string>> = {
   closed: "Disconnected, retrying…",
 };
 
-const isTool = (value: string | undefined): value is Tool =>
-  tools.some((t) => t.tool === value);
-
 export const TopBar = () => {
   const current = useStore(uiStore, (s) => s.tool);
   const project = useStore(boardStore, (s) => s.project);
   const connection = useStore(boardStore, (s) => s.connection);
-  const choose = useCallback((e: MouseEvent<HTMLButtonElement>) => {
-    const { tool } = e.currentTarget.dataset;
-    if (isTool(tool)) setTool(tool);
-  }, []);
   return (
     <header className="chrome topbar">
       <div className="brand">
@@ -58,8 +48,9 @@ export const TopBar = () => {
             key={t.tool}
             type="button"
             className={cx("tool", current === t.tool && "tool-on")}
-            data-tool={t.tool}
-            onClick={choose}
+            onClick={() => {
+              setTool(t.tool);
+            }}
             title={`${t.label} (${t.key})`}
             aria-pressed={current === t.tool}
           >

@@ -13,7 +13,7 @@ The canvas is a browser page shared with the user. Use it instead of a chat list
 2. Tell the user in one line what to review. The first write opens the browser.
 3. `read` with `wait` (for example 600) blocks until the user presses Send. Each line is one part:
    `plan.3 approve`, `plan.2 question; "unclear"`, `plan.5 = "new text"` (user edit), `plan.7 added "..."`,
-   `opts.r2.pick = yes`, `note n4 "..."`, `link l5 plan.6 -> plan.1 "entails?"`, `submit "message"`.
+   `opts.r2.pick = "x"`, `n4: note "..."`, `link l5 plan.6 -> plan.1 "entails?"`, `submit "message"`.
 4. Act on it. Change only what the feedback touches: `set`, `insert`, `remove`, or `reply` to a comment.
    A re-`put` keeps feedback on items whose text did not change and marks edited ones `revised`.
 5. Repeat until the parts you need are approved.
@@ -27,7 +27,7 @@ The canvas is a browser page shared with the user. Use it instead of a chat list
 |---|---|---|
 | one list (`1.` or `-`) | list, item labels `plan.1`… | react, comment, edit, add, remove items |
 | one table | table, labels `id.r2`, `id.r2.col`, `id.col` | react and comment on rows, cells, columns |
-| table whose headers carry `{check}`, `{text}`, `{number}` or `{a,b,c}` | interactive table | fill those columns |
+| table whose headers carry `{check}`, `{text}`, `{number}` or `{a,b,c}` | table with input columns | fill those columns |
 | anything else | markdown text | react, comment, rewrite |
 
 A leading `# heading` becomes the card title. Column keys are the header text in lower snake case

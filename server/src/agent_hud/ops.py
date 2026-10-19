@@ -1,12 +1,10 @@
-"""Agent write operations: the input of the `write` tool."""
-
 from enum import StrEnum
-from functools import cache
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, StringConstraints, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, StringConstraints
 
-from agent_hud.primitives.base import BoxKind, ElementId
+from agent_hud.primitives import BoxKind
+from agent_hud.primitives.base import ElementId
 
 
 class OpKind(StrEnum):
@@ -27,51 +25,46 @@ class OpBase(BaseModel):
 
 
 class PutOp(OpBase):
-    op: Literal[OpKind.PUT] = Field(description="Create or replace an element", examples=[OpKind.PUT])
-    id: ElementId = Field(description="Element id", examples=["plan"])
-    md: str = Field(description="Markdown body", examples=["## Plan\n1. Add cache\n2. Load test"])
-    title: str | None = Field(default=None, description="Card title; default is a leading heading", examples=["Plan"])
-    kind: BoxKind | None = Field(default=None, description="Force a kind; default infers", examples=[BoxKind.TEXT])
+    op: Literal[OpKind.PUT] = Field(description="Create or replace an element")
+    id: ElementId = Field(description="Element id")
+    md: str = Field(description="Markdown body")
+    title: str | None = Field(default=None, description="Card title; default is a leading heading")
+    kind: BoxKind | None = Field(default=None, description="Force a kind; default infers")
 
 
 class SetOp(OpBase):
-    op: Literal[OpKind.SET] = Field(description="Replace the text of a part", examples=[OpKind.SET])
-    at: Label = Field(description="Label of an item, row, cell or text element", examples=["plan.2"])
-    value: str = Field(description="New text; a row takes `a | b`; a check cell takes x or empty", examples=["x"])
+    op: Literal[OpKind.SET] = Field(description="Replace the text of a part")
+    at: Label = Field(description="Label of an item, row, cell or text element")
+    value: str = Field(description="New text; a row takes `a | b`; a check cell takes x or empty")
 
 
 class InsertOp(OpBase):
-    op: Literal[OpKind.INSERT] = Field(description="Insert an item or row", examples=[OpKind.INSERT])
-    at: Label = Field(description="`plan.3` inserts before item 3; `plan` appends", examples=["plan.3"])
-    value: str = Field(description="Item text, or a row as `a | b`", examples=["Write docs"])
+    op: Literal[OpKind.INSERT] = Field(description="Insert an item or row")
+    at: Label = Field(description="`plan.3` inserts before item 3; `plan` appends")
+    value: str = Field(description="Item text, or a row as `a | b`")
 
 
 class RemoveOp(OpBase):
-    op: Literal[OpKind.REMOVE] = Field(description="Remove an element, item or row", examples=[OpKind.REMOVE])
-    at: Label = Field(description="`plan` removes the element; `plan.3` one item", examples=["opts.r2"])
+    op: Literal[OpKind.REMOVE] = Field(description="Remove an element, item or row")
+    at: Label = Field(description="`plan` removes the element; `plan.3` one item")
 
 
 class ReplyOp(OpBase):
-    op: Literal[OpKind.REPLY] = Field(description="Comment on a part, such as an answer", examples=[OpKind.REPLY])
-    at: Label = Field(description="Label of the part", examples=["plan.2"])
-    text: str = Field(min_length=1, description="Comment", examples=["Reworded; see item 2"])
+    op: Literal[OpKind.REPLY] = Field(description="Comment on a part, such as an answer")
+    at: Label = Field(description="Label of the part")
+    text: str = Field(min_length=1, description="Comment")
 
 
 class LinkOp(OpBase):
-    op: Literal[OpKind.LINK] = Field(description="Draw an arrow between parts", examples=[OpKind.LINK])
-    src: Label = Field(description="Arrow tail", examples=["plan.6"])
-    dst: Label = Field(description="Arrow head", examples=["plan.1"])
-    text: str | None = Field(default=None, description="Arrow text", examples=["depends on"])
-    id: ElementId | None = Field(default=None, description="Arrow id; default generated", examples=["dep1"])
+    op: Literal[OpKind.LINK] = Field(description="Draw an arrow between parts")
+    src: Label = Field(description="Arrow tail")
+    dst: Label = Field(description="Arrow head")
+    text: str | None = Field(default=None, description="Arrow text")
+    id: ElementId | None = Field(default=None, description="Arrow id; default generated")
 
 
 class ClearOp(OpBase):
-    op: Literal[OpKind.CLEAR] = Field(description="Remove every element", examples=[OpKind.CLEAR])
+    op: Literal[OpKind.CLEAR] = Field(description="Remove every element")
 
 
 type Op = Annotated[PutOp | SetOp | InsertOp | RemoveOp | ReplyOp | LinkOp | ClearOp, Discriminator("op")]
-
-
-@cache
-def op_list() -> TypeAdapter[list[Op]]:
-    return TypeAdapter(list[Op])
