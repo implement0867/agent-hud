@@ -31,7 +31,8 @@ def build(settings: HudSettings, board: Board | None = None) -> FastMCP:
         persistence.attach()
     if settings.demo:
         seed(board)
-    last_open = last_hint = 0.0
+    last_open: float | None = None  # monotonic time; None means never
+    last_hint: float | None = None
 
     @lifespan
     async def stop_canvas(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
@@ -47,10 +48,10 @@ def build(settings: HudSettings, board: Board | None = None) -> FastMCP:
         now = time.monotonic()
         if board.viewers > 0:
             return ""
-        if settings.open_browser and now - last_open > 60 and open_browser(url):
+        if settings.open_browser and (last_open is None or now - last_open > 60) and open_browser(url):
             last_open = last_hint = now
             return f"\n(opened {url} in the browser)"
-        if now - last_hint < 300:
+        if last_hint is not None and now - last_hint < 300:
             return ""
         last_hint = now
         return f"\n(no canvas tab is open: ask the user to open {url})"
