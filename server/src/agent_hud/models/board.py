@@ -1,13 +1,15 @@
 from typing import assert_never
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
+from agent_hud.models.base import Model
 from agent_hud.models.card import Card, CardId
 from agent_hud.models.ops import Op, PutOp, RemoveOp
 
 
-class Board(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class Board(Model):
+    # apply replaces the cards; #8 makes Board frozen.
+    model_config = ConfigDict(frozen=False)
 
     cards: dict[CardId, Card] = Field(default_factory=dict)
 

@@ -1,8 +1,7 @@
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
-
+from agent_hud.models.base import Model
 from agent_hud.models.board import Board
 
 
@@ -11,15 +10,11 @@ class EventKind(StrEnum):
     send = "send"
 
 
-class BoardEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
+class BoardEvent(Model):
     kind: Literal[EventKind.board]
     board: Board
 
 
-class SendEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
+class SendEvent(Model):
     kind: Literal[EventKind.send]
     message: str
