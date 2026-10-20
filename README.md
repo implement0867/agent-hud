@@ -11,8 +11,8 @@ cd ui && npm install && npm run build && cd ..
 uv run --project server agent-hud
 ```
 
-The second command starts the MCP server on stdio and the board page at <http://127.0.0.1:7676>.
-The page shows each card and updates when the agent writes. `AGENT_HUD_PORT` sets a different port.
+The second command starts the MCP server on stdio and serves the board page, which shows each card
+and updates when the agent writes. `server/src/agent_hud/settings.py` sets the address.
 
 ## Tools
 
@@ -35,5 +35,5 @@ Requires [uv](https://docs.astral.sh/uv/) and Node 22.
 | Command | Does |
 |---|---|
 | `make check` | ruff format and lint, basedpyright; tsc, eslint, prettier |
-| `cd ui && npm run build` | build the UI into `server/src/agent_hud/static` |
-| `cd ui && npm run dev` | Vite on port 5173, with `/ws` sent to the running server |
+| `cd ui && npm run build` | build the UI into the server package |
+| `cd ui && npm run dev` | Vite dev server, which sends `/ws` to the running server |

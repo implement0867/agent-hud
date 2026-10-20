@@ -1,18 +1,26 @@
 import { useEffect, useState } from "react";
+import { z } from "zod";
 
 import { invariant } from "~/lib/invariant";
-import { boardSchema } from "~/schemas/board";
-import type { Board } from "~/schemas/board";
+import type { TBoard } from "~/schemas/board";
+import { boardEventSchema } from "~/schemas/events";
 
-export type Connection =
-  | { status: "connecting" }
-  | { status: "live"; board: Board }
-  | { status: "closed" };
+export const ConnectionStatus = z.enum(["connecting", "live", "closed"]);
+
+export type TConnecting = {
+  status: typeof ConnectionStatus.enum.connecting;
+};
+export type TLive = {
+  status: typeof ConnectionStatus.enum.live;
+  board: TBoard;
+};
+export type TClosed = { status: typeof ConnectionStatus.enum.closed };
+export type TConnection = TConnecting | TLive | TClosed;
 
 /** The board from the server, replaced each time the agent changes it. */
-export const useBoard = (): Connection => {
-  const [connection, setConnection] = useState<Connection>({
-    status: "connecting",
+export const useBoard = (): TConnection => {
+  const [connection, setConnection] = useState<TConnection>({
+    status: ConnectionStatus.enum.connecting,
   });
 
   useEffect(() => {
@@ -25,15 +33,15 @@ export const useBoard = (): Connection => {
       "message",
       (event: MessageEvent<unknown>) => {
         invariant(typeof event.data === "string", "the server sends text");
-        const board = boardSchema.parse(JSON.parse(event.data));
-        setConnection({ status: "live", board });
+        const { board } = boardEventSchema.parse(JSON.parse(event.data));
+        setConnection({ status: ConnectionStatus.enum.live, board });
       },
       { signal },
     );
     socket.addEventListener(
       "close",
       () => {
-        setConnection({ status: "closed" });
+        setConnection({ status: ConnectionStatus.enum.closed });
       },
       { signal },
     );

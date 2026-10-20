@@ -7,6 +7,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_hud.changes import Changes
 from agent_hud.models.board import Board
+from agent_hud.models.events import BoardEvent, EventKind
 
 
 def require_same_origin(websocket: WebSocket) -> None:
@@ -24,7 +25,7 @@ def create_app(board: Board, changes: Changes, static_dir: Path) -> FastAPI:
     async def send_boards(websocket: WebSocket) -> None:
         while True:
             changed = changes.next
-            await websocket.send_text(board.model_dump_json())
+            await websocket.send_text(BoardEvent(kind=EventKind.board, board=board).model_dump_json())
             await changed.wait()
 
     @app.websocket("/ws", dependencies=[Depends(require_same_origin)])

@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agent-hud = "agent_hud.server:main"
+agent-hud = "agent_hud.main:main"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
