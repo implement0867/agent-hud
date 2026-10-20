@@ -1,6 +1,7 @@
 import asyncio
 import socket
 from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from typing import Any
 
 import pytest
@@ -10,25 +11,26 @@ from fastmcp import Client
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.provisional import domains
+from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
 from agent_hud.deps import get_store
-from agent_hud.models.events import BoardChanged, EventKind, MessageSent
-from agent_hud.models.ops import Op
+from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent
+from agent_hud.models.ops import TOp
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
 from agent_hud.web import create_app
 from tests.factories import as_json
-from tests.strategies import card_ids, ops
+from tests.strategies import blanks, card_ids, messages, ops
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
 @st.composite
-def writes(draw: st.DrawFn) -> list[list[Op]]:
+def writes(draw: st.DrawFn) -> list[list[TOp]]:
     """The ops of write calls on one pool of ids, so that removes hit cards that exist and cards that do not."""
     ids = st.sampled_from(draw(st.lists(card_ids(), min_size=1)))
     return draw(st.lists(st.lists(ops(ids), min_size=1)))
@@ -47,7 +49,10 @@ async def address(tmp_path_factory: pytest.TempPathFactory) -> AsyncIterator[tup
         get_settings.cache_clear()
         app = create_app()
     get_settings.cache_clear()
-    sock = socket.create_server(("127.0.0.1", 0))
+    # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen()
     server = uvicorn.Server(uvicorn.Config(app, log_config=None))
     task = asyncio.create_task(server.serve(sockets=[sock]))
     yield sock.getsockname()
@@ -69,6 +74,16 @@ async def page(address: tuple[str, int], store: BoardStore) -> AsyncIterator[Cli
     async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
         await page.recv()
         yield page
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def listeners(address: tuple[str, int], store: BoardStore) -> AsyncIterator[list[ClientConnection]]:
+    """Two agents' sockets for the user's messages, at the URL that the listen tool returns."""
+    host, port = address
+    async with Client(f"http://{host}:{port}/mcp/") as remote:
+        url = (await remote.call_tool("listen", {})).data
+    async with AsyncExitStack() as stack:
+        yield [await stack.enter_async_context(connect(url, proxy=None)) for _ in range(2)]
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -100,7 +115,7 @@ async def test_page_gets_the_board_on_connect(address: tuple[str, int], store: B
 @given(writes())
 @settings(deadline=None)
 async def test_page_gets_the_board_after_each_accepted_write(
-    page: ClientConnection, agent: Client[Any], store: BoardStore, writes: list[list[Op]]
+    page: ClientConnection, agent: Client[Any], store: BoardStore, writes: list[list[TOp]]
 ) -> None:
     """Assemble: a page on the app.
     Act: the agent writes each batch of ops.
@@ -112,41 +127,68 @@ async def test_page_gets_the_board_after_each_accepted_write(
                 assert BoardChanged.model_validate_json(await page.recv()).board == store.read()
 
 
+@pytest.mark.parametrize("path", ["/ws", "/agent"])
 @given(host_names())
 @settings(deadline=None)
-async def test_pages_of_other_sites_cannot_connect(address: tuple[str, int], domain: str) -> None:
+async def test_pages_of_other_sites_cannot_connect(address: tuple[str, int], path: str, domain: str) -> None:
     """Assemble: the app.
     Act: open the websocket with the Origin of another site.
     Assert: the handshake fails."""
     host, port = address
     with pytest.raises(InvalidStatus):
-        await connect(f"ws://{host}:{port}/ws", origin=f"http://{domain}", proxy=None)
+        await connect(f"ws://{host}:{port}{path}", origin=f"http://{domain}", proxy=None)
 
 
+@pytest.mark.parametrize("path", ["/ws", "/agent"])
 @given(host_names())
 @settings(deadline=None)
-async def test_other_host_names_cannot_connect(address: tuple[str, int], domain: str) -> None:
+async def test_other_host_names_cannot_connect(address: tuple[str, int], path: str, domain: str) -> None:
     """Assemble: the app.
     Act: open the websocket by another host name with its own Origin, as a DNS rebinding page does.
     Assert: the handshake fails."""
     host, port = address
     with pytest.raises(InvalidStatus):
-        await connect(f"ws://{domain}:{port}/ws", host=host, origin=f"http://{domain}:{port}", proxy=None)
+        await connect(f"ws://{domain}:{port}{path}", host=host, origin=f"http://{domain}:{port}", proxy=None)
 
 
-@given(st.lists(st.lists(st.text(), min_size=1)))
+@given(st.lists(st.lists(messages(), min_size=1)))
 @settings(deadline=None)
 async def test_agent_gets_each_sent_message_once_in_order(
-    page: ClientConnection, agent: Client[Any], batches: list[list[str]]
+    page: ClientConnection, listeners: list[ClientConnection], batches: list[list[str]]
 ) -> None:
-    """Assemble: a page on the app.
-    Act: for each batch, the page sends its messages, then the agent waits until it has as many messages.
-    Assert: each batch reaches the agent in the order sent, each message once."""
+    """Assemble: a page and two agents' listeners on the app.
+    Act: for each batch, the page sends its messages.
+    Assert: the page gets a receipt for each message, and each listener gets each message once, in the order sent."""
     async with asyncio.timeout(5):
         for batch in batches:
             for message in batch:
                 await page.send(MessageSent(kind=EventKind.message_sent, message=message).model_dump_json())
-            received: list[str] = []
-            while len(received) < len(batch):
-                received += (await agent.call_tool("wait", {})).data
-            assert received == batch
+            for _ in batch:
+                MessageReceived.model_validate_json(await page.recv())
+            for listener in listeners:
+                assert [MessageSent.model_validate_json(await listener.recv()).message for _ in batch] == batch
+
+
+@given(st.builds(BoardStore), messages(), st.lists(messages()))
+async def test_a_listener_gets_the_messages_sent_after_the_last_listener_stopped(
+    new_store: BoardStore, first: str, rest: list[str]
+) -> None:
+    """Assemble: a store whose only listener got one message and stopped.
+    Act: add more messages, then listen again.
+    Assert: the new listener has them in the order added."""
+    with new_store.listen() as listener:
+        new_store.add_message(first)
+        assert listener.get_nowait() == first
+    for message in rest:
+        new_store.add_message(message)
+    with new_store.listen() as listener:
+        assert [listener.get_nowait() for _ in rest] == rest
+
+
+@given(blanks())
+async def test_a_sent_message_needs_a_character_that_is_not_white_space(blank: str) -> None:
+    """Assemble: text of white space only, or no text.
+    Act: make a MessageSent event of it.
+    Assert: ValidationError."""
+    with pytest.raises(ValidationError):
+        MessageSent(kind=EventKind.message_sent, message=blank)

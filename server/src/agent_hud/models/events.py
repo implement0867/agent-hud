@@ -1,13 +1,18 @@
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
+
+from pydantic import StringConstraints
 
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
+
+type TMessage = Annotated[str, StringConstraints(pattern=r"\S")]
 
 
 class EventKind(StrEnum):
     board_changed = "board_changed"
     message_sent = "message_sent"
+    message_received = "message_received"
 
 
 class BoardChanged(Model):
@@ -17,4 +22,8 @@ class BoardChanged(Model):
 
 class MessageSent(Model):
     kind: Literal[EventKind.message_sent]
-    message: str
+    message: TMessage
+
+
+class MessageReceived(Model):
+    kind: Literal[EventKind.message_received]

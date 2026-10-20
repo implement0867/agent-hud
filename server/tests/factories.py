@@ -3,7 +3,7 @@ from typing import Any
 from fastmcp import Client
 
 from agent_hud.models.board import Board
-from agent_hud.models.ops import Op, OpKind, PutOp, RemoveOp
+from agent_hud.models.ops import OpKind, PutOp, RemoveOp, TOp
 
 
 def put(card_id: str, md: str) -> PutOp:
@@ -14,7 +14,7 @@ def remove(card_id: str) -> RemoveOp:
     return RemoveOp(op=OpKind.remove, id=card_id)
 
 
-def as_json(*ops: Op) -> list[dict[str, Any]]:
+def as_json(*ops: TOp) -> list[dict[str, Any]]:
     """The ops as an MCP client sends them."""
     return [op.model_dump(mode="json") for op in ops]
 
