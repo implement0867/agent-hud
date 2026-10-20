@@ -25,7 +25,10 @@ def build() -> FastMCP:
         return store.read()
 
     async def wait(store: BoardStore = McpStoreDep) -> list[str]:
-        """Wait until the user presses Send on the board page. Returns the messages sent since the last wait."""
+        """Wait for the user's message. The board page lets the user send only while this waits.
+
+        Returns the messages sent since the last wait.
+        """
         return await store.wait_for_messages()
 
     mcp.tool(write)
