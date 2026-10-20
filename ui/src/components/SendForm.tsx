@@ -4,15 +4,14 @@ import type { TBoardSocket } from "~/api/boardSocket";
 import { ConnectionStatus } from "~/hooks/useBoard";
 import type { TConnection } from "~/hooks/useBoard";
 import { invariant } from "~/lib/invariant";
-import { Turn, messageSchema } from "~/schemas/events";
+import { messageSchema } from "~/schemas/events";
 
-/** Send is on while the page is live, the agent waits, and the message has text. The message stays until the server confirms it. */
+/** Send is on while the page is live and the message has text. The message stays until the server confirms it. */
 export const SendForm = ({ connection }: { connection: TConnection }) => {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const send =
     connection.status === ConnectionStatus.enum.live &&
-    connection.view.turn === Turn.enum.user &&
     !sending &&
     messageSchema.safeParse(message).success
       ? connection.send

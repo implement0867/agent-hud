@@ -3,16 +3,16 @@ from typing import assert_never
 from pydantic import ConfigDict, Field
 
 from agent_hud.models.base import Model
-from agent_hud.models.card import Card, CardId
-from agent_hud.models.ops import Op, PutOp, RemoveOp
+from agent_hud.models.card import Card, TCardId
+from agent_hud.models.ops import PutOp, RemoveOp, TOp
 
 
 class Board(Model):
     model_config = ConfigDict(frozen=False)
 
-    cards: dict[CardId, Card] = Field(default_factory=dict)
+    cards: dict[TCardId, Card] = Field(default_factory=dict)
 
-    def apply(self, ops: list[Op]) -> None:
+    def apply(self, ops: list[TOp]) -> None:
         """Apply the ops in order. A failing op raises ValueError, and no op applies."""
         cards = dict(self.cards)
         for n, op in enumerate(ops, start=1):

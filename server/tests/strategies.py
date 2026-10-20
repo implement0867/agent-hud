@@ -2,26 +2,26 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
 from agent_hud.models.board import Board
-from agent_hud.models.card import Card, CardId
-from agent_hud.models.events import Message
-from agent_hud.models.ops import Op
+from agent_hud.models.card import Card, TCardId
+from agent_hud.models.events import TMessage
+from agent_hud.models.ops import TOp
 from tests.factories import put, remove
 
 
 def card_ids() -> st.SearchStrategy[str]:
-    return st.from_regex(TypeAdapter(CardId).json_schema()["pattern"], fullmatch=True)
+    return st.from_regex(TypeAdapter(TCardId).json_schema()["pattern"], fullmatch=True)
 
 
 def boards(ids: st.SearchStrategy[str]) -> st.SearchStrategy[Board]:
     return st.builds(Board, cards=st.dictionaries(ids, st.builds(Card, md=st.text(min_size=1))))
 
 
-def ops(ids: st.SearchStrategy[str]) -> st.SearchStrategy[Op]:
+def ops(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TOp]:
     return st.one_of(st.builds(put, ids, st.text(min_size=1)), st.builds(remove, ids))
 
 
 def messages() -> st.SearchStrategy[str]:
-    return st.from_regex(TypeAdapter(Message).json_schema()["pattern"])
+    return st.from_regex(TypeAdapter(TMessage).json_schema()["pattern"])
 
 
 def blanks() -> st.SearchStrategy[str]:

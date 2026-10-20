@@ -5,15 +5,21 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_hud.deps import SameOriginDep, StoreDep
-from agent_hud.models.events import EventKind, MessageReceived, MessageSent, ViewChanged
+from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
 
 
-async def send_views(websocket: WebSocket, store: BoardStore) -> None:
-    async for view in store.watch():
-        await websocket.send_text(ViewChanged(kind=EventKind.view_changed, view=view).model_dump_json())
+async def send_boards(websocket: WebSocket, store: BoardStore) -> None:
+    async for board in store.watch():
+        await websocket.send_text(BoardChanged(kind=EventKind.board_changed, board=board).model_dump_json())
+
+
+async def send_messages(websocket: WebSocket, store: BoardStore) -> None:
+    while True:
+        for message in await store.wait_for_messages():
+            await websocket.send_text(MessageSent(kind=EventKind.message_sent, message=message).model_dump_json())
 
 
 def create_app() -> FastAPI:
@@ -25,13 +31,23 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws", dependencies=[SameOriginDep])
     async def board_updates(websocket: WebSocket, store: StoreDep) -> None:
-        """Send the view on connect and after each change, and take and confirm the page's messages, until it disconnects."""
+        """Send the board on connect and after each change, and take and confirm the page's messages, until it disconnects."""
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
-            sender = tg.create_task(send_views(websocket, store))
+            sender = tg.create_task(send_boards(websocket, store))
             async for text in websocket.iter_text():
                 store.add_message(MessageSent.model_validate_json(text).message)
                 await websocket.send_text(MessageReceived(kind=EventKind.message_received).model_dump_json())
+            sender.cancel()
+
+    @app.websocket("/agent", dependencies=[SameOriginDep])
+    async def agent_messages(websocket: WebSocket, store: StoreDep) -> None:
+        """Send each message from the page to the agent's monitor once, until it disconnects."""
+        await websocket.accept()
+        async with asyncio.TaskGroup() as tg:
+            sender = tg.create_task(send_messages(websocket, store))
+            # The monitor sends nothing, so this returns when it disconnects.
+            await websocket.receive()
             sender.cancel()
 
     app.mount("/mcp", mcp_app)

@@ -5,7 +5,7 @@ import {
   messageSentSchema,
   serverEventSchema,
 } from "~/schemas/events";
-import type { TView } from "~/schemas/events";
+import type { TBoard } from "~/schemas/board";
 
 export type TBoardSocket = {
   /** Resolves true when the server confirms the message, or false when the connection closes first. */
@@ -13,9 +13,9 @@ export type TBoardSocket = {
   close: () => void;
 };
 
-/** The page's websocket. The server sends the view on connect and after each change. */
+/** The page's websocket. The server sends the board on connect and after each change. */
 export const openBoardSocket = (
-  onView: (view: TView) => void,
+  onBoard: (board: TBoard) => void,
   onClose: () => void,
 ): TBoardSocket => {
   const url = new URL("/ws", window.location.href);
@@ -31,8 +31,8 @@ export const openBoardSocket = (
       invariant(typeof message.data === "string", "the server sends text");
       const event = serverEventSchema.parse(JSON.parse(message.data));
       switch (event.kind) {
-        case EventKind.enum.view_changed:
-          onView(event.view);
+        case EventKind.enum.board_changed:
+          onBoard(event.board);
           return;
         case EventKind.enum.message_received: {
           const confirm = unconfirmed.shift();
