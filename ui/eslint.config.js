@@ -42,6 +42,11 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": "error",
       "@typescript-eslint/consistent-type-definitions": ["error", "type"],
       "@typescript-eslint/switch-exhaustiveness-check": "error",
+      "@typescript-eslint/naming-convention": [
+        "error",
+        { selector: "typeAlias", format: ["PascalCase"], prefix: ["T"] },
+        { selector: "interface", format: ["PascalCase"], prefix: ["I"] },
+      ],
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },

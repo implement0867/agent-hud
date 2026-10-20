@@ -5,20 +5,18 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
+from agent_hud.deps import get_store
 from agent_hud.models.board import Board
 from agent_hud.models.ops import Op
 from agent_hud.server import build
-from tests.factories import as_json, put, remove
+from tests.factories import as_json, put, read_board, remove
 
 
 @pytest.fixture
 async def client() -> AsyncIterator[Client[Any]]:
-    async with Client(build(Board())) as client:
+    get_store.cache_clear()
+    async with Client(build()) as client:
         yield client
-
-
-async def read(client: Client[Any]) -> Board:
-    return Board.model_validate((await client.call_tool("read", {})).structured_content)
 
 
 async def test_read_returns_the_board_that_write_left(client: Client[Any]) -> None:
@@ -29,7 +27,7 @@ async def test_read_returns_the_board_that_write_left(client: Client[Any]) -> No
     expected = Board()
     expected.apply(ops)
     await client.call_tool("write", {"ops": as_json(*ops)})
-    assert await read(client) == expected
+    assert await read_board(client) == expected
 
 
 @pytest.mark.parametrize(
@@ -42,10 +40,10 @@ async def test_rejected_write_changes_nothing(client: Client[Any], ops: list[dic
     Act: send a write that the server rejects.
     Assert: ToolError, and read returns the same board as before."""
     await client.call_tool("write", {"ops": as_json(put("a", "x"))})
-    before = await read(client)
+    before = await read_board(client)
     with pytest.raises(ToolError):
         await client.call_tool("write", {"ops": ops})
-    assert await read(client) == before, "a rejected write must leave the board as it was"
+    assert await read_board(client) == before, "a rejected write must leave the board as it was"
 
 
 async def test_only_read_is_read_only(client: Client[Any]) -> None:

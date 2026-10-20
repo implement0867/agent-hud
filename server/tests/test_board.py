@@ -3,23 +3,18 @@ from typing import assert_never
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import TypeAdapter
 
 from agent_hud.models.board import Board
-from agent_hud.models.card import Card, CardId
+from agent_hud.models.card import Card
 from agent_hud.models.ops import Op, PutOp, RemoveOp
-from tests.factories import put, remove
+from tests.strategies import boards, card_ids, ops
 
 
 @st.composite
 def boards_and_ops(draw: st.DrawFn) -> tuple[Board, list[Op]]:
     """A board and ops that share one pool of generated ids, so that ops hit cards that exist and cards that do not."""
-    pool = draw(st.lists(st.from_regex(TypeAdapter(CardId).json_schema()["pattern"], fullmatch=True), min_size=1))
-    ids = st.sampled_from(pool)
-    mds = st.text(min_size=1)
-    board = Board(cards=draw(st.dictionaries(ids, st.builds(Card, md=mds))))
-    ops = draw(st.lists(st.one_of(st.builds(put, ids, mds), st.builds(remove, ids))))
-    return board, ops
+    ids = st.sampled_from(draw(st.lists(card_ids(), min_size=1)))
+    return draw(boards(ids)), draw(st.lists(ops(ids)))
 
 
 def dict_semantics(cards: dict[str, Card], ops: list[Op]) -> dict[str, Card]:
