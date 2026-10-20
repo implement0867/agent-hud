@@ -24,6 +24,11 @@ def build() -> FastMCP:
         """Every card on the board with its markdown."""
         return store.read()
 
+    async def wait(store: BoardStore = McpStoreDep) -> list[str]:
+        """Wait until the user presses Send on the board page. Returns the messages sent since the last wait."""
+        return await store.wait_for_messages()
+
     mcp.tool(write)
     mcp.tool(read, annotations=ToolAnnotations(read_only_hint=True))
+    mcp.tool(wait)
     return mcp

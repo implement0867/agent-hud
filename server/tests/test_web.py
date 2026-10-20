@@ -14,7 +14,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
 from agent_hud.deps import get_store
-from agent_hud.models.events import BoardEvent
+from agent_hud.models.events import BoardEvent, EventKind, SendEvent
 from agent_hud.models.ops import Op
 from agent_hud.server import build
 from agent_hud.settings import get_settings
@@ -112,3 +112,26 @@ async def test_other_host_names_cannot_connect(address: tuple[str, int], domain:
     host, port = address
     with pytest.raises(InvalidStatus):
         await connect(f"ws://{domain}:{port}/ws", host=host, origin=f"http://{domain}:{port}", proxy=None)
+
+
+@given(st.lists(st.lists(st.text(), min_size=1)))
+@settings(deadline=None)
+async def test_agent_gets_each_sent_message_once_in_order(
+    address: tuple[str, int], agent: Client[Any], batches: list[list[str]]
+) -> None:
+    """Assemble: a new store, and a page from the app's origin.
+    Act: for each batch, the page sends its messages, then the agent waits until it has as many messages.
+    Assert: each batch reaches the agent in the order sent, each message once."""
+    get_store.cache_clear()
+    host, port = address
+    async with (
+        asyncio.timeout(5),
+        connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page,
+    ):
+        for batch in batches:
+            for message in batch:
+                await page.send(SendEvent(kind=EventKind.send, message=message).model_dump_json())
+            received: list[str] = []
+            while len(received) < len(batch):
+                received += (await agent.call_tool("wait", {})).data
+            assert received == batch

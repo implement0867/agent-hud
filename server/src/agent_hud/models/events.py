@@ -8,6 +8,7 @@ from agent_hud.models.board import Board
 
 class EventKind(StrEnum):
     board = "board"
+    send = "send"
 
 
 class BoardEvent(BaseModel):
@@ -15,3 +16,10 @@ class BoardEvent(BaseModel):
 
     kind: Literal[EventKind.board]
     board: Board
+
+
+class SendEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal[EventKind.send]
+    message: str

@@ -49,7 +49,7 @@ async def test_rejected_write_changes_nothing(client: Client[Any], ops: list[dic
 async def test_only_read_is_read_only(client: Client[Any]) -> None:
     """Assemble: a client connected to a new server.
     Act: list the tools.
-    Assert: read has the read-only hint and write does not."""
+    Assert: read has the read-only hint, and write and wait do not."""
     tools = await client.list_tools()
     hints = {tool.name: tool.annotations is not None and tool.annotations.read_only_hint for tool in tools}
-    assert hints == {"write": False, "read": True}
+    assert hints == {"write": False, "read": True, "wait": False}

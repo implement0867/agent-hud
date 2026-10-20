@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_hud.deps import SameOriginDep, StoreDep
-from agent_hud.models.events import BoardEvent, EventKind
+from agent_hud.models.events import BoardEvent, EventKind, SendEvent
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
@@ -25,12 +25,12 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws", dependencies=[SameOriginDep])
     async def board_updates(websocket: WebSocket, store: StoreDep) -> None:
-        """Send the board on connect and after each change, until the page disconnects."""
+        """Send the board on connect and after each change, and take the page's messages, until it disconnects."""
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
             sender = tg.create_task(send_boards(websocket, store))
-            # The page sends nothing yet, so the first message is its disconnect.
-            await websocket.receive()
+            async for text in websocket.iter_text():
+                store.add_message(SendEvent.model_validate_json(text).message)
             sender.cancel()
 
     app.mount("/mcp", mcp_app)

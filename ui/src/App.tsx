@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
 
@@ -24,13 +25,48 @@ const Cards = ({ board }: { board: TBoard }) => {
   return cards.map(([id, card]) => <CardView key={id} id={id} card={card} />);
 };
 
+const SendForm = ({ send }: { send: (message: string) => void }) => {
+  const [message, setMessage] = useState("");
+  return (
+    <form
+      className="flex gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        send(message);
+        setMessage("");
+      }}
+    >
+      <textarea
+        className="flex-1 rounded-lg border border-stone-300 bg-white p-2"
+        placeholder="Message to the agent"
+        aria-label="Message to the agent"
+        value={message}
+        onChange={(event) => {
+          setMessage(event.target.value);
+        }}
+      />
+      <button
+        type="submit"
+        className="rounded-lg bg-stone-800 px-4 text-white hover:bg-stone-700"
+      >
+        Send
+      </button>
+    </form>
+  );
+};
+
 const BoardView = () => {
   const connection = useBoard();
   switch (connection.status) {
     case ConnectionStatus.enum.connecting:
       return <Notice>Connecting to the agent…</Notice>;
     case ConnectionStatus.enum.live:
-      return <Cards board={connection.board} />;
+      return (
+        <>
+          <Cards board={connection.board} />
+          <SendForm send={connection.send} />
+        </>
+      );
     case ConnectionStatus.enum.closed:
       return (
         <Notice>
