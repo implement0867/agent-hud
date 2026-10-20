@@ -7,7 +7,7 @@ from agent_hud.models.ops import Op
 
 
 class BoardStore:
-    """The one owner of the board, the agent's waits and the user's sent messages, on the event loop. Readers get copies."""
+    """The one owner of the board and of the user's sent messages, on the event loop. Readers get copies."""
 
     def __init__(self) -> None:
         self._board = Board()

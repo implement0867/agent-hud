@@ -24,7 +24,7 @@ def create_app() -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     @app.websocket("/ws", dependencies=[SameOriginDep])
-    async def page_events(websocket: WebSocket, store: StoreDep) -> None:
+    async def board_updates(websocket: WebSocket, store: StoreDep) -> None:
         """Send the view on connect and after each change, and take and confirm the page's messages, until it disconnects."""
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:

@@ -67,7 +67,7 @@ def store() -> BoardStore:
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def page(address: tuple[str, int], store: BoardStore) -> AsyncIterator[ClientConnection]:
-    """A page from the app's origin that has read the view it gets on connect. Each test reads every event it causes."""
+    """A page from the app's origin that has read the board it gets on connect."""
     host, port = address
     async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
         await page.recv()
@@ -90,10 +90,10 @@ async def test_app_serves_the_tools_over_http(address: tuple[str, int], agent: C
         assert await remote.list_tools() == await agent.list_tools()
 
 
-async def test_page_gets_the_view_on_connect(address: tuple[str, int], store: BoardStore) -> None:
+async def test_page_gets_the_board_on_connect(address: tuple[str, int], store: BoardStore) -> None:
     """Assemble: the app.
     Act: open a page from the app's origin.
-    Assert: the first event carries the stored view."""
+    Assert: the first event carries the stored board."""
     host, port = address
     async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
         assert ViewChanged.model_validate_json(await page.recv()).view == store.view()
@@ -102,12 +102,12 @@ async def test_page_gets_the_view_on_connect(address: tuple[str, int], store: Bo
 # Examples go over sockets, so their time varies more than the default deadline allows.
 @given(writes())
 @settings(deadline=None)
-async def test_page_gets_the_view_after_each_accepted_write(
+async def test_page_gets_the_board_after_each_accepted_write(
     page: ClientConnection, agent: Client[Any], store: BoardStore, writes: list[list[Op]]
 ) -> None:
     """Assemble: a page on the app.
     Act: the agent writes each batch of ops.
-    Assert: after each accepted write, the page gets the stored view."""
+    Assert: after each accepted write, the page gets the stored board."""
     async with asyncio.timeout(5):
         for batch in writes:
             result = await agent.call_tool("write", {"ops": as_json(*batch)}, raise_on_error=False)
@@ -139,7 +139,7 @@ async def test_other_host_names_cannot_connect(address: tuple[str, int], domain:
 
 @given(st.lists(st.lists(messages(), min_size=1)))
 @settings(deadline=None)
-async def test_agent_gets_the_messages_sent_since_its_last_wait(
+async def test_agent_gets_each_sent_message_once_in_order(
     page: ClientConnection, agent: Client[Any], store: BoardStore, batches: list[list[str]]
 ) -> None:
     """Assemble: a page on the app.

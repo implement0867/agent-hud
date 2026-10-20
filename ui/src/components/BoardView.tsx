@@ -4,6 +4,8 @@ import { SendForm } from "~/components/SendForm";
 import { ConnectionStatus, useBoard } from "~/hooks/useBoard";
 import type { TConnection } from "~/hooks/useBoard";
 import { assertNever } from "~/lib/assertNever";
+import { Turn } from "~/schemas/events";
+import type { TTurn } from "~/schemas/events";
 
 const BoardContent = ({ connection }: { connection: TConnection }) => {
   switch (connection.status) {
@@ -22,13 +24,27 @@ const BoardContent = ({ connection }: { connection: TConnection }) => {
   }
 };
 
-/** The form stays mounted in every state, so its draft stays when the connection changes. */
+const TurnNotice = ({ turn }: { turn: TTurn }) => {
+  switch (turn) {
+    case Turn.enum.agent:
+      return <Notice>The agent is working. You can send when it waits.</Notice>;
+    case Turn.enum.user:
+      return <Notice>The agent waits for your message.</Notice>;
+    default:
+      return assertNever(turn);
+  }
+};
+
+/** The form stays mounted in every state, so its text stays when the connection changes. */
 export const BoardView = () => {
   const connection = useBoard();
   return (
     <>
       <BoardContent connection={connection} />
       <SendForm connection={connection} />
+      {connection.status === ConnectionStatus.enum.live ? (
+        <TurnNotice turn={connection.view.turn} />
+      ) : null}
     </>
   );
 };
