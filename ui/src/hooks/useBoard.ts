@@ -7,15 +7,10 @@ import { boardEventSchema } from "~/schemas/events";
 
 export const ConnectionStatus = z.enum(["connecting", "live", "closed"]);
 
-export type TConnecting = {
-  status: typeof ConnectionStatus.enum.connecting;
-};
-export type TLive = {
-  status: typeof ConnectionStatus.enum.live;
-  board: TBoard;
-};
-export type TClosed = { status: typeof ConnectionStatus.enum.closed };
-export type TConnection = TConnecting | TLive | TClosed;
+export type TConnection =
+  | { status: typeof ConnectionStatus.enum.connecting }
+  | { status: typeof ConnectionStatus.enum.live; board: TBoard }
+  | { status: typeof ConnectionStatus.enum.closed };
 
 /** The board from the server, replaced each time the agent changes it. */
 export const useBoard = (): TConnection => {

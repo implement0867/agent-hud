@@ -1,20 +1,14 @@
 import asyncio
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, WebSocket, WebSocketException, status
+from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_hud.changes import Changes
+from agent_hud.deps import SameOriginDep
 from agent_hud.models.board import Board
 from agent_hud.models.events import BoardEvent, EventKind
-
-
-def require_same_origin(websocket: WebSocket) -> None:
-    """Websockets skip CORS, so any site open in the browser could read the board without this check."""
-    origin = websocket.headers.get("origin")
-    if origin not in (None, f"http://{websocket.headers['host']}"):
-        raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"origin {origin} is not allowed")
 
 
 def create_app(board: Board, changes: Changes, static_dir: Path) -> FastAPI:
@@ -28,7 +22,7 @@ def create_app(board: Board, changes: Changes, static_dir: Path) -> FastAPI:
             await websocket.send_text(BoardEvent(kind=EventKind.board, board=board).model_dump_json())
             await changed.wait()
 
-    @app.websocket("/ws", dependencies=[Depends(require_same_origin)])
+    @app.websocket("/ws", dependencies=[SameOriginDep])
     async def board_updates(websocket: WebSocket) -> None:
         """Send the board on connect and after each change, until the page disconnects."""
         await websocket.accept()

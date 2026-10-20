@@ -5,7 +5,7 @@ import uvicorn
 from agent_hud.changes import Changes
 from agent_hud.models.board import Board
 from agent_hud.server import build
-from agent_hud.settings import Settings
+from agent_hud.settings import Settings, get_settings
 from agent_hud.web import create_app
 
 
@@ -23,4 +23,4 @@ async def serve(settings: Settings) -> None:
 
 
 def main() -> None:
-    asyncio.run(serve(Settings()))
+    asyncio.run(serve(get_settings()))
