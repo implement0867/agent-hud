@@ -8,7 +8,6 @@ from agent_hud.models.ops import Op, PutOp, RemoveOp
 
 
 class Board(Model):
-    # apply replaces the cards; #8 makes Board frozen.
     model_config = ConfigDict(frozen=False)
 
     cards: dict[CardId, Card] = Field(default_factory=dict)

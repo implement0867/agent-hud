@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import { invariant } from "~/lib/invariant";
 import type { TBoard } from "~/schemas/board";
-import { EventKind, boardEventSchema } from "~/schemas/events";
-import type { TSendEvent } from "~/schemas/events";
+import { EventKind, boardChangedSchema } from "~/schemas/events";
+import type { TMessageSent } from "~/schemas/events";
 
 export const ConnectionStatus = z.enum(["connecting", "live", "closed"]);
 
@@ -30,14 +30,17 @@ export const useBoard = (): TConnection => {
     const listening = new AbortController();
     const { signal } = listening;
     const send = (message: string) => {
-      const event: TSendEvent = { kind: EventKind.enum.send, message };
+      const event: TMessageSent = {
+        kind: EventKind.enum.message_sent,
+        message,
+      };
       socket.send(JSON.stringify(event));
     };
     socket.addEventListener(
       "message",
       (event: MessageEvent<unknown>) => {
         invariant(typeof event.data === "string", "the server sends text");
-        const { board } = boardEventSchema.parse(JSON.parse(event.data));
+        const { board } = boardChangedSchema.parse(JSON.parse(event.data));
         setConnection({ status: ConnectionStatus.enum.live, board, send });
       },
       { signal },

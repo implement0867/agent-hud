@@ -10,14 +10,15 @@ from fastmcp import Client
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.provisional import domains
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
 from agent_hud.deps import get_store
-from agent_hud.models.events import BoardEvent, EventKind, SendEvent
+from agent_hud.models.events import BoardChanged, EventKind, MessageSent
 from agent_hud.models.ops import Op
 from agent_hud.server import build
 from agent_hud.settings import get_settings
+from agent_hud.store import BoardStore
 from agent_hud.web import create_app
 from tests.factories import as_json
 from tests.strategies import card_ids, ops
@@ -54,6 +55,22 @@ async def address(tmp_path_factory: pytest.TempPathFactory) -> AsyncIterator[tup
     await task
 
 
+@pytest.fixture(scope="module")
+def store() -> BoardStore:
+    """A new store for the module. The app and the agent get the same one from get_store."""
+    get_store.cache_clear()
+    return get_store()
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def page(address: tuple[str, int], store: BoardStore) -> AsyncIterator[ClientConnection]:
+    """A page from the app's origin that has read the board it gets on connect."""
+    host, port = address
+    async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
+        await page.recv()
+        yield page
+
+
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def agent() -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same store as the app. MCP over HTTP is slower per call."""
@@ -70,26 +87,29 @@ async def test_app_serves_the_tools_over_http(address: tuple[str, int], agent: C
         assert await remote.list_tools() == await agent.list_tools()
 
 
+async def test_page_gets_the_board_on_connect(address: tuple[str, int], store: BoardStore) -> None:
+    """Assemble: the app.
+    Act: open a page from the app's origin.
+    Assert: the first event carries the stored board."""
+    host, port = address
+    async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
+        assert BoardChanged.model_validate_json(await page.recv()).board == store.read()
+
+
 # Examples go over sockets, so their time varies more than the default deadline allows.
 @given(writes())
 @settings(deadline=None)
-async def test_page_gets_the_board_on_connect_and_after_each_accepted_write(
-    address: tuple[str, int], agent: Client[Any], writes: list[list[Op]]
+async def test_page_gets_the_board_after_each_accepted_write(
+    page: ClientConnection, agent: Client[Any], store: BoardStore, writes: list[list[Op]]
 ) -> None:
-    """Assemble: a new board, and a page from the app's origin.
+    """Assemble: a page on the app.
     Act: the agent writes each batch of ops.
-    Assert: the page gets the stored board on connect and after each accepted write."""
-    get_store.cache_clear()
-    host, port = address
-    async with (
-        asyncio.timeout(5),
-        connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page,
-    ):
-        assert BoardEvent.model_validate_json(await page.recv()).board == get_store().read()
+    Assert: after each accepted write, the page gets the stored board."""
+    async with asyncio.timeout(5):
         for batch in writes:
             result = await agent.call_tool("write", {"ops": as_json(*batch)}, raise_on_error=False)
             if not result.is_error:
-                assert BoardEvent.model_validate_json(await page.recv()).board == get_store().read()
+                assert BoardChanged.model_validate_json(await page.recv()).board == store.read()
 
 
 @given(host_names())
@@ -117,20 +137,15 @@ async def test_other_host_names_cannot_connect(address: tuple[str, int], domain:
 @given(st.lists(st.lists(st.text(), min_size=1)))
 @settings(deadline=None)
 async def test_agent_gets_each_sent_message_once_in_order(
-    address: tuple[str, int], agent: Client[Any], batches: list[list[str]]
+    page: ClientConnection, agent: Client[Any], batches: list[list[str]]
 ) -> None:
-    """Assemble: a new store, and a page from the app's origin.
+    """Assemble: a page on the app.
     Act: for each batch, the page sends its messages, then the agent waits until it has as many messages.
     Assert: each batch reaches the agent in the order sent, each message once."""
-    get_store.cache_clear()
-    host, port = address
-    async with (
-        asyncio.timeout(5),
-        connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page,
-    ):
+    async with asyncio.timeout(5):
         for batch in batches:
             for message in batch:
-                await page.send(SendEvent(kind=EventKind.send, message=message).model_dump_json())
+                await page.send(MessageSent(kind=EventKind.message_sent, message=message).model_dump_json())
             received: list[str] = []
             while len(received) < len(batch):
                 received += (await agent.call_tool("wait", {})).data

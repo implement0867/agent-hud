@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_hud.deps import SameOriginDep, StoreDep
-from agent_hud.models.events import BoardEvent, EventKind, SendEvent
+from agent_hud.models.events import BoardChanged, EventKind, MessageSent
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
@@ -13,7 +13,7 @@ from agent_hud.store import BoardStore
 
 async def send_boards(websocket: WebSocket, store: BoardStore) -> None:
     async for board in store.watch():
-        await websocket.send_text(BoardEvent(kind=EventKind.board, board=board).model_dump_json())
+        await websocket.send_text(BoardChanged(kind=EventKind.board_changed, board=board).model_dump_json())
 
 
 def create_app() -> FastAPI:
@@ -30,7 +30,7 @@ def create_app() -> FastAPI:
         async with asyncio.TaskGroup() as tg:
             sender = tg.create_task(send_boards(websocket, store))
             async for text in websocket.iter_text():
-                store.add_message(SendEvent.model_validate_json(text).message)
+                store.add_message(MessageSent.model_validate_json(text).message)
             sender.cancel()
 
     app.mount("/mcp", mcp_app)

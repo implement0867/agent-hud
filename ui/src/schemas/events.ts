@@ -2,16 +2,16 @@ import { z } from "zod";
 
 import { boardSchema } from "~/schemas/board";
 
-export const EventKind = z.enum(["board", "send"]);
+export const EventKind = z.enum(["board_changed", "message_sent"]);
 
-export const boardEventSchema = z.strictObject({
-  kind: z.literal(EventKind.enum.board),
+export const boardChangedSchema = z.strictObject({
+  kind: z.literal(EventKind.enum.board_changed),
   board: boardSchema,
 });
 
-export const sendEventSchema = z.strictObject({
-  kind: z.literal(EventKind.enum.send),
+export const messageSentSchema = z.strictObject({
+  kind: z.literal(EventKind.enum.message_sent),
   message: z.string(),
 });
 
-export type TSendEvent = z.infer<typeof sendEventSchema>;
+export type TMessageSent = z.infer<typeof messageSentSchema>;

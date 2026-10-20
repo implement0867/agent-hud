@@ -6,15 +6,15 @@ from agent_hud.models.board import Board
 
 
 class EventKind(StrEnum):
-    board = "board"
-    send = "send"
+    board_changed = "board_changed"
+    message_sent = "message_sent"
 
 
-class BoardEvent(Model):
-    kind: Literal[EventKind.board]
+class BoardChanged(Model):
+    kind: Literal[EventKind.board_changed]
     board: Board
 
 
-class SendEvent(Model):
-    kind: Literal[EventKind.send]
+class MessageSent(Model):
+    kind: Literal[EventKind.message_sent]
     message: str
