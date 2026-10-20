@@ -1,17 +1,20 @@
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
-
+from agent_hud.models.base import Model
 from agent_hud.models.board import Board
 
 
 class EventKind(StrEnum):
-    board = "board"
+    board_changed = "board_changed"
+    message_sent = "message_sent"
 
 
-class BoardEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    kind: Literal[EventKind.board]
+class BoardChanged(Model):
+    kind: Literal[EventKind.board_changed]
     board: Board
+
+
+class MessageSent(Model):
+    kind: Literal[EventKind.message_sent]
+    message: str
