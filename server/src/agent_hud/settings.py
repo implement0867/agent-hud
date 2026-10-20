@@ -14,7 +14,6 @@ def find_static_dir() -> Path:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENT_HUD_", extra="ignore", frozen=True)
 
-    port: int = Field(default=7676, ge=1, le=65535, description="Port of the board page on 127.0.0.1")
     static_dir: Path = Field(default_factory=find_static_dir, description="Directory of the built UI")
 
 

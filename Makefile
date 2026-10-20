@@ -1,4 +1,4 @@
-.PHONY: check check-server check-ui
+.PHONY: check check-server check-ui serve
 
 check: check-server check-ui
 
@@ -7,3 +7,6 @@ check-server:
 
 check-ui:
 	cd ui && npm run check
+
+serve:
+	cd server && uv run uvicorn agent_hud.web:create_app --factory --port 7676

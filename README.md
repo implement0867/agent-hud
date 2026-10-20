@@ -8,11 +8,15 @@ over MCP.
 
 ```sh
 cd ui && npm install && npm run build && cd ..
-uv run --project server agent-hud
+make serve
 ```
 
-The second command starts the MCP server on stdio and serves the board page, which shows each card
-and updates when the agent writes. `server/src/agent_hud/settings.py` sets the address.
+`make serve` starts the app and prints its URL. The app serves MCP at `/mcp/` and the board page at
+`/`. The page shows each card and updates when the agent writes. To connect Claude Code:
+
+```sh
+claude mcp add --transport http agent-hud <URL>/mcp/
+```
 
 ## Tools
 
@@ -35,5 +39,6 @@ Requires [uv](https://docs.astral.sh/uv/) and Node 22.
 | Command | Does |
 |---|---|
 | `make check` | ruff format and lint, basedpyright; tsc, eslint, prettier |
+| `make serve` | start the app |
 | `cd ui && npm run build` | build the UI into the server package |
 | `cd ui && npm run dev` | Vite dev server, which sends `/ws` to the running server |
