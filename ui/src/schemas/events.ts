@@ -1,30 +1,17 @@
 import { z } from "zod";
 
-import { viewSchema } from "~/schemas/view";
+import { boardSchema } from "~/schemas/board";
 
-export const EventKind = z.enum([
-  "view_changed",
-  "message_sent",
-  "message_received",
-]);
+export const EventKind = z.enum(["board_changed", "message_sent"]);
 
-export const messageSchema = z.string().regex(/\S/);
-
-const viewChangedSchema = z.strictObject({
-  kind: z.literal(EventKind.enum.view_changed),
-  view: viewSchema,
+export const boardChangedSchema = z.strictObject({
+  kind: z.literal(EventKind.enum.board_changed),
+  board: boardSchema,
 });
-
-const messageReceivedSchema = z.strictObject({
-  kind: z.literal(EventKind.enum.message_received),
-});
-
-export const serverEventSchema = z.discriminatedUnion("kind", [
-  viewChangedSchema,
-  messageReceivedSchema,
-]);
 
 export const messageSentSchema = z.strictObject({
   kind: z.literal(EventKind.enum.message_sent),
-  message: messageSchema,
+  message: z.string(),
 });
+
+export type TMessageSent = z.infer<typeof messageSentSchema>;

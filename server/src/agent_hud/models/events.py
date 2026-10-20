@@ -1,29 +1,20 @@
 from enum import StrEnum
-from typing import Annotated, Literal
-
-from pydantic import StringConstraints
+from typing import Literal
 
 from agent_hud.models.base import Model
-from agent_hud.models.view import View
-
-type Message = Annotated[str, StringConstraints(pattern=r"\S")]
+from agent_hud.models.board import Board
 
 
 class EventKind(StrEnum):
-    view_changed = "view_changed"
+    board_changed = "board_changed"
     message_sent = "message_sent"
-    message_received = "message_received"
 
 
-class ViewChanged(Model):
-    kind: Literal[EventKind.view_changed]
-    view: View
+class BoardChanged(Model):
+    kind: Literal[EventKind.board_changed]
+    board: Board
 
 
 class MessageSent(Model):
     kind: Literal[EventKind.message_sent]
-    message: Message
-
-
-class MessageReceived(Model):
-    kind: Literal[EventKind.message_received]
+    message: str

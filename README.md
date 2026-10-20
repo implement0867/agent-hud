@@ -24,7 +24,7 @@ claude mcp add --transport http agent-hud <URL>/mcp/
 |---|---|
 | `write(ops)` | `put {id, md}` creates or replaces a card; `remove {id}` deletes one. All or nothing. |
 | `read()` | the board as JSON: `{"cards": {"plan": {"md": "1. a"}}}` |
-| `wait()` | waits for the user's message; the page lets the user send only while the agent waits. Returns the messages sent since the last `wait` |
+| `wait()` | waits until the user presses Send on the page; returns the messages sent since the last `wait` |
 
 ## Layout
 
