@@ -1,6 +1,7 @@
 import asyncio
 import socket
 from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from typing import Any
 
 import pytest
@@ -76,13 +77,13 @@ async def page(address: tuple[str, int], store: BoardStore) -> AsyncIterator[Cli
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def listener(address: tuple[str, int], store: BoardStore) -> AsyncIterator[ClientConnection]:
-    """The agent's socket for the user's messages, at the URL that the listen tool returns."""
+async def listeners(address: tuple[str, int], store: BoardStore) -> AsyncIterator[list[ClientConnection]]:
+    """Two agents' sockets for the user's messages, at the URL that the listen tool returns."""
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/") as remote:
         url = (await remote.call_tool("listen", {})).data
-    async with connect(url, proxy=None) as listener:
-        yield listener
+    async with AsyncExitStack() as stack:
+        yield [await stack.enter_async_context(connect(url, proxy=None)) for _ in range(2)]
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -153,18 +154,35 @@ async def test_other_host_names_cannot_connect(address: tuple[str, int], path: s
 @given(st.lists(st.lists(messages(), min_size=1)))
 @settings(deadline=None)
 async def test_agent_gets_each_sent_message_once_in_order(
-    page: ClientConnection, listener: ClientConnection, batches: list[list[str]]
+    page: ClientConnection, listeners: list[ClientConnection], batches: list[list[str]]
 ) -> None:
-    """Assemble: a page and the agent's listener on the app.
+    """Assemble: a page and two agents' listeners on the app.
     Act: for each batch, the page sends its messages.
-    Assert: the page gets a receipt for each message, and the listener gets each message once, in the order sent."""
+    Assert: the page gets a receipt for each message, and each listener gets each message once, in the order sent."""
     async with asyncio.timeout(5):
         for batch in batches:
             for message in batch:
                 await page.send(MessageSent(kind=EventKind.message_sent, message=message).model_dump_json())
             for _ in batch:
                 MessageReceived.model_validate_json(await page.recv())
-            assert [MessageSent.model_validate_json(await listener.recv()).message for _ in batch] == batch
+            for listener in listeners:
+                assert [MessageSent.model_validate_json(await listener.recv()).message for _ in batch] == batch
+
+
+@given(st.builds(BoardStore), messages(), st.lists(messages()))
+async def test_a_listener_gets_the_messages_sent_after_the_last_listener_stopped(
+    new_store: BoardStore, first: str, rest: list[str]
+) -> None:
+    """Assemble: a store whose only listener got one message and stopped.
+    Act: add more messages, then listen again.
+    Assert: the new listener has them in the order added."""
+    with new_store.listen() as listener:
+        new_store.add_message(first)
+        assert listener.get_nowait() == first
+    for message in rest:
+        new_store.add_message(message)
+    with new_store.listen() as listener:
+        assert [listener.get_nowait() for _ in rest] == rest
 
 
 @given(blanks())

@@ -16,10 +16,10 @@ async def send_boards(websocket: WebSocket, store: BoardStore) -> None:
         await websocket.send_text(BoardChanged(kind=EventKind.board_changed, board=board).model_dump_json())
 
 
-async def send_messages(websocket: WebSocket, store: BoardStore) -> None:
+async def send_messages(websocket: WebSocket, messages: asyncio.Queue[str]) -> None:
     while True:
-        for message in await store.wait_for_messages():
-            await websocket.send_text(MessageSent(kind=EventKind.message_sent, message=message).model_dump_json())
+        message = await messages.get()
+        await websocket.send_text(MessageSent(kind=EventKind.message_sent, message=message).model_dump_json())
 
 
 def create_app() -> FastAPI:
@@ -42,13 +42,15 @@ def create_app() -> FastAPI:
 
     @app.websocket("/agent", dependencies=[SameOriginDep])
     async def agent_messages(websocket: WebSocket, store: StoreDep) -> None:
-        """Send each message from the page to the agent's monitor once, until it disconnects."""
-        await websocket.accept()
-        async with asyncio.TaskGroup() as tg:
-            sender = tg.create_task(send_messages(websocket, store))
-            # The monitor sends nothing, so this returns when it disconnects.
-            await websocket.receive()
-            sender.cancel()
+        """Send each message from the page to this agent's monitor, until it disconnects."""
+        # Listen before accept: the client's handshake ends only after accept, so it misses no message.
+        with store.listen() as messages:
+            await websocket.accept()
+            async with asyncio.TaskGroup() as tg:
+                sender = tg.create_task(send_messages(websocket, messages))
+                # The monitor sends nothing, so this returns when it disconnects.
+                await websocket.receive()
+                sender.cancel()
 
     app.mount("/mcp", mcp_app)
     app.mount("/", StaticFiles(directory=get_settings().static_dir, html=True))

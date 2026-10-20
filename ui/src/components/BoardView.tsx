@@ -22,7 +22,6 @@ const BoardContent = ({ connection }: { connection: TConnection }) => {
   }
 };
 
-/** The form stays mounted in every state, so its text stays when the connection changes. */
 export const BoardView = () => {
   const connection = useBoard();
   return (

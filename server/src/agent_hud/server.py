@@ -26,9 +26,7 @@ def build() -> FastMCP:
         return store.read()
 
     async def listen() -> str:
-        """The websocket URL of the user's messages. Open it with the Monitor tool: each message the user sends
-        on the board page arrives as one event. Open it again when the monitor ends; messages sent between are kept.
-        """
+        """The websocket URL of the user's messages. Open it with the Monitor tool, and again when the monitor ends."""
         return str(get_http_request().url.replace(scheme="ws", path="/agent"))
 
     mcp.tool(write)

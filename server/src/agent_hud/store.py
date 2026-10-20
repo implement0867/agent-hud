@@ -1,5 +1,6 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Generator
+from contextlib import contextmanager
 
 from agent_hud.models.board import Board
 from agent_hud.models.ops import TOp
@@ -12,7 +13,7 @@ class BoardStore:
         self._board = Board()
         self._changed = asyncio.Event()
         self._messages: list[str] = []
-        self._message_added = asyncio.Event()
+        self._listeners: set[asyncio.Queue[str]] = set()
 
     def read(self) -> Board:
         return self._board.model_copy(deep=True)
@@ -30,12 +31,21 @@ class BoardStore:
             await changed.wait()
 
     def add_message(self, message: str) -> None:
-        self._messages.append(message)
-        self._message_added.set()
+        if self._listeners:
+            for listener in self._listeners:
+                listener.put_nowait(message)
+        else:
+            self._messages.append(message)
 
-    async def wait_for_messages(self) -> list[str]:
-        """The messages sent since the last call. Waits for one when there are none."""
-        await self._message_added.wait()
-        self._message_added.clear()
-        messages, self._messages = self._messages, []
-        return messages
+    @contextmanager
+    def listen(self) -> Generator[asyncio.Queue[str]]:
+        """A queue of the messages sent while no one listened, then of each new message."""
+        listener = asyncio.Queue[str]()
+        for message in self._messages:
+            listener.put_nowait(message)
+        self._messages = []
+        self._listeners.add(listener)
+        try:
+            yield listener
+        finally:
+            self._listeners.remove(listener)
