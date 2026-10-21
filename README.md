@@ -12,7 +12,10 @@ make serve
 ```
 
 `make serve` starts the app and prints its URL. The app serves MCP at `/mcp/` and the board page at
-`/`. The page shows each card and updates when the agent writes. To connect Claude Code:
+`/`. The page shows each card and updates when the agent writes. On the page, the user reacts to,
+comments on and links the cards and their parts, fills input cells, adds notes (cards by the user)
+and sends messages. With `AGENT_HUD_STATE_FILE` set, the app appends each action to that JSONL file
+and replays it on start. To connect Claude Code:
 
 ```sh
 claude mcp add --transport http agent-hud <URL>/mcp/

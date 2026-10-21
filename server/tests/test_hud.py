@@ -1,5 +1,7 @@
 import asyncio
-from contextlib import aclosing
+from contextlib import aclosing, suppress
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 from hypothesis import given
@@ -58,3 +60,20 @@ async def test_an_agent_gets_the_user_actions_that_no_agent_had(
     assert await take(hud, len(first)) == said(first, Author.user)
     hud.act([*said(agent_texts, Author.agent), *said(rest, Author.user)])
     assert await take(hud, len(rest)) == said(rest, Author.user)
+
+
+@given(st.lists(actions(st.sampled_from(["a", "b"]))), messages())
+async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: list[Action], text: str) -> None:
+    """Assemble: a hud on a state file that took each action that fits.
+    Act: start a new hud on the same file, and the user says a message.
+    Assert: the new hud has the same board and log, and an agent gets only the new message."""
+    with TemporaryDirectory() as directory:
+        state_file = Path(directory) / "state.jsonl"
+        hud = Hud(state_file)
+        for action in batch:
+            with suppress(ValueError):
+                hud.act([action])
+        again = Hud(state_file)
+        assert (again.board, again.log.actions) == (hud.board, hud.log.actions)
+        again.act(said([text], Author.user))
+        assert await take(again, 1) == said([text], Author.user)

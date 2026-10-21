@@ -8,6 +8,7 @@ import { SendForm } from "~/components/SendForm";
 import { ConnectionStatus, useBoard } from "~/hooks/useBoard";
 import type { TConnection } from "~/hooks/useBoard";
 import { assertNever } from "~/lib/assertNever";
+import { ActionKind } from "~/schemas/actions";
 import type { TBoard } from "~/schemas/board";
 
 const LiveBoard = ({
@@ -48,7 +49,22 @@ export const BoardView = () => {
   return (
     <>
       <BoardContent connection={connection} />
-      <SendForm connection={connection} />
+      <SendForm
+        connection={connection}
+        label="Note for the agent"
+        button="Add note"
+        body={(md) => ({
+          kind: ActionKind.enum.put,
+          id: `note-${crypto.randomUUID().slice(0, 8)}`,
+          md,
+        })}
+      />
+      <SendForm
+        connection={connection}
+        label="Message to the agent"
+        button="Send"
+        body={(text) => ({ kind: ActionKind.enum.say, text })}
+      />
     </>
   );
 };

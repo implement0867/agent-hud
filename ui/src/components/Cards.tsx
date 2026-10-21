@@ -6,7 +6,7 @@ import type { ExtraProps } from "react-markdown";
 
 import { Notice } from "~/components/Notice";
 import type { TBoardSocket } from "~/api/boardSocket";
-import { ActionKind, Reaction, messageSchema } from "~/schemas/actions";
+import { ActionKind, Author, Reaction, messageSchema } from "~/schemas/actions";
 import type { TValue } from "~/schemas/actions";
 import { ColumnKind } from "~/lib/columns";
 import type { TBoard, TCard, TThread } from "~/schemas/board";
@@ -308,9 +308,23 @@ const CardView = ({
   return (
     <article
       data-ref={id}
-      className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm"
+      className={`rounded-lg border p-4 shadow-sm ${card.author === Author.enum.user ? "border-amber-200 bg-amber-50" : "border-stone-200 bg-white"}`}
     >
-      <header className="mb-2 font-mono text-xs text-stone-400">{id}</header>
+      <header className="mb-2 flex justify-between font-mono text-xs text-stone-400">
+        {id}
+        {card.author === Author.enum.user && (
+          <button
+            type="button"
+            aria-label={`Remove ${id}`}
+            className="rounded px-1 hover:bg-stone-200"
+            onClick={() => {
+              void act({ kind: ActionKind.enum.remove, id });
+            }}
+          >
+            ×
+          </button>
+        )}
+      </header>
       <div className="prose prose-sm prose-stone max-w-none">
         <CardContext value={context}>
           <Markdown

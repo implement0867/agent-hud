@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENT_HUD_", extra="ignore", frozen=True)
 
     static_dir: Path = Field(default_factory=find_static_dir, description="Directory of the built UI")
+    state_file: Path | None = Field(default=None, description="JSONL file of every action, replayed on start")
 
 
 @lru_cache(maxsize=1)
