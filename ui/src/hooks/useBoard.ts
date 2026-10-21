@@ -14,6 +14,7 @@ export type TConnection =
       board: TBoard;
       send: TBoardSocket["send"];
       react: TBoardSocket["react"];
+      comment: TBoardSocket["comment"];
     }
   | { status: typeof ConnectionStatus.enum.closed };
 
@@ -31,6 +32,7 @@ export const useBoard = (): TConnection => {
           board,
           send: socket.send,
           react: socket.react,
+          comment: socket.comment,
         });
       },
       () => {
