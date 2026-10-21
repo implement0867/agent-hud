@@ -6,9 +6,10 @@ from pydantic import Discriminator, Field, StringConstraints
 from agent_hud.models.base import Model
 
 type TCardId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
-type TRef = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}(/[1-9][0-9]*)?$")]
+type TRef = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}(/[1-9][0-9]*){0,2}$")]
 type TActionId = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 type TMessage = Annotated[str, StringConstraints(pattern=r"\S")]
+type TValue = str | float | bool | None
 
 
 class Author(StrEnum):
@@ -29,6 +30,7 @@ class ActionKind(StrEnum):
     unreact = "unreact"
     comment = "comment"
     say = "say"
+    fill = "fill"
 
 
 class Put(Model):
@@ -66,7 +68,15 @@ class Say(Model):
     text: TMessage
 
 
-type TBody = Annotated[Put | Remove | React | Unreact | Comment | Say, Discriminator("kind")]
+class Fill(Model):
+    kind: Literal[ActionKind.fill]
+    ref: TRef = Field(
+        description="A cell of an input column, as the card id, row number and column number, such as plan/3/2"
+    )
+    value: TValue = Field(description="Text, a number, true or false, or one of the options; null clears the cell")
+
+
+type TBody = Annotated[Put | Remove | React | Unreact | Comment | Say | Fill, Discriminator("kind")]
 
 
 class Action(Model):

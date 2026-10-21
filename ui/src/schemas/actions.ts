@@ -9,6 +9,14 @@ export const ActionKind = z.enum([
   "unreact",
   "comment",
   "say",
+  "fill",
+]);
+
+export const valueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
 ]);
 
 export const messageSchema = z.string().regex(/\S/);
@@ -32,6 +40,11 @@ export const bodySchema = z.discriminatedUnion("kind", [
     text: messageSchema,
   }),
   z.strictObject({ kind: z.literal(ActionKind.enum.say), text: messageSchema }),
+  z.strictObject({
+    kind: z.literal(ActionKind.enum.fill),
+    ref: z.string(),
+    value: valueSchema,
+  }),
 ]);
 
 export const requestSchema = z.strictObject({
@@ -41,3 +54,4 @@ export const requestSchema = z.strictObject({
 
 export type TReaction = z.infer<typeof Reaction>;
 export type TBody = z.infer<typeof bodySchema>;
+export type TValue = z.infer<typeof valueSchema>;

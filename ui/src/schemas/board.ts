@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { Author, Reaction } from "~/schemas/actions";
+import { Author, Reaction, valueSchema } from "~/schemas/actions";
 
 const cardSchema = z.strictObject({ md: z.string().min(1), author: Author });
 
@@ -18,6 +18,7 @@ const threadSchema = z.strictObject({
 export const boardSchema = z.strictObject({
   cards: z.record(z.string(), cardSchema),
   threads: z.record(z.string(), threadSchema),
+  values: z.record(z.string(), valueSchema),
 });
 
 export type TCard = z.infer<typeof cardSchema>;
