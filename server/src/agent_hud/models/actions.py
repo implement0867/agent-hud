@@ -33,6 +33,7 @@ class ActionKind(StrEnum):
     fill = "fill"
     link = "link"
     unlink = "unlink"
+    move = "move"
 
 
 class Put(Model):
@@ -91,7 +92,16 @@ class Unlink(Model):
     id: TCardId
 
 
-type TBody = Annotated[Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink, Discriminator("kind")]
+class Move(Model):
+    kind: Literal[ActionKind.move]
+    id: TCardId
+    x: float = Field(allow_inf_nan=False, description="Left edge of the card on the board, in pixels")
+    y: float = Field(allow_inf_nan=False, description="Top edge of the card on the board, in pixels")
+
+
+type TBody = Annotated[
+    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move, Discriminator("kind")
+]
 
 
 class Action(Model):

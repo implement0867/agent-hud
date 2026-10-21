@@ -214,7 +214,7 @@ async def test_agent_gets_each_message_once_in_order(
         for batch in batches:
             for action_id, text in batch:
                 await page.send(Request(id=action_id, body=say(text)).model_dump_json())
-            assert [Accepted.model_validate_json(await page.recv()).id for _ in batch] == [i for i, _ in batch]
+            assert [(await reply(page))[0].id for _ in batch] == [i for i, _ in batch]
             expected = [Action(id=i, author=Author.user, body=say(text)) for i, text in batch]
             for listener in listeners:
                 assert [Action.model_validate_json(await listener.recv()) for _ in batch] == expected

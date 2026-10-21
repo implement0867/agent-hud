@@ -1,8 +1,27 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+@theme {
+  --animate-rise: rise 240ms ease-out;
+  --animate-pop: pop 140ms ease-out;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 8px;
+    }
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+}
+
 @layer base {
   body {
-    @apply bg-stone-50 text-stone-900;
+    @apply bg-stone-100 text-stone-900 antialiased;
   }
 }
