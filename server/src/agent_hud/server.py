@@ -22,7 +22,7 @@ def build() -> FastMCP:
         store.apply(ops)
 
     async def read(store: BoardStore = McpStoreDep) -> Board:
-        """Every card on the board with its markdown and the user's reaction and comments."""
+        """Every card on the board with its markdown, and the user's reactions and comments on the card and on its list items by number."""
         return store.read()
 
     async def listen() -> str:

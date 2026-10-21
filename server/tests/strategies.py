@@ -35,6 +35,15 @@ def ops(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TOp]:
     return st.one_of(st.builds(put, ids, st.text(min_size=1)), st.builds(remove, ids))
 
 
+def item_texts() -> st.SearchStrategy[str]:
+    """Words that markdown reads as plain text."""
+    return st.from_regex(r"[A-Za-z]([A-Za-z0-9 ]*[A-Za-z0-9])?", fullmatch=True)
+
+
+def list_md(marker: str, texts: list[str]) -> str:
+    return "\n".join(f"{marker}{text}" for text in texts)
+
+
 def messages() -> st.SearchStrategy[str]:
     return st.from_regex(TypeAdapter(TMessage).json_schema()["pattern"])
 

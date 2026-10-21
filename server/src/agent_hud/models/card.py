@@ -7,6 +7,7 @@ from pydantic import Field, StringConstraints
 from agent_hud.models.base import Model
 
 type TCardId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
+type TItemNumber = Annotated[int, Field(ge=1)]
 
 
 class Reaction(StrEnum):
@@ -20,7 +21,13 @@ class Comment(Model):
     text: str
 
 
+class Item(Model):
+    reaction: Reaction | None = None
+    comments: list[Comment] = Field(default_factory=list)
+
+
 class Card(Model):
     md: str = Field(min_length=1)
+    items: dict[TItemNumber, Item] = Field(default_factory=dict)
     reaction: Reaction | None = None
     comments: list[Comment] = Field(default_factory=list)

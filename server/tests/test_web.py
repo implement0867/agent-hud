@@ -18,14 +18,23 @@ from websockets.exceptions import InvalidStatus
 from agent_hud.deps import get_store
 from agent_hud.models.board import Board
 from agent_hud.models.card import Reaction
-from agent_hud.models.events import BoardChanged, CommentAdded, EventKind, MessageReceived, MessageSent, ReactionSet
+from agent_hud.models.events import (
+    BoardChanged,
+    CommentAdded,
+    EventKind,
+    ItemCommentAdded,
+    ItemReactionSet,
+    MessageReceived,
+    MessageSent,
+    ReactionSet,
+)
 from agent_hud.models.ops import TOp
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
 from agent_hud.web import create_app
 from tests.factories import as_json, put
-from tests.strategies import blanks, card_ids, messages, ops, reactions
+from tests.strategies import blanks, card_ids, item_texts, list_md, messages, ops, reactions
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -175,6 +184,59 @@ async def test_page_and_agents_get_the_comment_on_the_card(
             assert CommentAdded.model_validate_json(await listener.recv()) == comment_added
 
 
+@given(card_ids(), st.lists(item_texts(), min_size=1), reactions(), st.data())
+@settings(deadline=None)
+async def test_page_and_agents_get_the_reaction_on_the_item(
+    page: ClientConnection,
+    listeners: list[ClientConnection],
+    agent: Client[Any],
+    card_id: str,
+    texts: list[str],
+    reaction: Reaction | None,
+    data: st.DataObject,
+) -> None:
+    """Assemble: a card of a list that the agent put, a page that got the board, and two agents' listeners.
+    Act: the page sets a reaction on one list item.
+    Assert: the page gets the board with the reaction on the item, and each listener gets the reaction."""
+    number = data.draw(st.integers(1, len(texts)))
+    item_reaction_set = ItemReactionSet(kind=EventKind.item_reaction_set, id=card_id, item=number, reaction=reaction)
+    async with asyncio.timeout(5):
+        await agent.call_tool("write", {"ops": as_json(put(card_id, list_md("1. ", texts)))})
+        await page.recv()
+        await page.send(item_reaction_set.model_dump_json())
+        assert (
+            BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].items[number].reaction == reaction
+        )
+        for listener in listeners:
+            assert ItemReactionSet.model_validate_json(await listener.recv()) == item_reaction_set
+
+
+@given(card_ids(), st.lists(item_texts(), min_size=1), messages(), st.data())
+@settings(deadline=None)
+async def test_page_and_agents_get_the_comment_on_the_item(
+    page: ClientConnection,
+    listeners: list[ClientConnection],
+    agent: Client[Any],
+    card_id: str,
+    texts: list[str],
+    text: str,
+    data: st.DataObject,
+) -> None:
+    """Assemble: a card of a list that the agent put, a page that got the board, and two agents' listeners.
+    Act: the page adds a comment to one list item.
+    Assert: the page gets the board with the comment on the item, and each listener gets the comment."""
+    number = data.draw(st.integers(1, len(texts)))
+    item_comment_added = ItemCommentAdded(kind=EventKind.item_comment_added, id=card_id, item=number, text=text)
+    async with asyncio.timeout(5):
+        await agent.call_tool("write", {"ops": as_json(put(card_id, list_md("1. ", texts)))})
+        await page.recv()
+        await page.send(item_comment_added.model_dump_json())
+        items = BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].items
+        assert items[number].comments[0].text == text
+        for listener in listeners:
+            assert ItemCommentAdded.model_validate_json(await listener.recv()) == item_comment_added
+
+
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
 @given(host_names())
 @settings(deadline=None)
@@ -252,6 +314,32 @@ async def test_a_comment_on_a_missing_card_changes_nothing(new_store: BoardStore
     Act: comment on the card.
     Assert: the board is still empty."""
     new_store.comment(card_id, text)
+    assert new_store.read() == Board()
+
+
+@given(st.builds(BoardStore), card_ids(), st.lists(item_texts(), min_size=1), reactions(), messages(), st.integers(0))
+async def test_feedback_on_an_item_after_the_last_changes_nothing(
+    new_store: BoardStore, card_id: str, texts: list[str], reaction: Reaction | None, text: str, extra: int
+) -> None:
+    """Assemble: a store with a card of a list, as after the agent put fewer items than the page showed.
+    Act: react to and comment on an item after the last.
+    Assert: the board is unchanged."""
+    new_store.apply([put(card_id, list_md("1. ", texts))])
+    before = new_store.read()
+    new_store.react_to_item(card_id, len(texts) + 1 + extra, reaction)
+    new_store.comment_on_item(card_id, len(texts) + 1 + extra, text)
+    assert new_store.read() == before
+
+
+@given(st.builds(BoardStore), card_ids(), st.integers(min_value=1), reactions(), messages())
+async def test_feedback_on_an_item_of_a_missing_card_changes_nothing(
+    new_store: BoardStore, card_id: str, number: int, reaction: Reaction | None, text: str
+) -> None:
+    """Assemble: an empty store, as after the agent removed the card the page showed.
+    Act: react to and comment on an item of the card.
+    Assert: the board is still empty."""
+    new_store.react_to_item(card_id, number, reaction)
+    new_store.comment_on_item(card_id, number, text)
     assert new_store.read() == Board()
 
 

@@ -5,7 +5,7 @@ from pydantic import Discriminator, StringConstraints, TypeAdapter
 
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
-from agent_hud.models.card import Reaction, TCardId
+from agent_hud.models.card import Reaction, TCardId, TItemNumber
 
 type TMessage = Annotated[str, StringConstraints(pattern=r"\S")]
 
@@ -16,6 +16,8 @@ class EventKind(StrEnum):
     message_received = "message_received"
     reaction_set = "reaction_set"
     comment_added = "comment_added"
+    item_reaction_set = "item_reaction_set"
+    item_comment_added = "item_comment_added"
 
 
 class BoardChanged(Model):
@@ -44,6 +46,22 @@ class CommentAdded(Model):
     text: TMessage
 
 
-type TPageEvent = Annotated[MessageSent | ReactionSet | CommentAdded, Discriminator("kind")]
+class ItemReactionSet(Model):
+    kind: Literal[EventKind.item_reaction_set]
+    id: TCardId
+    item: TItemNumber
+    reaction: Reaction | None
+
+
+class ItemCommentAdded(Model):
+    kind: Literal[EventKind.item_comment_added]
+    id: TCardId
+    item: TItemNumber
+    text: TMessage
+
+
+type TPageEvent = Annotated[
+    MessageSent | ReactionSet | CommentAdded | ItemReactionSet | ItemCommentAdded, Discriminator("kind")
+]
 
 PageEventAdapter = TypeAdapter[TPageEvent](TPageEvent)
