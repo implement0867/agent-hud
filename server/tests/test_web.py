@@ -18,13 +18,13 @@ from websockets.exceptions import InvalidStatus
 from agent_hud.deps import get_store
 from agent_hud.models.board import Board
 from agent_hud.models.card import Reaction
-from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent
+from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent, ReactionSet
 from agent_hud.models.ops import TOp
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
 from agent_hud.web import create_app
-from tests.factories import as_json
+from tests.factories import as_json, put
 from tests.strategies import blanks, card_ids, messages, ops, reactions
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
@@ -127,6 +127,21 @@ async def test_page_gets_the_board_after_each_accepted_write(
             result = await agent.call_tool("write", {"ops": as_json(*batch)}, raise_on_error=False)
             if not result.is_error:
                 assert BoardChanged.model_validate_json(await page.recv()).board == store.read()
+
+
+@given(card_ids(), st.text(min_size=1), reactions())
+@settings(deadline=None)
+async def test_page_gets_the_board_with_its_reaction_on_the_card(
+    page: ClientConnection, agent: Client[Any], card_id: str, md: str, reaction: Reaction | None
+) -> None:
+    """Assemble: a card that the agent put, and a page that got the board.
+    Act: the page sets a reaction on the card.
+    Assert: the page gets the board with the reaction on the card."""
+    async with asyncio.timeout(5):
+        await agent.call_tool("write", {"ops": as_json(put(card_id, md))})
+        await page.recv()
+        await page.send(ReactionSet(kind=EventKind.reaction_set, id=card_id, reaction=reaction).model_dump_json())
+        assert BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].reaction == reaction
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
