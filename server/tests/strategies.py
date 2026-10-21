@@ -47,7 +47,7 @@ def mds() -> st.SearchStrategy[str]:
     tables_md = st.builds(
         table_md, tables(), st.lists(st.sampled_from(["", " {text}", " {number}", " {check}", " {a, b}"]))
     )
-    return st.one_of(st.text(st.characters(exclude_characters="{"), min_size=1), lists, tables_md)
+    return st.one_of(st.text(st.characters(codec="utf-8", exclude_characters="{"), min_size=1), lists, tables_md)
 
 
 def refs(ids: st.SearchStrategy[str]) -> st.SearchStrategy[str]:
