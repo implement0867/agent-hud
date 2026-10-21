@@ -7,6 +7,7 @@ export const EventKind = z.enum([
   "message_sent",
   "message_received",
   "reaction_set",
+  "item_reaction_set",
   "comment_added",
 ]);
 
@@ -34,6 +35,13 @@ export const messageSentSchema = z.strictObject({
 export const reactionSetSchema = z.strictObject({
   kind: z.literal(EventKind.enum.reaction_set),
   id: z.string(),
+  reaction: Reaction.nullable(),
+});
+
+export const itemReactionSetSchema = z.strictObject({
+  kind: z.literal(EventKind.enum.item_reaction_set),
+  id: z.string(),
+  item: z.int().min(1),
   reaction: Reaction.nullable(),
 });
 
