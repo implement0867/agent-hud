@@ -6,7 +6,15 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_hud.deps import SameOriginDep, StoreDep
-from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent, PageEventAdapter, ReactionSet
+from agent_hud.models.events import (
+    BoardChanged,
+    EventKind,
+    MessageReceived,
+    MessageSent,
+    PageEventAdapter,
+    ReactionSet,
+    TPageEvent,
+)
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
@@ -17,10 +25,10 @@ async def send_boards(websocket: WebSocket, store: BoardStore) -> None:
         await websocket.send_text(BoardChanged(kind=EventKind.board_changed, board=board).model_dump_json())
 
 
-async def send_messages(websocket: WebSocket, messages: asyncio.Queue[str]) -> None:
+async def send_events(websocket: WebSocket, events: asyncio.Queue[TPageEvent]) -> None:
     while True:
-        message = await messages.get()
-        await websocket.send_text(MessageSent(kind=EventKind.message_sent, message=message).model_dump_json())
+        event = await events.get()
+        await websocket.send_text(event.model_dump_json())
 
 
 def create_app() -> FastAPI:
@@ -49,12 +57,12 @@ def create_app() -> FastAPI:
 
     @app.websocket("/agent", dependencies=[SameOriginDep])
     async def agent_messages(websocket: WebSocket, store: StoreDep) -> None:
-        """Send each message from the page to this agent's monitor, until it disconnects."""
+        """Send each message and reaction from the page to this agent's monitor, until it disconnects."""
         # Listen before accept: the client's handshake ends only after accept, so it misses no message.
-        with store.listen() as messages:
+        with store.listen() as events:
             await websocket.accept()
             async with asyncio.TaskGroup() as tg:
-                sender = tg.create_task(send_messages(websocket, messages))
+                sender = tg.create_task(send_events(websocket, events))
                 # The monitor sends nothing, so this returns when it disconnects.
                 await websocket.receive()
                 sender.cancel()

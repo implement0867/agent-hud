@@ -131,17 +131,25 @@ async def test_page_gets_the_board_after_each_accepted_write(
 
 @given(card_ids(), st.text(min_size=1), reactions())
 @settings(deadline=None)
-async def test_page_gets_the_board_with_its_reaction_on_the_card(
-    page: ClientConnection, agent: Client[Any], card_id: str, md: str, reaction: Reaction | None
+async def test_page_and_agents_get_the_reaction_on_the_card(
+    page: ClientConnection,
+    listeners: list[ClientConnection],
+    agent: Client[Any],
+    card_id: str,
+    md: str,
+    reaction: Reaction | None,
 ) -> None:
-    """Assemble: a card that the agent put, and a page that got the board.
+    """Assemble: a card that the agent put, a page that got the board, and two agents' listeners.
     Act: the page sets a reaction on the card.
-    Assert: the page gets the board with the reaction on the card."""
+    Assert: the page gets the board with the reaction on the card, and each listener gets the reaction."""
+    reaction_set = ReactionSet(kind=EventKind.reaction_set, id=card_id, reaction=reaction)
     async with asyncio.timeout(5):
         await agent.call_tool("write", {"ops": as_json(put(card_id, md))})
         await page.recv()
-        await page.send(ReactionSet(kind=EventKind.reaction_set, id=card_id, reaction=reaction).model_dump_json())
+        await page.send(reaction_set.model_dump_json())
         assert BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].reaction == reaction
+        for listener in listeners:
+            assert ReactionSet.model_validate_json(await listener.recv()) == reaction_set
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
@@ -195,11 +203,13 @@ async def test_a_listener_gets_the_messages_sent_after_the_last_listener_stopped
     Assert: the new listener has them in the order added."""
     with new_store.listen() as listener:
         new_store.add_message(first)
-        assert listener.get_nowait() == first
+        assert listener.get_nowait() == MessageSent(kind=EventKind.message_sent, message=first)
     for message in rest:
         new_store.add_message(message)
     with new_store.listen() as listener:
-        assert [listener.get_nowait() for _ in rest] == rest
+        assert [listener.get_nowait() for _ in rest] == [
+            MessageSent(kind=EventKind.message_sent, message=m) for m in rest
+        ]
 
 
 @given(st.builds(BoardStore), card_ids(), reactions())

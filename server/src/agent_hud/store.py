@@ -4,17 +4,18 @@ from contextlib import contextmanager
 
 from agent_hud.models.board import Board
 from agent_hud.models.card import Reaction, TCardId
+from agent_hud.models.events import EventKind, MessageSent, ReactionSet, TPageEvent
 from agent_hud.models.ops import TOp
 
 
 class BoardStore:
-    """The one owner of the board and of the user's sent messages, on the event loop. Readers get copies."""
+    """The one owner of the board and of the user's messages and reactions for the agent, on the event loop. Readers get copies."""
 
     def __init__(self) -> None:
         self._board = Board()
         self._changed = asyncio.Event()
-        self._messages: list[str] = []
-        self._listeners: set[asyncio.Queue[str]] = set()
+        self._events: list[TPageEvent] = []
+        self._listeners: set[asyncio.Queue[TPageEvent]] = set()
 
     def read(self) -> Board:
         return self._board.model_copy(deep=True)
@@ -28,6 +29,7 @@ class BoardStore:
         if card_id in self._board.cards:
             self._board.react(card_id, reaction)
             self._publish()
+            self._forward(ReactionSet(kind=EventKind.reaction_set, id=card_id, reaction=reaction))
 
     def _publish(self) -> None:
         self._changed.set()
@@ -41,19 +43,22 @@ class BoardStore:
             await changed.wait()
 
     def add_message(self, message: str) -> None:
+        self._forward(MessageSent(kind=EventKind.message_sent, message=message))
+
+    def _forward(self, event: TPageEvent) -> None:
         if self._listeners:
             for listener in self._listeners:
-                listener.put_nowait(message)
+                listener.put_nowait(event)
         else:
-            self._messages.append(message)
+            self._events.append(event)
 
     @contextmanager
-    def listen(self) -> Generator[asyncio.Queue[str]]:
-        """A queue of the messages sent while no one listened, then of each new message."""
-        listener = asyncio.Queue[str]()
-        for message in self._messages:
-            listener.put_nowait(message)
-        self._messages = []
+    def listen(self) -> Generator[asyncio.Queue[TPageEvent]]:
+        """A queue of the messages and reactions from while no one listened, then of each new one."""
+        listener = asyncio.Queue[TPageEvent]()
+        for event in self._events:
+            listener.put_nowait(event)
+        self._events = []
         self._listeners.add(listener)
         try:
             yield listener
