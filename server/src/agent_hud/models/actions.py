@@ -31,6 +31,8 @@ class ActionKind(StrEnum):
     comment = "comment"
     say = "say"
     fill = "fill"
+    link = "link"
+    unlink = "unlink"
 
 
 class Put(Model):
@@ -76,7 +78,20 @@ class Fill(Model):
     value: TValue = Field(description="Text, a number, true or false, or one of the options; null clears the cell")
 
 
-type TBody = Annotated[Put | Remove | React | Unreact | Comment | Say | Fill, Discriminator("kind")]
+class Link(Model):
+    kind: Literal[ActionKind.link]
+    id: TCardId = Field(description="Arrow id, such as why")
+    src: TRef = Field(description="The part the arrow starts at")
+    dst: TRef = Field(description="The part the arrow points to")
+    text: str = Field(default="", description="Text on the arrow")
+
+
+class Unlink(Model):
+    kind: Literal[ActionKind.unlink]
+    id: TCardId
+
+
+type TBody = Annotated[Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink, Discriminator("kind")]
 
 
 class Action(Model):

@@ -7,6 +7,7 @@ from agent_hud.models.actions import (
     Author,
     Comment,
     Fill,
+    Link,
     Put,
     React,
     Reaction,
@@ -17,6 +18,7 @@ from agent_hud.models.actions import (
     TMessage,
     TRef,
     TValue,
+    Unlink,
     Unreact,
 )
 from agent_hud.models.base import Model
@@ -41,6 +43,13 @@ class Said(Model):
     text: TMessage
 
 
+class Arrow(Model):
+    src: TRef
+    dst: TRef
+    text: str
+    author: Author
+
+
 class Thread(Model):
     """The reaction and comments on one part of the board."""
 
@@ -56,7 +65,7 @@ class Thread(Model):
             case Comment(text=text):
                 said = Said(id=action.id, author=action.author, text=text)
                 return self.model_copy(update={"comments": (*self.comments, said)})
-            case Put() | Remove() | Say() | Fill():
+            case Put() | Remove() | Say() | Fill() | Link() | Unlink():
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
@@ -66,6 +75,7 @@ class Board(Model):
     cards: dict[TCardId, Card] = Field(default_factory=dict)
     threads: dict[TRef, Thread] = Field(default_factory=dict)
     values: dict[TRef, TValue] = Field(default_factory=dict)
+    arrows: dict[TCardId, Arrow] = Field(default_factory=dict)
 
     def apply(self, action: Action) -> "Board":
         """The board after the action. ValueError if the action does not fit the board."""
@@ -91,6 +101,17 @@ class Board(Model):
                         raise ValueError(f"input '{ref}' takes {column.kind} values")
                     case _:
                         return self.model_copy(update={"values": {**self.values, ref: value}})
+            case Link(src=src) if src not in self._parts(src):
+                raise ValueError(f"no part '{src}'")
+            case Link(dst=dst) if dst not in self._parts(dst):
+                raise ValueError(f"no part '{dst}'")
+            case Link(id=arrow_id, src=src, dst=dst, text=text):
+                arrow = Arrow(src=src, dst=dst, text=text, author=action.author)
+                return self.model_copy(update={"arrows": {**self.arrows, arrow_id: arrow}})
+            case Unlink(id=arrow_id) if arrow_id in self.arrows:
+                return self.model_copy(update={"arrows": {k: v for k, v in self.arrows.items() if k != arrow_id}})
+            case Unlink(id=arrow_id):
+                raise ValueError(f"no arrow '{arrow_id}'")
             case Say():
                 return self
             case _:
@@ -111,7 +132,12 @@ class Board(Model):
         return {f"{card_id}/{path}": column for path, column in Outline(self.cards[card_id].md).inputs.items()}
 
     def _clear(self, card_id: TCardId) -> "Board":
-        """The board without the threads and values on the card."""
+        """The board without the threads, values and arrows on the card."""
         threads = {ref: thread for ref, thread in self.threads.items() if ref.partition("/")[0] != card_id}
         values = {ref: value for ref, value in self.values.items() if ref.partition("/")[0] != card_id}
-        return self.model_copy(update={"threads": threads, "values": values})
+        arrows = {
+            arrow_id: arrow
+            for arrow_id, arrow in self.arrows.items()
+            if card_id not in (arrow.src.partition("/")[0], arrow.dst.partition("/")[0])
+        }
+        return self.model_copy(update={"threads": threads, "values": values, "arrows": arrows})
