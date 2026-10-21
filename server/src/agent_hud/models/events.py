@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Discriminator, StringConstraints
+from pydantic import Discriminator, RootModel, StringConstraints
 
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
@@ -37,4 +37,5 @@ class ReactionSet(Model):
     reaction: Reaction | None
 
 
-type TPageEvent = Annotated[MessageSent | ReactionSet, Discriminator("kind")]
+class PageEvent(RootModel[Annotated[MessageSent | ReactionSet, Discriminator("kind")]]):
+    pass
