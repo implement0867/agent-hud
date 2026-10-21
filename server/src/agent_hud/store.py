@@ -3,8 +3,8 @@ from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
 
 from agent_hud.models.board import Board
-from agent_hud.models.card import Reaction, TCardId
-from agent_hud.models.events import CommentAdded, EventKind, MessageSent, ReactionSet, TPageEvent
+from agent_hud.models.card import Reaction, TCardId, TItemNumber
+from agent_hud.models.events import CommentAdded, EventKind, ItemReactionSet, MessageSent, ReactionSet, TPageEvent
 from agent_hud.models.ops import TOp
 
 
@@ -30,6 +30,13 @@ class BoardStore:
             self._board.react(card_id, reaction)
             self._publish()
             self._forward(ReactionSet(kind=EventKind.reaction_set, id=card_id, reaction=reaction))
+
+    def react_to_item(self, card_id: TCardId, number: TItemNumber, reaction: Reaction | None) -> None:
+        """Set the user's reaction on the card's item, if the agent has not removed either since the page showed it."""
+        if card_id in self._board.cards and number <= len(self._board.cards[card_id].items):
+            self._board.react_to_item(card_id, number, reaction)
+            self._publish()
+            self._forward(ItemReactionSet(kind=EventKind.item_reaction_set, id=card_id, item=number, reaction=reaction))
 
     def comment(self, card_id: TCardId, text: str) -> None:
         """Add the user's comment to the card, if the agent has not removed it since the page showed it."""

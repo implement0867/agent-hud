@@ -8,6 +8,7 @@ from agent_hud.markdown import numbered_items
 from agent_hud.models.base import Model
 
 type TCardId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
+type TItemNumber = Annotated[int, Field(ge=1)]
 
 
 class Reaction(StrEnum):
@@ -23,6 +24,7 @@ class Comment(Model):
 
 class Item(Model):
     md: str = Field(min_length=1)
+    reaction: Reaction | None = None
 
 
 class Card(Model):

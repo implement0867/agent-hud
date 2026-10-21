@@ -8,7 +8,7 @@ from agent_hud.models.board import Board
 from agent_hud.models.card import Card, Reaction
 from agent_hud.models.ops import PutOp, RemoveOp, TOp
 from tests.factories import put
-from tests.strategies import boards, card_ids, item_texts, messages, ops, reactions
+from tests.strategies import boards, card_ids, item_texts, messages, numbered_list, ops, reactions
 
 
 @st.composite
@@ -84,8 +84,24 @@ def test_a_card_of_one_numbered_list_has_its_items(card_id: str, texts: list[str
     Act: put a card of it.
     Assert: the card's items are the texts in order."""
     board = Board()
-    board.apply([put(card_id, "\n".join(f"{n}. {text}" for n, text in enumerate(texts, start=1)))])
+    board.apply([put(card_id, numbered_list(texts))])
     assert [item.md for item in board.cards[card_id].items] == texts
+
+
+@given(boards(card_ids()), card_ids(), st.lists(item_texts(), min_size=1), reactions(), st.data())
+def test_react_to_item_sets_the_reaction_on_that_item_only(
+    board: Board, card_id: str, texts: list[str], reaction: Reaction | None, data: st.DataObject
+) -> None:
+    """Assemble: any board with a card of a numbered list put on it.
+    Act: react to one item of the card.
+    Assert: that item has the reaction, and the other items and cards are unchanged."""
+    board.apply([put(card_id, numbered_list(texts))])
+    before = board.model_copy(deep=True)
+    number = data.draw(st.integers(1, len(texts)))
+    board.react_to_item(card_id, number, reaction)
+    items = before.cards[card_id].items
+    items[number - 1] = items[number - 1].model_copy(update={"reaction": reaction})
+    assert board == before
 
 
 @given(card_ids(), st.lists(st.tuples(item_texts(), item_texts()), min_size=1))

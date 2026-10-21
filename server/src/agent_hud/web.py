@@ -10,6 +10,7 @@ from agent_hud.models.events import (
     BoardChanged,
     CommentAdded,
     EventKind,
+    ItemReactionSet,
     MessageReceived,
     MessageSent,
     PageEventAdapter,
@@ -52,6 +53,8 @@ def create_app() -> FastAPI:
                         await websocket.send_text(MessageReceived(kind=EventKind.message_received).model_dump_json())
                     case ReactionSet(id=card_id, reaction=reaction):
                         store.react(card_id, reaction)
+                    case ItemReactionSet(id=card_id, item=number, reaction=reaction):
+                        store.react_to_item(card_id, number, reaction)
                     case CommentAdded(id=card_id, text=comment):
                         store.comment(card_id, comment)
                     case _:

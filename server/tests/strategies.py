@@ -40,6 +40,10 @@ def item_texts() -> st.SearchStrategy[str]:
     return st.from_regex(r"[A-Za-z]([A-Za-z0-9 ]*[A-Za-z0-9])?", fullmatch=True)
 
 
+def numbered_list(texts: list[str]) -> str:
+    return "\n".join(f"{n}. {text}" for n, text in enumerate(texts, start=1))
+
+
 def messages() -> st.SearchStrategy[str]:
     return st.from_regex(TypeAdapter(TMessage).json_schema()["pattern"])
 
