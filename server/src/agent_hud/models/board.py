@@ -42,3 +42,11 @@ class Board(Model):
         """Add the user's comment to the card. KeyError for a missing card."""
         card = self.cards[card_id]
         self.cards[card_id] = card.model_copy(update={"comments": [*card.comments, Comment(text=text)]})
+
+    def comment_on_item(self, card_id: TCardId, number: TItemNumber, text: str) -> None:
+        """Add the user's comment to the card's item of that number. KeyError for a missing card, IndexError for a missing item."""
+        card = self.cards[card_id]
+        items = list(card.items)
+        item = items[number - 1]
+        items[number - 1] = item.model_copy(update={"comments": [*item.comments, Comment(text=text)]})
+        self.cards[card_id] = card.model_copy(update={"items": items})

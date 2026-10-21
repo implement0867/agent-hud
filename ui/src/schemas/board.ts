@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const Reaction = z.enum(["approve", "reject", "question"]);
 
+const commentSchema = z.strictObject({ id: z.string(), text: z.string() });
+
 export const cardSchema = z.strictObject({
   md: z.string().min(1),
   items: z.array(
@@ -9,10 +11,11 @@ export const cardSchema = z.strictObject({
       id: z.string(),
       md: z.string().min(1),
       reaction: Reaction.nullable(),
+      comments: z.array(commentSchema),
     }),
   ),
   reaction: Reaction.nullable(),
-  comments: z.array(z.strictObject({ id: z.string(), text: z.string() })),
+  comments: z.array(commentSchema),
 });
 
 export const boardSchema = z.strictObject({

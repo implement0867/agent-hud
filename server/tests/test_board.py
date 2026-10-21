@@ -104,6 +104,26 @@ def test_react_to_item_sets_the_reaction_on_that_item_only(
     assert board == before
 
 
+@given(boards(card_ids()), card_ids(), st.lists(item_texts(), min_size=1), st.lists(messages(), min_size=1), st.data())
+def test_comments_on_an_item_add_to_that_item_only_in_order(
+    board: Board, card_id: str, texts: list[str], comments: list[str], data: st.DataObject
+) -> None:
+    """Assemble: any board with a card of a numbered list put on it.
+    Act: comment on one item of the card with each text.
+    Assert: that item has the comments in order with distinct ids, and the other items and cards are unchanged."""
+    board.apply([put(card_id, numbered_list(texts))])
+    before = board.model_copy(deep=True)
+    number = data.draw(st.integers(1, len(texts)))
+    for comment in comments:
+        board.comment_on_item(card_id, number, comment)
+    added = board.cards[card_id].items[number - 1].comments
+    assert [comment.text for comment in added] == comments
+    assert len({comment.id for comment in added}) == len(comments)
+    items = before.cards[card_id].items
+    items[number - 1] = items[number - 1].model_copy(update={"comments": added})
+    assert board == before
+
+
 @given(card_ids(), st.lists(st.tuples(item_texts(), item_texts()), min_size=1))
 def test_an_item_keeps_its_other_paragraphs(card_id: str, paragraphs: list[tuple[str, str]]) -> None:
     """Assemble: a numbered list whose items each have two paragraphs.

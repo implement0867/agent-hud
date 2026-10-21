@@ -22,6 +22,7 @@ from agent_hud.models.events import (
     BoardChanged,
     CommentAdded,
     EventKind,
+    ItemCommentAdded,
     ItemReactionSet,
     MessageReceived,
     MessageSent,
@@ -209,6 +210,32 @@ async def test_page_and_agents_get_the_comment_on_the_card(
             assert CommentAdded.model_validate_json(await listener.recv()) == comment_added
 
 
+@given(card_ids(), st.lists(item_texts(), min_size=1), messages(), st.data())
+@settings(deadline=None)
+async def test_page_and_agents_get_the_comment_on_the_item(
+    page: ClientConnection,
+    listeners: list[ClientConnection],
+    agent: Client[Any],
+    card_id: str,
+    texts: list[str],
+    text: str,
+    data: st.DataObject,
+) -> None:
+    """Assemble: a card of a numbered list that the agent put, a page that got the board, and two agents' listeners.
+    Act: the page adds a comment to one item.
+    Assert: the page gets the board with the comment on the item, and each listener gets the comment."""
+    number = data.draw(st.integers(1, len(texts)))
+    item_comment_added = ItemCommentAdded(kind=EventKind.item_comment_added, id=card_id, item=number, text=text)
+    async with asyncio.timeout(5):
+        await agent.call_tool("write", {"ops": as_json(put(card_id, numbered_list(texts)))})
+        await page.recv()
+        await page.send(item_comment_added.model_dump_json())
+        items = BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].items
+        assert items[number - 1].comments[0].text == text
+        for listener in listeners:
+            assert ItemCommentAdded.model_validate_json(await listener.recv()) == item_comment_added
+
+
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
 @given(host_names())
 @settings(deadline=None)
@@ -301,6 +328,20 @@ async def test_a_comment_on_a_missing_card_changes_nothing(new_store: BoardStore
     Assert: the board is still empty."""
     new_store.comment(card_id, text)
     assert new_store.read() == Board()
+
+
+@given(st.builds(BoardStore), card_ids(), st.lists(item_texts()), messages(), st.integers(min_value=0))
+async def test_a_comment_on_a_missing_item_changes_nothing(
+    new_store: BoardStore, card_id: str, texts: list[str], text: str, extra: int
+) -> None:
+    """Assemble: a store with a card of a numbered list, or a missing card, as after the agent replaced or removed it.
+    Act: comment on an item after the last.
+    Assert: the board is unchanged."""
+    if texts:
+        new_store.apply([put(card_id, numbered_list(texts))])
+    before = new_store.read()
+    new_store.comment_on_item(card_id, len(texts) + 1 + extra, text)
+    assert new_store.read() == before
 
 
 @given(blanks())
