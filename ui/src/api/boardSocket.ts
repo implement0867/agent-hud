@@ -3,13 +3,16 @@ import { invariant } from "~/lib/invariant";
 import {
   EventKind,
   messageSentSchema,
+  reactionSetSchema,
   serverEventSchema,
 } from "~/schemas/events";
-import type { TBoard } from "~/schemas/board";
+import type { TBoard, TReaction } from "~/schemas/board";
 
 export type TBoardSocket = {
   /** Resolves true when the server confirms the message, or false when the connection closes first. */
   send: (message: string) => Promise<boolean>;
+  /** The page gets the board with the reaction on the card. */
+  react: (id: string, reaction: TReaction | null) => void;
   close: () => void;
 };
 
@@ -67,6 +70,14 @@ export const openBoardSocket = (
       return new Promise((resolve) => {
         unconfirmed.push(resolve);
       });
+    },
+    react: (id, reaction) => {
+      const event = reactionSetSchema.parse({
+        kind: EventKind.enum.reaction_set,
+        id,
+        reaction,
+      });
+      socket.send(JSON.stringify(event));
     },
     close: () => {
       listening.abort();
