@@ -13,7 +13,8 @@ Call `write` with a list of actions. They run in order, all or nothing.
 
 - `put {id, md}` adds a card of markdown, or replaces the card with that id. A replaced card loses its feedback, values and arrows.
 - `remove {id}` removes a card.
-- `say {text}` sends a message to the user.
+- `say {text}` sends a message to the user. It shows in the chat on the page.
+- `move {id, x, y}` places a card on the board, in pixels. A card with no place goes below the others.
 - `react {ref, reaction}`, `comment {ref, text}`, `fill {ref, value}` and `link {id, src, dst, text}` act on cards as the user does.
 
 Put one subject on each card, with a short id such as `plan` or `risks`. Write each step or option as a list item or a table body row, so that the user can give feedback on it.
@@ -42,7 +43,7 @@ A table header with a spec makes an input column that the user fills:
 
 ## Read feedback
 
-- `read` returns the board: the cards, the threads of reactions and comments by ref, the values by cell ref, and the arrows. Cards with the author `user` are notes from the user.
+- `read` returns the board: the cards, the threads of reactions and comments by ref, the values by cell ref, the arrows, the chat messages and the card positions. Cards with the author `user` are notes from the user, or cards that the user edited. Cards that the user placed near each other belong together for the user.
 - `listen` returns the websocket URL of the user's actions. Open it with the Monitor tool to get each action when the user makes it, and open it again when the monitor ends.
 
 After you show content for review, tell the user what to review, then wait for their actions. Read the board before you act on the feedback.

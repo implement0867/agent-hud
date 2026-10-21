@@ -8,6 +8,7 @@ from agent_hud.models.actions import (
     Comment,
     Fill,
     Link,
+    Move,
     Put,
     React,
     Reaction,
@@ -50,6 +51,11 @@ class Arrow(Model):
     author: Author
 
 
+class Point(Model):
+    x: float
+    y: float
+
+
 class Thread(Model):
     """The reaction and comments on one part of the board."""
 
@@ -65,7 +71,7 @@ class Thread(Model):
             case Comment(text=text):
                 said = Said(id=action.id, author=action.author, text=text)
                 return self.model_copy(update={"comments": (*self.comments, said)})
-            case Put() | Remove() | Say() | Fill() | Link() | Unlink():
+            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move():
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
@@ -76,6 +82,8 @@ class Board(Model):
     threads: dict[TRef, Thread] = Field(default_factory=dict)
     values: dict[TRef, TValue] = Field(default_factory=dict)
     arrows: dict[TCardId, Arrow] = Field(default_factory=dict)
+    messages: tuple[Said, ...] = ()
+    positions: dict[TCardId, Point] = Field(default_factory=dict)
 
     def apply(self, action: Action) -> "Board":
         """The board after the action. ValueError if the action does not fit the board."""
@@ -85,7 +93,8 @@ class Board(Model):
                 return self._clear(card_id).model_copy(update={"cards": cards})
             case Remove(id=card_id) if card_id in self.cards:
                 cards = {k: v for k, v in self.cards.items() if k != card_id}
-                return self._clear(card_id).model_copy(update={"cards": cards})
+                positions = {k: v for k, v in self.positions.items() if k != card_id}
+                return self._clear(card_id).model_copy(update={"cards": cards, "positions": positions})
             case Remove(id=card_id):
                 raise ValueError(f"no card '{card_id}'")
             case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref) if ref not in self._parts(ref):
@@ -112,8 +121,13 @@ class Board(Model):
                 return self.model_copy(update={"arrows": {k: v for k, v in self.arrows.items() if k != arrow_id}})
             case Unlink(id=arrow_id):
                 raise ValueError(f"no arrow '{arrow_id}'")
-            case Say():
-                return self
+            case Move(id=card_id, x=x, y=y) if card_id in self.cards:
+                return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
+            case Move(id=card_id):
+                raise ValueError(f"no card '{card_id}'")
+            case Say(text=text):
+                said = Said(id=action.id, author=action.author, text=text)
+                return self.model_copy(update={"messages": (*self.messages, said)})
             case _:
                 assert_never(action.body)
 

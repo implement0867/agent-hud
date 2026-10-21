@@ -22,14 +22,20 @@ const arrowSchema = z.strictObject({
   author: Author,
 });
 
+const pointSchema = z.strictObject({ x: z.number(), y: z.number() });
+
 export const boardSchema = z.strictObject({
   cards: z.record(z.string(), cardSchema),
   threads: z.record(z.string(), threadSchema),
   values: z.record(z.string(), valueSchema),
   arrows: z.record(z.string(), arrowSchema),
+  messages: z.array(saidSchema),
+  positions: z.record(z.string(), pointSchema),
 });
 
 export type TCard = z.infer<typeof cardSchema>;
+export type TArrow = z.infer<typeof arrowSchema>;
+export type TPoint = z.infer<typeof pointSchema>;
 export type TSaid = z.infer<typeof saidSchema>;
 export type TThread = z.infer<typeof threadSchema>;
 export type TBoard = z.infer<typeof boardSchema>;

@@ -5,11 +5,22 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from agent_hud.models.actions import Action, Author, Reaction, TBody, TValue
-from agent_hud.models.board import Arrow, Board, Card, Said, Thread
+from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
-from tests.factories import comment, fill, link, put, react, remove, say, unlink, unreact
-from tests.strategies import action_ids, actions, card_ids, item_texts, list_md, mds, messages, table_md, tables
+from tests.factories import comment, fill, link, move, put, react, remove, say, unlink, unreact
+from tests.strategies import (
+    action_ids,
+    actions,
+    card_ids,
+    coordinates,
+    item_texts,
+    list_md,
+    mds,
+    messages,
+    table_md,
+    tables,
+)
 
 
 @st.composite
@@ -48,13 +59,45 @@ def test_put_sets_the_card_and_clears_its_threads(board: Board, card_id: str, md
 def test_remove_drops_the_card_and_its_threads_or_raises(board: Board, card_id: str) -> None:
     """Assemble: any board.
     Act: remove a card.
-    Assert: the rest of the board is unchanged and the card is gone, or ValueError when there was no card."""
+    Assert: the rest of the board is unchanged and the card and its position are gone, or ValueError when there was no card."""
     if card_id in board.cards:
         after = act(board, remove(card_id))
         assert (after.cards, after.threads) == outside(board, card_id)
+        assert after.positions == {k: v for k, v in board.positions.items() if k != card_id}
     else:
         with pytest.raises(ValueError):
             act(board, remove(card_id))
+
+
+@given(boards(), card_ids(), coordinates(), coordinates())
+def test_move_places_the_card_or_raises(board: Board, card_id: str, x: float, y: float) -> None:
+    """Assemble: any board.
+    Act: move a card.
+    Assert: the card has the new position and the rest of the board is unchanged, or ValueError when there was no card."""
+    if card_id in board.cards:
+        after = act(board, move(card_id, x, y))
+        assert after == board.model_copy(update={"positions": {**board.positions, card_id: Point(x=x, y=y)}})
+    else:
+        with pytest.raises(ValueError):
+            act(board, move(card_id, x, y))
+
+
+@given(card_ids(), mds(), mds(), coordinates(), coordinates())
+def test_put_keeps_the_position_of_the_card(card_id: str, md: str, again: str, x: float, y: float) -> None:
+    """Assemble: a board with a card that the user moved.
+    Act: put the card again.
+    Assert: the card keeps its position."""
+    board = act(act(Board(), put(card_id, md)), move(card_id, x, y))
+    assert act(board, put(card_id, again)).positions == {card_id: Point(x=x, y=y)}
+
+
+@given(card_ids(), mds(), coordinates(), coordinates())
+def test_remove_drops_the_position_of_the_card(card_id: str, md: str, x: float, y: float) -> None:
+    """Assemble: a board with a card that the user moved.
+    Act: remove the card.
+    Assert: the board has no position for it."""
+    board = act(act(Board(), put(card_id, md)), move(card_id, x, y))
+    assert act(board, remove(card_id)).positions == {}
 
 
 @given(card_ids(), st.lists(item_texts(), min_size=1), st.from_type(Reaction), messages(), st.data())
@@ -101,12 +144,16 @@ def test_comments_add_in_order_with_their_action_and_author(
     assert board.threads[card_id].comments == tuple(Said(id=i, author=a, text=t) for i, a, t in comments)
 
 
-@given(boards(), messages())
-def test_say_leaves_the_board_as_it_is(board: Board, text: str) -> None:
+@given(boards(), st.lists(st.tuples(action_ids(), st.from_type(Author), messages())))
+def test_say_adds_each_message_to_the_board(board: Board, messages: list[tuple[str, Author, str]]) -> None:
     """Assemble: any board.
-    Act: say a message.
-    Assert: the board is unchanged."""
-    assert act(board, say(text)) == board
+    Act: say each message.
+    Assert: the board has the messages in order, with the id of its action and its author, and is otherwise unchanged."""
+    said = board
+    for action_id, author, text in messages:
+        said = act(said, say(text), author, action_id)
+    added = tuple(Said(id=i, author=a, text=t) for i, a, t in messages)
+    assert said == board.model_copy(update={"messages": (*board.messages, *added)})
 
 
 @pytest.mark.parametrize("marker", ["- ", "1. "])

@@ -7,6 +7,7 @@ from agent_hud.models.actions import (
     Comment,
     Fill,
     Link,
+    Move,
     Put,
     React,
     Reaction,
@@ -54,6 +55,10 @@ def link(arrow_id: str, src: str, dst: str) -> Link:
 
 def unlink(arrow_id: str) -> Unlink:
     return Unlink(kind=ActionKind.unlink, id=arrow_id)
+
+
+def move(card_id: str, x: float, y: float) -> Move:
+    return Move(kind=ActionKind.move, id=card_id, x=x, y=y)
 
 
 def as_json(*bodies: TBody) -> list[dict[str, Any]]:

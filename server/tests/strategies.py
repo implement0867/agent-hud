@@ -2,7 +2,7 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
 from agent_hud.models.actions import Action, Author, Reaction, TBody, TCardId, TMessage, TValue
-from tests.factories import comment, fill, link, put, react, remove, say, unlink, unreact
+from tests.factories import comment, fill, link, move, put, react, remove, say, unlink, unreact
 
 
 def card_ids() -> st.SearchStrategy[str]:
@@ -65,6 +65,10 @@ def values() -> st.SearchStrategy[TValue]:
     )
 
 
+def coordinates() -> st.SearchStrategy[float]:
+    return st.floats(allow_nan=False, allow_infinity=False)
+
+
 def bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TBody]:
     return st.one_of(
         st.builds(put, ids, mds()),
@@ -76,6 +80,7 @@ def bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TBody]:
         st.builds(fill, refs(ids), values()),
         st.builds(link, ids, refs(ids), refs(ids)),
         st.builds(unlink, ids),
+        st.builds(move, ids, coordinates(), coordinates()),
     )
 
 
