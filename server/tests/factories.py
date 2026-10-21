@@ -6,6 +6,7 @@ from agent_hud.models.actions import (
     ActionKind,
     Comment,
     Fill,
+    Link,
     Put,
     React,
     Reaction,
@@ -13,6 +14,7 @@ from agent_hud.models.actions import (
     Say,
     TBody,
     TValue,
+    Unlink,
     Unreact,
 )
 from agent_hud.models.board import Board
@@ -44,6 +46,14 @@ def say(text: str) -> Say:
 
 def fill(ref: str, value: TValue) -> Fill:
     return Fill(kind=ActionKind.fill, ref=ref, value=value)
+
+
+def link(arrow_id: str, src: str, dst: str) -> Link:
+    return Link(kind=ActionKind.link, id=arrow_id, src=src, dst=dst)
+
+
+def unlink(arrow_id: str) -> Unlink:
+    return Unlink(kind=ActionKind.unlink, id=arrow_id)
 
 
 def as_json(*bodies: TBody) -> list[dict[str, Any]]:

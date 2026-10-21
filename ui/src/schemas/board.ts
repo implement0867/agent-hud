@@ -15,10 +15,18 @@ const threadSchema = z.strictObject({
   comments: z.array(saidSchema),
 });
 
+const arrowSchema = z.strictObject({
+  src: z.string(),
+  dst: z.string(),
+  text: z.string(),
+  author: Author,
+});
+
 export const boardSchema = z.strictObject({
   cards: z.record(z.string(), cardSchema),
   threads: z.record(z.string(), threadSchema),
   values: z.record(z.string(), valueSchema),
+  arrows: z.record(z.string(), arrowSchema),
 });
 
 export type TCard = z.infer<typeof cardSchema>;

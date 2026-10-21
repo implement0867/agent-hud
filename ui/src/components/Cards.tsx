@@ -24,6 +24,11 @@ const CardContext = createContext<{
   act: TAct;
 } | null>(null);
 
+const LinkContext = createContext<{
+  from: string | null;
+  setFrom: (from: string | null) => void;
+} | null>(null);
+
 const useCard = () => {
   const context = useContext(CardContext);
   invariant(context !== null, "parts render inside a card");
@@ -43,7 +48,7 @@ const ReactionButtons = ({
   <div
     role="group"
     aria-label={`Reactions on ${target}`}
-    className="mt-2 flex gap-1"
+    className="flex gap-1"
   >
     {Reaction.options.map((reaction) => (
       <button
@@ -64,6 +69,41 @@ const ReactionButtons = ({
     ))}
   </div>
 );
+
+/** The first press marks the arrow's source, a press on another part draws the arrow to it, and a second press on the source cancels. */
+const LinkButton = ({ target, act }: { target: string; act: TAct }) => {
+  const link = useContext(LinkContext);
+  invariant(link !== null, "parts render inside the cards");
+  const { from, setFrom } = link;
+  const [label, text] =
+    from === null
+      ? [`Link from ${target}`, "link"]
+      : from === target
+        ? [`Cancel link from ${target}`, "cancel"]
+        : [`Link ${from} to ${target}`, "link here"];
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className="rounded border border-stone-300 px-2 text-xs text-stone-600 hover:bg-stone-100"
+      onClick={() => {
+        if (from !== null && from !== target) {
+          const id = `u${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+          void act({
+            kind: ActionKind.enum.link,
+            id,
+            src: from,
+            dst: target,
+            text: "",
+          });
+        }
+        setFrom(from === null ? target : null);
+      }}
+    >
+      {text}
+    </button>
+  );
+};
 
 /** The page clears the box when it sends the comment. */
 const CommentForm = ({ target, act }: { target: string; act: TAct }) => {
@@ -105,7 +145,10 @@ const Feedback = ({
   act: TAct;
 }) => (
   <div className="not-prose">
-    <ReactionButtons target={target} thread={thread} act={act} />
+    <div className="mt-2 flex gap-1">
+      <ReactionButtons target={target} thread={thread} act={act} />
+      <LinkButton target={target} act={act} />
+    </div>
     <ul className="mt-2 space-y-1 text-sm text-stone-700">
       {thread.comments.map(({ id, text }) => (
         <li key={id} className="rounded bg-stone-100 px-2 py-1">
@@ -132,7 +175,7 @@ const PartFeedback = ({ node }: ExtraProps) => {
 };
 
 const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => (
-  <li>
+  <li data-ref={`${useCard().id}/${String(node?.properties["dataPart"])}`}>
     {children}
     <PartFeedback node={node} />
   </li>
@@ -140,7 +183,7 @@ const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => (
 
 /** A header row gets an empty cell above the feedback column. */
 const TableRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => (
-  <tr>
+  <tr data-ref={`${useCard().id}/${String(node?.properties["dataPart"])}`}>
     {children}
     {node?.properties["dataPart"] === undefined ? (
       <th />
@@ -263,7 +306,10 @@ const CardView = ({
     [id, threads, values, act],
   );
   return (
-    <article className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+    <article
+      data-ref={id}
+      className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm"
+    >
       <header className="mb-2 font-mono text-xs text-stone-400">{id}</header>
       <div className="prose prose-sm prose-stone max-w-none">
         <CardContext value={context}>
@@ -282,16 +328,22 @@ const CardView = ({
 };
 
 export const Cards = ({ board, act }: { board: TBoard; act: TAct }) => {
+  const [from, setFrom] = useState<string | null>(null);
+  const link = useMemo(() => ({ from, setFrom }), [from]);
   const cards = Object.entries(board.cards);
   if (cards.length === 0) return <Notice>No cards yet.</Notice>;
-  return cards.map(([id, card]) => (
-    <CardView
-      key={id}
-      id={id}
-      card={card}
-      threads={board.threads}
-      values={board.values}
-      act={act}
-    />
-  ));
+  return (
+    <LinkContext value={link}>
+      {cards.map(([id, card]) => (
+        <CardView
+          key={id}
+          id={id}
+          card={card}
+          threads={board.threads}
+          values={board.values}
+          act={act}
+        />
+      ))}
+    </LinkContext>
+  );
 };
