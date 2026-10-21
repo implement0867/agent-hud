@@ -16,6 +16,8 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
 from agent_hud.deps import get_store
+from agent_hud.models.board import Board
+from agent_hud.models.card import Reaction
 from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent
 from agent_hud.models.ops import TOp
 from agent_hud.server import build
@@ -23,7 +25,7 @@ from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
 from agent_hud.web import create_app
 from tests.factories import as_json
-from tests.strategies import blanks, card_ids, messages, ops
+from tests.strategies import blanks, card_ids, messages, ops, reactions
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -183,6 +185,17 @@ async def test_a_listener_gets_the_messages_sent_after_the_last_listener_stopped
         new_store.add_message(message)
     with new_store.listen() as listener:
         assert [listener.get_nowait() for _ in rest] == rest
+
+
+@given(st.builds(BoardStore), card_ids(), reactions())
+async def test_a_reaction_to_a_missing_card_changes_nothing(
+    new_store: BoardStore, card_id: str, reaction: Reaction | None
+) -> None:
+    """Assemble: an empty store, as after the agent removed the card the page showed.
+    Act: react to the card.
+    Assert: the board is still empty."""
+    new_store.react(card_id, reaction)
+    assert new_store.read() == Board()
 
 
 @given(blanks())

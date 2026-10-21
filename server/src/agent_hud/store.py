@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
 
 from agent_hud.models.board import Board
+from agent_hud.models.card import Reaction, TCardId
 from agent_hud.models.ops import TOp
 
 
@@ -20,6 +21,15 @@ class BoardStore:
 
     def apply(self, ops: list[TOp]) -> None:
         self._board.apply(ops)
+        self._publish()
+
+    def react(self, card_id: TCardId, reaction: Reaction | None) -> None:
+        """Set the user's reaction on the card, if the agent has not removed it since the page showed it."""
+        if card_id in self._board.cards:
+            self._board.react(card_id, reaction)
+            self._publish()
+
+    def _publish(self) -> None:
         self._changed.set()
         self._changed = asyncio.Event()
 
