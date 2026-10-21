@@ -17,12 +17,12 @@ def build() -> FastMCP:
     async def write(ops: Annotated[list[TOp], Field(min_length=1)], store: BoardStore = McpStoreDep) -> None:
         """Change the cards on the board. Ops run in order, all or nothing.
 
-        put {id, md}: create a card, or replace the card with that id. remove {id}: delete a card.
+        put {id, md}: create a card, or replace the card with that id. A card of one numbered list also gets its items. remove {id}: delete a card.
         """
         store.apply(ops)
 
     async def read(store: BoardStore = McpStoreDep) -> Board:
-        """Every card on the board with its markdown and the user's reaction and comments."""
+        """Every card on the board with its markdown, its items and the user's reaction and comments."""
         return store.read()
 
     async def listen() -> str:

@@ -8,7 +8,7 @@ from agent_hud.models.board import Board
 from agent_hud.models.card import Card, Reaction
 from agent_hud.models.ops import PutOp, RemoveOp, TOp
 from tests.factories import put
-from tests.strategies import boards, card_ids, messages, ops, reactions
+from tests.strategies import boards, card_ids, item_texts, messages, ops, reactions
 
 
 @st.composite
@@ -24,7 +24,7 @@ def dict_semantics(cards: dict[str, Card], ops: list[TOp]) -> dict[str, Card]:
     for op in ops:
         match op:
             case PutOp(id=card_id, md=md):
-                result[card_id] = Card(md=md)
+                result[card_id] = Card.from_md(md)
             case RemoveOp(id=card_id):
                 del result[card_id]
             case _:
@@ -60,7 +60,7 @@ def test_react_sets_the_reaction_on_that_card_only(
     board.apply([put(card_id, md)])
     before = dict(board.cards)
     board.react(card_id, reaction)
-    assert board.cards == {**before, card_id: Card(md=md, reaction=reaction)}
+    assert board.cards == {**before, card_id: Card.from_md(md).model_copy(update={"reaction": reaction})}
 
 
 @given(boards(card_ids()), card_ids(), st.text(min_size=1), st.lists(messages(), min_size=1))
@@ -76,3 +76,52 @@ def test_comments_add_to_that_card_only_in_order(board: Board, card_id: str, md:
     assert [comment.text for comment in comments] == texts
     assert len({comment.id for comment in comments}) == len(texts)
     assert {**board.cards, card_id: before[card_id]} == before
+
+
+@given(card_ids(), st.lists(item_texts(), min_size=1))
+def test_a_card_of_one_numbered_list_has_its_items(card_id: str, texts: list[str]) -> None:
+    """Assemble: a numbered list of texts.
+    Act: put a card of it.
+    Assert: the card's items are the texts in order."""
+    board = Board()
+    board.apply([put(card_id, "\n".join(f"{n}. {text}" for n, text in enumerate(texts, start=1)))])
+    assert [item.md for item in board.cards[card_id].items] == texts
+
+
+@given(card_ids(), st.lists(st.tuples(item_texts(), item_texts()), min_size=1))
+def test_an_item_keeps_its_other_paragraphs(card_id: str, paragraphs: list[tuple[str, str]]) -> None:
+    """Assemble: a numbered list whose items each have two paragraphs.
+    Act: put a card of it.
+    Assert: each item's markdown is its two paragraphs, without the indent."""
+    board = Board()
+    markers = [f"{n}. " for n in range(1, len(paragraphs) + 1)]
+    md = "\n".join(
+        f"{m}{first}\n\n{' ' * len(m)}{second}\n" for m, (first, second) in zip(markers, paragraphs, strict=True)
+    )
+    board.apply([put(card_id, md)])
+    assert [item.md for item in board.cards[card_id].items] == [f"{first}\n\n{second}" for first, second in paragraphs]
+
+
+@given(card_ids(), st.lists(item_texts(), min_size=1), st.data())
+def test_a_numbered_list_with_an_item_that_starts_with_a_heading_has_no_items(
+    card_id: str, texts: list[str], data: st.DataObject
+) -> None:
+    """Assemble: a numbered list of texts, one of which is a heading.
+    Act: put a card of it.
+    Assert: the card has no items."""
+    heading = data.draw(st.integers(0, len(texts) - 1))
+    board = Board()
+    lines = [f"{n + 1}. {'# ' if n == heading else ''}{text}" for n, text in enumerate(texts)]
+    board.apply([put(card_id, "\n".join(lines))])
+    assert board.cards[card_id].items == []
+
+
+@pytest.mark.parametrize("marker", ["", "- "])
+@given(card_ids(), st.lists(item_texts(), min_size=1))
+def test_a_card_of_lines_or_bullets_has_no_items(marker: str, card_id: str, texts: list[str]) -> None:
+    """Assemble: lines of texts, as a paragraph or a bulleted list.
+    Act: put a card of them.
+    Assert: the card has no items."""
+    board = Board()
+    board.apply([put(card_id, "\n".join(f"{marker}{text}" for text in texts))])
+    assert board.cards[card_id].items == []

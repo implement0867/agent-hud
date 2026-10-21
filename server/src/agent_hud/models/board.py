@@ -18,7 +18,7 @@ class Board(Model):
         for n, op in enumerate(ops, start=1):
             match op:
                 case PutOp(id=card_id, md=md):
-                    cards[card_id] = Card(md=md)
+                    cards[card_id] = Card.from_md(md)
                 case RemoveOp(id=card_id) if card_id in cards:
                     del cards[card_id]
                 case RemoveOp(id=card_id):

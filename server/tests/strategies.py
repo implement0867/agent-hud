@@ -35,6 +35,11 @@ def ops(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TOp]:
     return st.one_of(st.builds(put, ids, st.text(min_size=1)), st.builds(remove, ids))
 
 
+def item_texts() -> st.SearchStrategy[str]:
+    """Words of letters and digits that start with a letter, which markdown keeps as they are."""
+    return st.from_regex(r"[A-Za-z]([A-Za-z0-9 ]*[A-Za-z0-9])?", fullmatch=True)
+
+
 def messages() -> st.SearchStrategy[str]:
     return st.from_regex(TypeAdapter(TMessage).json_schema()["pattern"])
 
