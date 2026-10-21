@@ -4,22 +4,39 @@ import Markdown from "react-markdown";
 import { Notice } from "~/components/Notice";
 import type { TBoardSocket } from "~/api/boardSocket";
 import { Reaction } from "~/schemas/board";
-import type { TBoard, TCard, TReaction } from "~/schemas/board";
+import type { TBoard, TCard, TComment, TReaction } from "~/schemas/board";
 import { messageSchema } from "~/schemas/events";
 
 type TReact = TBoardSocket["react"];
 type TReactToItem = TBoardSocket["reactToItem"];
-type TComment = TBoardSocket["comment"];
+type TCommentOnCard = TBoardSocket["comment"];
+type TCommentOnItem = TBoardSocket["commentOnItem"];
+
+const CommentList = ({ comments }: { comments: TComment[] }) => (
+  <ul className="mt-2 space-y-1 text-sm text-stone-700">
+    {comments.map(({ id, text }) => (
+      <li key={id} className="rounded bg-stone-100 px-2 py-1">
+        {text}
+      </li>
+    ))}
+  </ul>
+);
 
 /** The page clears the box when it sends the comment. */
-const CommentForm = ({ id, comment }: { id: string; comment: TComment }) => {
+const CommentForm = ({
+  label,
+  comment,
+}: {
+  label: string;
+  comment: (text: string) => void;
+}) => {
   const [text, setText] = useState("");
   return (
     <div className="mt-2 flex gap-1">
       <input
         className="flex-1 rounded border border-stone-300 px-2 text-sm"
         placeholder="Comment"
-        aria-label={`Comment on ${id}`}
+        aria-label={label}
         value={text}
         onChange={(event) => {
           setText(event.target.value);
@@ -30,7 +47,7 @@ const CommentForm = ({ id, comment }: { id: string; comment: TComment }) => {
         className="rounded border border-stone-300 px-2 text-xs text-stone-600 hover:bg-stone-100 disabled:text-stone-300"
         disabled={!messageSchema.safeParse(text).success}
         onClick={() => {
-          comment(id, text);
+          comment(text);
           setText("");
         }}
       >
@@ -73,12 +90,14 @@ const CardView = ({
   react,
   reactToItem,
   comment,
+  commentOnItem,
 }: {
   id: string;
   card: TCard;
   react: TReact;
   reactToItem: TReactToItem;
-  comment: TComment;
+  comment: TCommentOnCard;
+  commentOnItem: TCommentOnItem;
 }) => (
   <article className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
     <header className="mb-2 font-mono text-xs text-stone-400">{id}</header>
@@ -100,6 +119,13 @@ const CardView = ({
                 reactToItem(id, index + 1, reaction);
               }}
             />
+            <CommentList comments={item.comments} />
+            <CommentForm
+              label={`Comment on ${id} item ${String(index + 1)}`}
+              comment={(text) => {
+                commentOnItem(id, index + 1, text);
+              }}
+            />
           </li>
         ))}
       </ol>
@@ -111,14 +137,13 @@ const CardView = ({
         react(id, reaction);
       }}
     />
-    <ul className="mt-2 space-y-1 text-sm text-stone-700">
-      {card.comments.map(({ id, text }) => (
-        <li key={id} className="rounded bg-stone-100 px-2 py-1">
-          {text}
-        </li>
-      ))}
-    </ul>
-    <CommentForm id={id} comment={comment} />
+    <CommentList comments={card.comments} />
+    <CommentForm
+      label={`Comment on ${id}`}
+      comment={(text) => {
+        comment(id, text);
+      }}
+    />
   </article>
 );
 
@@ -127,11 +152,13 @@ export const Cards = ({
   react,
   reactToItem,
   comment,
+  commentOnItem,
 }: {
   board: TBoard;
   react: TReact;
   reactToItem: TReactToItem;
-  comment: TComment;
+  comment: TCommentOnCard;
+  commentOnItem: TCommentOnItem;
 }) => {
   const cards = Object.entries(board.cards);
   if (cards.length === 0) return <Notice>No cards yet.</Notice>;
@@ -143,6 +170,7 @@ export const Cards = ({
       react={react}
       reactToItem={reactToItem}
       comment={comment}
+      commentOnItem={commentOnItem}
     />
   ));
 };
