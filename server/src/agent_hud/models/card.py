@@ -2,12 +2,14 @@ from enum import StrEnum
 from typing import Annotated
 from uuid import uuid4
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, WithJsonSchema
 
 from agent_hud.models.base import Model
 
 type TCardId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
 type TItemNumber = Annotated[int, Field(ge=1)]
+# JSON object keys are strings, so the schema names the number as a string.
+type TItemKey = Annotated[TItemNumber, WithJsonSchema({"type": "string", "pattern": "^[1-9][0-9]*$"})]
 
 
 class Reaction(StrEnum):
@@ -28,6 +30,6 @@ class Item(Model):
 
 class Card(Model):
     md: str = Field(min_length=1)
-    items: dict[TItemNumber, Item] = Field(default_factory=dict)
+    items: dict[TItemKey, Item] = Field(default_factory=dict)
     reaction: Reaction | None = None
     comments: list[Comment] = Field(default_factory=list)
