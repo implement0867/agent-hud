@@ -8,23 +8,32 @@ import type { TBoard } from "~/schemas/board";
 type TPoint = { x: number; y: number };
 type TPath = { id: string; from: TPoint; to: TPoint; text: string };
 
-/** The right end of the first line of the part, in the board's coordinates. */
-const anchorOf = (board: HTMLElement, ref: string): TPoint | null => {
+/** The right end of the first line of the part, in the board's coordinates, which the canvas shows at scale. */
+const anchorOf = (
+  board: HTMLElement,
+  ref: string,
+  scale: number,
+): TPoint | null => {
   const part = board.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
   if (part === null) return null;
   const box = board.getBoundingClientRect();
   const rect = part.getBoundingClientRect();
-  return { x: rect.right - box.left, y: rect.top - box.top + 12 };
+  return {
+    x: (rect.right - box.left) / scale,
+    y: (rect.top - box.top) / scale + 12,
+  };
 };
 
 /** Each arrow curves out to the right of the board, from its source part to its target part. */
 export const Arrows = ({
   board,
   container,
+  scale,
   act,
 }: {
   board: TBoard;
   container: RefObject<HTMLDivElement | null>;
+  scale: number;
   act: TBoardSocket["act"];
 }) => {
   const [paths, setPaths] = useState<TPath[]>([]);
@@ -34,8 +43,8 @@ export const Arrows = ({
     const measure = () => {
       setPaths(
         Object.entries(board.arrows).flatMap(([id, { src, dst, text }]) => {
-          const from = anchorOf(root, src);
-          const to = anchorOf(root, dst);
+          const from = anchorOf(root, src, scale);
+          const to = anchorOf(root, dst, scale);
           return from === null || to === null ? [] : [{ id, from, to, text }];
         }),
       );
@@ -46,7 +55,7 @@ export const Arrows = ({
     return () => {
       observer.disconnect();
     };
-  }, [board, container]);
+  }, [board, container, scale]);
 
   return (
     <>
@@ -83,7 +92,7 @@ export const Arrows = ({
       {paths.map(({ id, from, to, text }) => (
         <div
           key={id}
-          className="absolute flex items-center gap-1 text-xs text-stone-600"
+          className="pointer-events-auto absolute flex items-center gap-1 text-xs text-stone-600"
           style={{
             left: Math.max(from.x, to.x) + 40,
             top: (from.y + to.y) / 2 - 8,

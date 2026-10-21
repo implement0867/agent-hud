@@ -2,6 +2,7 @@ import { useRef } from "react";
 
 import { Arrows } from "~/components/Arrows";
 import type { TBoardSocket } from "~/api/boardSocket";
+import { Canvas } from "~/components/Canvas";
 import { Cards } from "~/components/Cards";
 import { Notice } from "~/components/Notice";
 import { SendForm } from "~/components/SendForm";
@@ -20,10 +21,17 @@ const LiveBoard = ({
 }) => {
   const container = useRef<HTMLDivElement>(null);
   return (
-    <div ref={container} className="relative flex flex-col gap-4">
-      <Cards board={board} act={act} />
-      <Arrows board={board} container={container} act={act} />
-    </div>
+    <Canvas>
+      {({ scale }) => (
+        <div
+          ref={container}
+          className="relative flex w-[90rem] flex-wrap items-start gap-4"
+        >
+          <Cards board={board} act={act} />
+          <Arrows board={board} container={container} scale={scale} act={act} />
+        </div>
+      )}
+    </Canvas>
   );
 };
 
@@ -49,22 +57,24 @@ export const BoardView = () => {
   return (
     <>
       <BoardContent connection={connection} />
-      <SendForm
-        connection={connection}
-        label="Note for the agent"
-        button="Add note"
-        body={(md) => ({
-          kind: ActionKind.enum.put,
-          id: `note-${crypto.randomUUID().slice(0, 8)}`,
-          md,
-        })}
-      />
-      <SendForm
-        connection={connection}
-        label="Message to the agent"
-        button="Send"
-        body={(text) => ({ kind: ActionKind.enum.say, text })}
-      />
+      <div className="flex flex-col gap-2 border-t border-stone-200 bg-white p-4">
+        <SendForm
+          connection={connection}
+          label="Note for the agent"
+          button="Add note"
+          body={(md) => ({
+            kind: ActionKind.enum.put,
+            id: `note-${crypto.randomUUID().slice(0, 8)}`,
+            md,
+          })}
+        />
+        <SendForm
+          connection={connection}
+          label="Message to the agent"
+          button="Send"
+          body={(text) => ({ kind: ActionKind.enum.say, text })}
+        />
+      </div>
     </>
   );
 };
