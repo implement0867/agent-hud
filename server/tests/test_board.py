@@ -5,9 +5,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from agent_hud.models.board import Board
-from agent_hud.models.card import Card
+from agent_hud.models.card import Card, Reaction
 from agent_hud.models.ops import PutOp, RemoveOp, TOp
-from tests.strategies import boards, card_ids, ops
+from tests.factories import put
+from tests.strategies import boards, card_ids, ops, reactions
 
 
 @st.composite
@@ -47,3 +48,16 @@ def test_apply_follows_dict_semantics_all_or_nothing(case: tuple[Board, list[TOp
     else:
         board.apply(ops)
         assert board.cards == expected
+
+
+@given(boards(card_ids()), card_ids(), st.text(min_size=1), reactions())
+def test_react_sets_the_reaction_on_that_card_only(
+    board: Board, card_id: str, md: str, reaction: Reaction | None
+) -> None:
+    """Assemble: any board with a card put on it.
+    Act: react to the card.
+    Assert: the card has the reaction, and the other cards are unchanged."""
+    board.apply([put(card_id, md)])
+    before = dict(board.cards)
+    board.react(card_id, reaction)
+    assert board.cards == {**before, card_id: Card(md=md, reaction=reaction)}
