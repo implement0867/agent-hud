@@ -5,11 +5,12 @@ from fastapi import Depends, WebSocket, WebSocketException, status
 from fastmcp.dependencies import Depends as McpDepends
 
 from agent_hud.hud import Hud
+from agent_hud.settings import get_settings
 
 
 @lru_cache(maxsize=1)
 def get_hud() -> Hud:
-    return Hud()
+    return Hud(get_settings().state_file)
 
 
 def require_same_origin(websocket: WebSocket) -> None:

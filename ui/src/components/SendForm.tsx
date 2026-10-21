@@ -4,10 +4,21 @@ import type { TBoardSocket } from "~/api/boardSocket";
 import { ConnectionStatus } from "~/hooks/useBoard";
 import type { TConnection } from "~/hooks/useBoard";
 import { invariant } from "~/lib/invariant";
-import { ActionKind, messageSchema } from "~/schemas/actions";
+import { messageSchema } from "~/schemas/actions";
+import type { TBody } from "~/schemas/actions";
 
-/** Send is on while the page is live and the message has text. The message stays until the server confirms it. */
-export const SendForm = ({ connection }: { connection: TConnection }) => {
+/** The button is on while the page is live and the box has text. The text stays until the server takes the action. */
+export const SendForm = ({
+  connection,
+  label,
+  button,
+  body,
+}: {
+  connection: TConnection;
+  label: string;
+  button: string;
+  body: (text: string) => TBody;
+}) => {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const act =
@@ -19,7 +30,7 @@ export const SendForm = ({ connection }: { connection: TConnection }) => {
 
   const sendMessage = async (act: TBoardSocket["act"]) => {
     setSending(true);
-    if (await act({ kind: ActionKind.enum.say, text: message })) setMessage("");
+    if (await act(body(message))) setMessage("");
     setSending(false);
   };
 
@@ -27,8 +38,8 @@ export const SendForm = ({ connection }: { connection: TConnection }) => {
     <div className="flex gap-2">
       <textarea
         className="flex-1 rounded-lg border border-stone-300 bg-white p-2"
-        placeholder="Message to the agent"
-        aria-label="Message to the agent"
+        placeholder={label}
+        aria-label={label}
         value={message}
         readOnly={sending}
         onChange={(event) => {
@@ -44,7 +55,7 @@ export const SendForm = ({ connection }: { connection: TConnection }) => {
           void sendMessage(act);
         }}
       >
-        Send
+        {button}
       </button>
     </div>
   );

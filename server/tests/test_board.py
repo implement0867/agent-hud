@@ -5,10 +5,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from agent_hud.models.actions import Action, Author, Reaction, TBody, TValue
-from agent_hud.models.board import Board, Card, Said, Thread
+from agent_hud.models.board import Arrow, Board, Card, Said, Thread
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
-from tests.factories import comment, fill, put, react, remove, say, unreact
+from tests.factories import comment, fill, link, put, react, remove, say, unlink, unreact
 from tests.strategies import action_ids, actions, card_ids, item_texts, list_md, mds, messages, table_md, tables
 
 
@@ -66,7 +66,8 @@ def test_feedback_fits_the_card_and_each_list_item_only(
     Assert: the card and its items take the feedback, and the others raise ValueError."""
     board = act(Board(), put(card_id, list_md("1. ", texts)))
     fits = data.draw(st.sampled_from([card_id, *(f"{card_id}/{n}" for n in range(1, len(texts) + 1))]))
-    misses = data.draw(st.sampled_from([f"{card_id}/{len(texts) + 1}", f"{card_id}x", f"{card_id}x/1"]))
+    other = data.draw(card_ids().filter(lambda other: other != card_id))
+    misses = data.draw(st.sampled_from([f"{card_id}/{len(texts) + 1}", other, f"{other}/1"]))
     for body in react(fits, reaction), unreact(fits), comment(fits, text):
         act(board, body)
     for body in react(misses, reaction), unreact(misses), comment(misses, text):
@@ -227,3 +228,48 @@ def test_a_put_with_a_column_it_cannot_read_raises(header: str) -> None:
     Assert: ValueError, so a write with it changes nothing."""
     with pytest.raises(ValueError):
         act(Board(), put("plan", f"| {header} |\n|---|\n| x |"))
+
+
+@given(card_ids(), card_ids(), st.lists(item_texts(), min_size=1), st.from_type(Author), st.data())
+def test_link_draws_an_arrow_between_parts_and_unlink_removes_it(
+    card_id: str, arrow_id: str, texts: list[str], author: Author, data: st.DataObject
+) -> None:
+    """Assemble: a board with a card of a list.
+    Act: link two of its parts, then unlink the arrow.
+    Assert: the board has the arrow, then none."""
+    board = act(Board(), put(card_id, list_md("1. ", texts)))
+    parts = st.sampled_from([card_id, *(f"{card_id}/{n}" for n in range(1, len(texts) + 1))])
+    src, dst = data.draw(parts), data.draw(parts)
+    linked = act(board, link(arrow_id, src, dst), author)
+    assert linked.arrows == {arrow_id: Arrow(src=src, dst=dst, text="", author=author)}
+    assert act(linked, unlink(arrow_id)).arrows == {}
+
+
+@pytest.mark.parametrize("ends", [("a", "a/9"), ("a/9", "a"), ("a", "b"), ("b", "a")])
+def test_link_to_a_part_that_is_not_on_the_board_raises(ends: tuple[str, str]) -> None:
+    """Assemble: a board with card a of one list item.
+    Act: link to or from a part that is not there.
+    Assert: ValueError."""
+    board = act(Board(), put("a", "1. x"))
+    with pytest.raises(ValueError):
+        act(board, link("why", *ends))
+
+
+@given(card_ids())
+def test_unlink_of_no_arrow_raises(arrow_id: str) -> None:
+    """Assemble: an empty board.
+    Act: unlink an arrow.
+    Assert: ValueError."""
+    with pytest.raises(ValueError):
+        act(Board(), unlink(arrow_id))
+
+
+@pytest.mark.parametrize("body", [put("a", "1. y"), remove("a")])
+def test_put_or_remove_drops_the_arrows_that_touch_the_card(body: TBody) -> None:
+    """Assemble: a board with arrows from card a to card b, within b, and from b to a.
+    Act: put or remove card a.
+    Assert: only the arrow within b stays."""
+    board = act(act(Board(), put("a", "1. x")), put("b", "1. x"))
+    for arrow_id, src, dst in ("ab", "a/1", "b"), ("bb", "b", "b/1"), ("ba", "b/1", "a"):
+        board = act(board, link(arrow_id, src, dst))
+    assert list(act(board, body).arrows) == ["bb"]

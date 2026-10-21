@@ -1,0 +1,14 @@
+{
+  "name": "agent-hud",
+  "description": "The agent-hud plugin",
+  "owner": {
+    "name": "implement0867"
+  },
+  "plugins": [
+    {
+      "name": "agent-hud",
+      "source": "./",
+      "description": "A board in the browser that the agent and the user share"
+    }
+  ]
+}

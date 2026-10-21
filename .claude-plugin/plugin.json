@@ -1,0 +1,27 @@
+{
+  "name": "agent-hud",
+  "version": "0.1.0",
+  "description": "A board in the browser that the agent and the user share: cards, feedback, input cells and arrows",
+  "author": {
+    "name": "implement0867"
+  },
+  "repository": "https://github.com/implement0867/agent-hud",
+  "mcpServers": {
+    "board": {
+      "type": "http",
+      "url": "http://127.0.0.1:7676/mcp/"
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/serve.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
