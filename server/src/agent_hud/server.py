@@ -26,7 +26,7 @@ def build() -> FastMCP:
         return store.read()
 
     async def listen() -> str:
-        """The websocket URL of the user's messages. Open it with the Monitor tool, and again when the monitor ends."""
+        """The websocket URL of the user's messages and reactions. Open it with the Monitor tool, and again when the monitor ends."""
         return str(get_http_request().url.replace(scheme="ws", path="/agent"))
 
     mcp.tool(write)
