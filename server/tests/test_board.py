@@ -7,7 +7,7 @@ from hypothesis import strategies as st
 from agent_hud.models.board import Board
 from agent_hud.models.card import Card, Reaction
 from agent_hud.models.ops import PutOp, RemoveOp, TOp
-from tests.factories import put
+from tests.factories import put, without_item_ids
 from tests.strategies import boards, card_ids, item_texts, messages, numbered_list, ops, reactions
 
 
@@ -47,7 +47,7 @@ def test_apply_follows_dict_semantics_all_or_nothing(case: tuple[Board, list[TOp
         assert board == before, "a failed apply must not change the board"
     else:
         board.apply(ops)
-        assert board.cards == expected
+        assert without_item_ids(board) == without_item_ids(Board(cards=expected))
 
 
 @given(boards(card_ids()), card_ids(), st.text(min_size=1), reactions())
@@ -60,7 +60,7 @@ def test_react_sets_the_reaction_on_that_card_only(
     board.apply([put(card_id, md)])
     before = dict(board.cards)
     board.react(card_id, reaction)
-    assert board.cards == {**before, card_id: Card.from_md(md).model_copy(update={"reaction": reaction})}
+    assert board.cards == {**before, card_id: before[card_id].model_copy(update={"reaction": reaction})}
 
 
 @given(boards(card_ids()), card_ids(), st.text(min_size=1), st.lists(messages(), min_size=1))

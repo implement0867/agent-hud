@@ -23,6 +23,7 @@ class Comment(Model):
 
 
 class Item(Model):
+    id: str = Field(default_factory=lambda: uuid4().hex)
     md: str = Field(min_length=1)
     reaction: Reaction | None = None
 

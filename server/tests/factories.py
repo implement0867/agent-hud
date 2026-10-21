@@ -21,3 +21,8 @@ def as_json(*ops: TOp) -> list[dict[str, Any]]:
 
 async def read_board(client: Client[Any]) -> Board:
     return Board.model_validate((await client.call_tool("read", {})).structured_content)
+
+
+def without_item_ids(board: Board) -> dict[str, Any]:
+    """The board as JSON without its item ids, which each put makes new."""
+    return board.model_dump(mode="json", exclude={"cards": {"__all__": {"items": {"__all__": {"id"}}}}})
