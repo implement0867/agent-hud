@@ -1,11 +1,12 @@
 import asyncio
+from typing import assert_never
 
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agent_hud.deps import SameOriginDep, StoreDep
-from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent
+from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent, PageEventAdapter, ReactionSet
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import BoardStore
@@ -31,13 +32,19 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws", dependencies=[SameOriginDep])
     async def board_updates(websocket: WebSocket, store: StoreDep) -> None:
-        """Send the board on connect and after each change, and take and confirm the page's messages, until it disconnects."""
+        """Send the board on connect and after each change, and take the page's messages and reactions, until it disconnects."""
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
             sender = tg.create_task(send_boards(websocket, store))
             async for text in websocket.iter_text():
-                store.add_message(MessageSent.model_validate_json(text).message)
-                await websocket.send_text(MessageReceived(kind=EventKind.message_received).model_dump_json())
+                match event := PageEventAdapter.validate_json(text):
+                    case MessageSent(message=message):
+                        store.add_message(message)
+                        await websocket.send_text(MessageReceived(kind=EventKind.message_received).model_dump_json())
+                    case ReactionSet(id=card_id, reaction=reaction):
+                        store.react(card_id, reaction)
+                    case _:
+                        assert_never(event)
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[SameOriginDep])
