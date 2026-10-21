@@ -1,49 +1,42 @@
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Discriminator, StringConstraints, TypeAdapter
+from pydantic import Discriminator, TypeAdapter
 
+from agent_hud.models.actions import TActionId, TBody
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
-from agent_hud.models.card import Reaction, TCardId
-
-type TMessage = Annotated[str, StringConstraints(pattern=r"\S")]
 
 
 class EventKind(StrEnum):
-    board_changed = "board_changed"
-    message_sent = "message_sent"
-    message_received = "message_received"
-    reaction_set = "reaction_set"
-    comment_added = "comment_added"
+    snapshot = "snapshot"
+    accepted = "accepted"
+    rejected = "rejected"
 
 
-class BoardChanged(Model):
-    kind: Literal[EventKind.board_changed]
+class Snapshot(Model):
+    kind: Literal[EventKind.snapshot]
     board: Board
 
 
-class MessageSent(Model):
-    kind: Literal[EventKind.message_sent]
-    message: TMessage
+class Accepted(Model):
+    kind: Literal[EventKind.accepted]
+    id: TActionId
 
 
-class MessageReceived(Model):
-    kind: Literal[EventKind.message_received]
+class Rejected(Model):
+    kind: Literal[EventKind.rejected]
+    id: TActionId
+    reason: str
 
 
-class ReactionSet(Model):
-    kind: Literal[EventKind.reaction_set]
-    id: TCardId
-    reaction: Reaction | None
+class Request(Model):
+    """An action the page asks the board to take for the user."""
+
+    id: TActionId
+    body: TBody
 
 
-class CommentAdded(Model):
-    kind: Literal[EventKind.comment_added]
-    id: TCardId
-    text: TMessage
-
-
-type TPageEvent = Annotated[MessageSent | ReactionSet | CommentAdded, Discriminator("kind")]
+type TPageEvent = Annotated[Snapshot | Accepted | Rejected, Discriminator("kind")]
 
 PageEventAdapter = TypeAdapter[TPageEvent](TPageEvent)

@@ -4,12 +4,12 @@ from typing import Annotated
 from fastapi import Depends, WebSocket, WebSocketException, status
 from fastmcp.dependencies import Depends as McpDepends
 
-from agent_hud.store import BoardStore
+from agent_hud.hud import Hud
 
 
 @lru_cache(maxsize=1)
-def get_store() -> BoardStore:
-    return BoardStore()
+def get_hud() -> Hud:
+    return Hud()
 
 
 def require_same_origin(websocket: WebSocket) -> None:
@@ -19,6 +19,6 @@ def require_same_origin(websocket: WebSocket) -> None:
         raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"origin {origin} is not allowed")
 
 
-StoreDep = Annotated[BoardStore, Depends(get_store)]
-McpStoreDep = McpDepends(get_store)
+HudDep = Annotated[Hud, Depends(get_hud)]
+McpHudDep = McpDepends(get_hud)
 SameOriginDep = Depends(require_same_origin)

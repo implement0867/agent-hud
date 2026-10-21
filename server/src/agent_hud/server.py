@@ -1,32 +1,30 @@
 from typing import Annotated
+from uuid import uuid4
 
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_request
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from agent_hud.deps import McpStoreDep
+from agent_hud.deps import McpHudDep
+from agent_hud.hud import Hud
+from agent_hud.models.actions import Action, Author, TBody
 from agent_hud.models.board import Board
-from agent_hud.models.ops import TOp
-from agent_hud.store import BoardStore
 
 
 def build() -> FastMCP:
     mcp = FastMCP("agent-hud")
 
-    async def write(ops: Annotated[list[TOp], Field(min_length=1)], store: BoardStore = McpStoreDep) -> None:
-        """Change the cards on the board. Ops run in order, all or nothing.
+    async def write(actions: Annotated[list[TBody], Field(min_length=1)], hud: Hud = McpHudDep) -> None:
+        """Act on the board as the agent. Actions run in order, all or nothing. A put replaces the card and clears the feedback on it."""
+        hud.act([Action(id=uuid4().hex, author=Author.agent, body=body) for body in actions])
 
-        put {id, md}: create a card, or replace the card with that id. remove {id}: delete a card.
-        """
-        store.apply(ops)
-
-    async def read(store: BoardStore = McpStoreDep) -> Board:
-        """Every card on the board with its markdown and the user's reaction and comments."""
-        return store.read()
+    async def read(hud: Hud = McpHudDep) -> Board:
+        """The cards, and the threads of feedback on them by ref."""
+        return hud.board
 
     async def listen() -> str:
-        """The websocket URL of the user's messages, reactions and comments. Open it with the Monitor tool, and again when the monitor ends."""
+        """The websocket URL of the user's actions. Open it with the Monitor tool, and again when the monitor ends."""
         return str(get_http_request().url.replace(scheme="ws", path="/agent"))
 
     mcp.tool(write)

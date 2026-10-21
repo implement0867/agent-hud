@@ -1,17 +1,26 @@
 import { z } from "zod";
 
-export const Reaction = z.enum(["approve", "reject", "question"]);
+import { Author, Reaction } from "~/schemas/actions";
 
-export const cardSchema = z.strictObject({
-  md: z.string().min(1),
+const cardSchema = z.strictObject({ md: z.string().min(1), author: Author });
+
+const saidSchema = z.strictObject({
+  id: z.string(),
+  author: Author,
+  text: z.string(),
+});
+
+const threadSchema = z.strictObject({
   reaction: Reaction.nullable(),
-  comments: z.array(z.strictObject({ id: z.string(), text: z.string() })),
+  comments: z.array(saidSchema),
 });
 
 export const boardSchema = z.strictObject({
   cards: z.record(z.string(), cardSchema),
+  threads: z.record(z.string(), threadSchema),
 });
 
-export type TReaction = z.infer<typeof Reaction>;
 export type TCard = z.infer<typeof cardSchema>;
+export type TSaid = z.infer<typeof saidSchema>;
+export type TThread = z.infer<typeof threadSchema>;
 export type TBoard = z.infer<typeof boardSchema>;

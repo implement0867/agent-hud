@@ -12,13 +12,11 @@ export type TConnection =
   | {
       status: typeof ConnectionStatus.enum.live;
       board: TBoard;
-      send: TBoardSocket["send"];
-      react: TBoardSocket["react"];
-      comment: TBoardSocket["comment"];
+      act: TBoardSocket["act"];
     }
   | { status: typeof ConnectionStatus.enum.closed };
 
-/** The board from the server, replaced each time the agent changes it. `send` exists only while live. */
+/** The board from the server, replaced each time the agent changes it. `act` exists only while live. */
 export const useBoard = (): TConnection => {
   const [connection, setConnection] = useState<TConnection>({
     status: ConnectionStatus.enum.connecting,
@@ -30,9 +28,7 @@ export const useBoard = (): TConnection => {
         setConnection({
           status: ConnectionStatus.enum.live,
           board,
-          send: socket.send,
-          react: socket.react,
-          comment: socket.comment,
+          act: socket.act,
         });
       },
       () => {
