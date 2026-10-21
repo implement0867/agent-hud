@@ -14,6 +14,7 @@ const BoardContent = ({ connection }: { connection: TConnection }) => {
         <Cards
           board={connection.board}
           react={connection.react}
+          reactToItem={connection.reactToItem}
           comment={connection.comment}
         />
       );

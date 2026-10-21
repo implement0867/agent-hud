@@ -3,6 +3,7 @@ import { invariant } from "~/lib/invariant";
 import {
   EventKind,
   commentAddedSchema,
+  itemReactionSetSchema,
   messageSentSchema,
   reactionSetSchema,
   serverEventSchema,
@@ -14,6 +15,8 @@ export type TBoardSocket = {
   send: (message: string) => Promise<boolean>;
   /** The page gets the board with the reaction on the card. */
   react: (id: string, reaction: TReaction | null) => void;
+  /** The page gets the board with the reaction on the card's list item of that number. */
+  reactToItem: (id: string, item: number, reaction: TReaction | null) => void;
   /** The page gets the board with the comment on the card. */
   comment: (id: string, text: string) => void;
   close: () => void;
@@ -78,6 +81,15 @@ export const openBoardSocket = (
       const event = reactionSetSchema.parse({
         kind: EventKind.enum.reaction_set,
         id,
+        reaction,
+      });
+      socket.send(JSON.stringify(event));
+    },
+    reactToItem: (id, item, reaction) => {
+      const event = itemReactionSetSchema.parse({
+        kind: EventKind.enum.item_reaction_set,
+        id,
+        item,
         reaction,
       });
       socket.send(JSON.stringify(event));
