@@ -44,7 +44,7 @@ class Remove(Model):
 
 class React(Model):
     kind: Literal[ActionKind.react]
-    ref: TRef = Field(description="A card id, or a card id and the number of a list item in it, such as plan/2")
+    ref: TRef = Field(description="A card id, or a card id and the number of a list item or table row in it, such as plan/2")
     reaction: Reaction
 
 

@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import type { ComponentProps } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ExtraProps } from "react-markdown";
 
 import { Notice } from "~/components/Notice";
@@ -8,7 +9,7 @@ import type { TBoardSocket } from "~/api/boardSocket";
 import { ActionKind, Reaction, messageSchema } from "~/schemas/actions";
 import type { TBoard, TCard, TThread } from "~/schemas/board";
 import { invariant } from "~/lib/invariant";
-import { numberListItems } from "~/lib/numberListItems";
+import { numberParts } from "~/lib/numberParts";
 
 type TAct = TBoardSocket["act"];
 
@@ -107,23 +108,41 @@ const Feedback = ({
   </div>
 );
 
-const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => {
+const PartFeedback = ({ node }: ExtraProps) => {
   const context = useContext(CardContext);
-  const number = node?.properties["dataItem"];
-  invariant(context !== null, "list items render inside a card");
-  invariant(typeof number === "number", "numberListItems numbers each li");
+  const number = node?.properties["dataPart"];
+  invariant(context !== null, "parts render inside a card");
+  invariant(typeof number === "number", "numberParts numbers each part");
   const target = `${context.id}/${String(number)}`;
   return (
-    <li>
-      {children}
-      <Feedback
-        target={target}
-        thread={context.threads[target] ?? emptyThread}
-        act={context.act}
-      />
-    </li>
+    <Feedback
+      target={target}
+      thread={context.threads[target] ?? emptyThread}
+      act={context.act}
+    />
   );
 };
+
+const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => (
+  <li>
+    {children}
+    <PartFeedback node={node} />
+  </li>
+);
+
+/** A header row gets an empty cell above the feedback column. */
+const TableRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => (
+  <tr>
+    {children}
+    {node?.properties["dataPart"] === undefined ? (
+      <th />
+    ) : (
+      <td>
+        <PartFeedback node={node} />
+      </td>
+    )}
+  </tr>
+);
 
 const CardView = ({
   id,
@@ -143,8 +162,9 @@ const CardView = ({
       <div className="prose prose-sm prose-stone max-w-none">
         <CardContext value={context}>
           <Markdown
-            rehypePlugins={[numberListItems]}
-            components={{ li: ListItem }}
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[numberParts]}
+            components={{ li: ListItem, tr: TableRow }}
           >
             {card.md}
           </Markdown>

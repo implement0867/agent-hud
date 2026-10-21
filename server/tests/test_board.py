@@ -8,7 +8,7 @@ from agent_hud.models.actions import Action, Author, Reaction, TBody
 from agent_hud.models.board import Board, Card, Said, Thread
 from agent_hud.outline import Outline
 from tests.factories import comment, put, react, remove, say, unreact
-from tests.strategies import action_ids, actions, card_ids, item_texts, list_md, mds, messages
+from tests.strategies import action_ids, actions, card_ids, item_texts, list_md, mds, messages, table_md, tables
 
 
 @st.composite
@@ -131,3 +131,20 @@ def test_outline_of_lines_has_no_paths(texts: list[str]) -> None:
     Act: outline it.
     Assert: no paths."""
     assert Outline(list_md("", texts)).paths == frozenset()
+
+
+@given(tables())
+def test_outline_has_a_path_for_each_table_body_row(rows: list[list[str]]) -> None:
+    """Assemble: a table with a header row and body rows.
+    Act: outline it.
+    Assert: the paths are the numbers of the body rows."""
+    assert Outline(table_md(rows)).paths == {str(n) for n in range(1, len(rows) + 1)}
+
+
+@given(st.lists(item_texts(), min_size=1), tables())
+def test_outline_numbers_list_items_and_table_rows_together(texts: list[str], rows: list[list[str]]) -> None:
+    """Assemble: a list, then a table.
+    Act: outline them.
+    Assert: one path for each list item and each body row."""
+    md = list_md("1. ", texts) + "\n\n" + table_md(rows)
+    assert Outline(md).paths == {str(n) for n in range(1, len(texts) + len(rows) + 1)}

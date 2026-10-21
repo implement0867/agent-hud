@@ -26,6 +26,20 @@ def list_md(marker: str, texts: list[str]) -> str:
     return "\n".join(f"{marker}{text}" for text in texts)
 
 
+def table_md(rows: list[list[str]]) -> str:
+    """A table with a header row of the width of the first row."""
+    width = len(rows[0])
+    lines = [["h"] * width, ["---"] * width, *rows]
+    return "\n".join("| " + " | ".join(cells) + " |" for cells in lines)
+
+
+def tables() -> st.SearchStrategy[list[list[str]]]:
+    """Rows of one width, of words that markdown reads as plain text."""
+    return st.integers(1, 3).flatmap(
+        lambda width: st.lists(st.lists(item_texts(), min_size=width, max_size=width), min_size=1)
+    )
+
+
 def mds() -> st.SearchStrategy[str]:
     """Card markdown, often with a list, so that refs to list items fit some cards and not others."""
     lists = st.builds(list_md, st.sampled_from(["- ", "1. "]), st.lists(item_texts(), min_size=1, max_size=3))
