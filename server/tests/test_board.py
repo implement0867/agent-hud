@@ -66,7 +66,8 @@ def test_feedback_fits_the_card_and_each_list_item_only(
     Assert: the card and its items take the feedback, and the others raise ValueError."""
     board = act(Board(), put(card_id, list_md("1. ", texts)))
     fits = data.draw(st.sampled_from([card_id, *(f"{card_id}/{n}" for n in range(1, len(texts) + 1))]))
-    misses = data.draw(st.sampled_from([f"{card_id}/{len(texts) + 1}", f"{card_id}x", f"{card_id}x/1"]))
+    other = data.draw(card_ids().filter(lambda other: other != card_id))
+    misses = data.draw(st.sampled_from([f"{card_id}/{len(texts) + 1}", other, f"{other}/1"]))
     for body in react(fits, reaction), unreact(fits), comment(fits, text):
         act(board, body)
     for body in react(misses, reaction), unreact(misses), comment(misses, text):
