@@ -1,8 +1,8 @@
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
-from agent_hud.models.actions import Action, Author, Reaction, TBody, TCardId, TMessage
-from tests.factories import comment, put, react, remove, say, unreact
+from agent_hud.models.actions import Action, Author, Reaction, TBody, TCardId, TMessage, TValue
+from tests.factories import comment, fill, put, react, remove, say, unreact
 
 
 def card_ids() -> st.SearchStrategy[str]:
@@ -26,14 +26,43 @@ def list_md(marker: str, texts: list[str]) -> str:
     return "\n".join(f"{marker}{text}" for text in texts)
 
 
+def table_md(rows: list[list[str]], specs: list[str] | None = None) -> str:
+    """A table with a header row of the width of the first row, whose columns take the specs in order, then none."""
+    width = len(rows[0])
+    headers = [f"h{spec}" for spec in [*(specs or []), *[""] * width][:width]]
+    lines = [headers, ["---"] * width, *rows]
+    return "\n".join("| " + " | ".join(cells) + " |" for cells in lines)
+
+
+def tables() -> st.SearchStrategy[list[list[str]]]:
+    """Rows of one width, of words that markdown reads as plain text."""
+    return st.integers(1, 3).flatmap(
+        lambda width: st.lists(st.lists(item_texts(), min_size=width, max_size=width), min_size=1)
+    )
+
+
 def mds() -> st.SearchStrategy[str]:
     """Card markdown, often with a list, so that refs to list items fit some cards and not others."""
     lists = st.builds(list_md, st.sampled_from(["- ", "1. "]), st.lists(item_texts(), min_size=1, max_size=3))
-    return st.one_of(st.text(min_size=1), lists)
+    tables_md = st.builds(
+        table_md, tables(), st.lists(st.sampled_from(["", " {text}", " {number}", " {check}", " {a, b}"]))
+    )
+    return st.one_of(st.text(st.characters(exclude_characters="{"), min_size=1), lists, tables_md)
 
 
 def refs(ids: st.SearchStrategy[str]) -> st.SearchStrategy[str]:
-    return st.one_of(ids, st.builds("{}/{}".format, ids, st.integers(1, 4)))
+    numbers = st.integers(1, 4)
+    return st.one_of(ids, st.builds("{}/{}".format, ids, numbers), st.builds("{}/{}/{}".format, ids, numbers, numbers))
+
+
+def values() -> st.SearchStrategy[TValue]:
+    return st.one_of(
+        st.text(),
+        st.floats(allow_nan=False, allow_infinity=False),
+        st.booleans(),
+        st.none(),
+        st.sampled_from(["a", "b"]),
+    )
 
 
 def bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TBody]:
@@ -44,6 +73,7 @@ def bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TBody]:
         st.builds(unreact, refs(ids)),
         st.builds(comment, refs(ids), messages()),
         st.builds(say, messages()),
+        st.builds(fill, refs(ids), values()),
     )
 
 

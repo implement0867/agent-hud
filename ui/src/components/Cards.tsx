@@ -1,14 +1,34 @@
-import { useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
+import type { ComponentProps } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { ExtraProps } from "react-markdown";
 
 import { Notice } from "~/components/Notice";
 import type { TBoardSocket } from "~/api/boardSocket";
 import { ActionKind, Reaction, messageSchema } from "~/schemas/actions";
-import type { TBoard, TThread } from "~/schemas/board";
+import type { TValue } from "~/schemas/actions";
+import { ColumnKind } from "~/lib/columns";
+import type { TBoard, TCard, TThread } from "~/schemas/board";
+import { invariant } from "~/lib/invariant";
+import { numberParts } from "~/lib/numberParts";
 
 type TAct = TBoardSocket["act"];
 
 const emptyThread: TThread = { reaction: null, comments: [] };
+
+const CardContext = createContext<{
+  id: string;
+  threads: TBoard["threads"];
+  values: TBoard["values"];
+  act: TAct;
+} | null>(null);
+
+const useCard = () => {
+  const context = useContext(CardContext);
+  invariant(context !== null, "parts render inside a card");
+  return context;
+};
 
 /** Pressing the set reaction again clears it. */
 const ReactionButtons = ({
@@ -84,7 +104,7 @@ const Feedback = ({
   thread: TThread;
   act: TAct;
 }) => (
-  <>
+  <div className="not-prose">
     <ReactionButtons target={target} thread={thread} act={act} />
     <ul className="mt-2 space-y-1 text-sm text-stone-700">
       {thread.comments.map(({ id, text }) => (
@@ -94,26 +114,184 @@ const Feedback = ({
       ))}
     </ul>
     <CommentForm target={target} act={act} />
-  </>
+  </div>
 );
+
+const PartFeedback = ({ node }: ExtraProps) => {
+  const context = useCard();
+  const number = node?.properties["dataPart"];
+  invariant(typeof number === "number", "numberParts numbers each part");
+  const target = `${context.id}/${String(number)}`;
+  return (
+    <Feedback
+      target={target}
+      thread={context.threads[target] ?? emptyThread}
+      act={context.act}
+    />
+  );
+};
+
+const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => (
+  <li>
+    {children}
+    <PartFeedback node={node} />
+  </li>
+);
+
+/** A header row gets an empty cell above the feedback column. */
+const TableRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => (
+  <tr>
+    {children}
+    {node?.properties["dataPart"] === undefined ? (
+      <th />
+    ) : (
+      <td>
+        <PartFeedback node={node} />
+      </td>
+    )}
+  </tr>
+);
+
+/** Text and number cells send their value when they lose focus; checks and selects on each change. Empty clears. */
+const CellInput = ({
+  target,
+  kind,
+  options,
+}: {
+  target: string;
+  kind: unknown;
+  options: unknown;
+}) => {
+  const { values, act } = useCard();
+  const value = values[target] ?? null;
+  const fill = (next: TValue) => {
+    if (next !== value)
+      void act({ kind: ActionKind.enum.fill, ref: target, value: next });
+  };
+  const label = `Input ${target}`;
+  switch (kind) {
+    case ColumnKind.enum.check:
+      return (
+        <input
+          type="checkbox"
+          aria-label={label}
+          checked={value === true}
+          onChange={(event) => {
+            fill(event.target.checked);
+          }}
+        />
+      );
+    case ColumnKind.enum.select:
+      invariant(
+        Array.isArray(options),
+        "numberParts gives a select its options",
+      );
+      return (
+        <select
+          aria-label={label}
+          className="rounded border border-stone-300 text-sm"
+          value={typeof value === "string" ? value : ""}
+          onChange={(event) => {
+            fill(event.target.value === "" ? null : event.target.value);
+          }}
+        >
+          <option value="" />
+          {options.map((option) => (
+            <option key={String(option)}>{String(option)}</option>
+          ))}
+        </select>
+      );
+    case ColumnKind.enum.text:
+    case ColumnKind.enum.number:
+      return (
+        <input
+          key={String(value)}
+          type={kind}
+          aria-label={label}
+          className="w-full rounded border border-stone-300 px-1 text-sm"
+          defaultValue={value === null ? "" : String(value)}
+          onBlur={(event) => {
+            const text = event.target.value;
+            fill(
+              text === ""
+                ? null
+                : kind === ColumnKind.enum.number
+                  ? Number(text)
+                  : text,
+            );
+          }}
+        />
+      );
+    default:
+      throw new Error(`numberParts gives no input of kind ${String(kind)}`);
+  }
+};
+
+const TableCell = ({ node, children }: ComponentProps<"td"> & ExtraProps) => {
+  const target = node?.properties["dataInput"];
+  const { id } = useCard();
+  return (
+    <td>
+      {typeof target === "string" ? (
+        <CellInput
+          target={`${id}/${target}`}
+          kind={node?.properties["dataKind"]}
+          options={node?.properties["dataOptions"]}
+        />
+      ) : (
+        children
+      )}
+    </td>
+  );
+};
+
+const CardView = ({
+  id,
+  card,
+  threads,
+  values,
+  act,
+}: {
+  id: string;
+  card: TCard;
+  threads: TBoard["threads"];
+  values: TBoard["values"];
+  act: TAct;
+}) => {
+  const context = useMemo(
+    () => ({ id, threads, values, act }),
+    [id, threads, values, act],
+  );
+  return (
+    <article className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <header className="mb-2 font-mono text-xs text-stone-400">{id}</header>
+      <div className="prose prose-sm prose-stone max-w-none">
+        <CardContext value={context}>
+          <Markdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[numberParts]}
+            components={{ li: ListItem, tr: TableRow, td: TableCell }}
+          >
+            {card.md}
+          </Markdown>
+        </CardContext>
+      </div>
+      <Feedback target={id} thread={threads[id] ?? emptyThread} act={act} />
+    </article>
+  );
+};
 
 export const Cards = ({ board, act }: { board: TBoard; act: TAct }) => {
   const cards = Object.entries(board.cards);
   if (cards.length === 0) return <Notice>No cards yet.</Notice>;
   return cards.map(([id, card]) => (
-    <article
+    <CardView
       key={id}
-      className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm"
-    >
-      <header className="mb-2 font-mono text-xs text-stone-400">{id}</header>
-      <div className="prose prose-sm prose-stone max-w-none">
-        <Markdown>{card.md}</Markdown>
-      </div>
-      <Feedback
-        target={id}
-        thread={board.threads[id] ?? emptyThread}
-        act={act}
-      />
-    </article>
+      id={id}
+      card={card}
+      threads={board.threads}
+      values={board.values}
+      act={act}
+    />
   ));
 };

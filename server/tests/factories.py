@@ -5,12 +5,14 @@ from fastmcp import Client
 from agent_hud.models.actions import (
     ActionKind,
     Comment,
+    Fill,
     Put,
     React,
     Reaction,
     Remove,
     Say,
     TBody,
+    TValue,
     Unreact,
 )
 from agent_hud.models.board import Board
@@ -38,6 +40,10 @@ def comment(ref: str, text: str) -> Comment:
 
 def say(text: str) -> Say:
     return Say(kind=ActionKind.say, text=text)
+
+
+def fill(ref: str, value: TValue) -> Fill:
+    return Fill(kind=ActionKind.fill, ref=ref, value=value)
 
 
 def as_json(*bodies: TBody) -> list[dict[str, Any]]:
