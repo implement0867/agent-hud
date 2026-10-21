@@ -1,11 +1,12 @@
 import { z } from "zod";
 
-import { boardSchema } from "~/schemas/board";
+import { Reaction, boardSchema } from "~/schemas/board";
 
 export const EventKind = z.enum([
   "board_changed",
   "message_sent",
   "message_received",
+  "reaction_set",
 ]);
 
 export const messageSchema = z.string().regex(/\S/);
@@ -27,4 +28,10 @@ export const serverEventSchema = z.discriminatedUnion("kind", [
 export const messageSentSchema = z.strictObject({
   kind: z.literal(EventKind.enum.message_sent),
   message: messageSchema,
+});
+
+export const reactionSetSchema = z.strictObject({
+  kind: z.literal(EventKind.enum.reaction_set),
+  id: z.string(),
+  reaction: Reaction.nullable(),
 });
