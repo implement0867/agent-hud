@@ -2,6 +2,7 @@ import { assertNever } from "~/lib/assertNever";
 import { invariant } from "~/lib/invariant";
 import {
   EventKind,
+  commentAddedSchema,
   messageSentSchema,
   reactionSetSchema,
   serverEventSchema,
@@ -13,6 +14,8 @@ export type TBoardSocket = {
   send: (message: string) => Promise<boolean>;
   /** The page gets the board with the reaction on the card. */
   react: (id: string, reaction: TReaction | null) => void;
+  /** The page gets the board with the comment on the card. */
+  comment: (id: string, text: string) => void;
   close: () => void;
 };
 
@@ -76,6 +79,14 @@ export const openBoardSocket = (
         kind: EventKind.enum.reaction_set,
         id,
         reaction,
+      });
+      socket.send(JSON.stringify(event));
+    },
+    comment: (id, text) => {
+      const event = commentAddedSchema.parse({
+        kind: EventKind.enum.comment_added,
+        id,
+        text,
       });
       socket.send(JSON.stringify(event));
     },

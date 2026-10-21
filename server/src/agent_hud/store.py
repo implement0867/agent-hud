@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 from agent_hud.models.board import Board
 from agent_hud.models.card import Reaction, TCardId
-from agent_hud.models.events import EventKind, MessageSent, ReactionSet, TPageEvent
+from agent_hud.models.events import CommentAdded, EventKind, MessageSent, ReactionSet, TPageEvent
 from agent_hud.models.ops import TOp
 
 
@@ -30,6 +30,13 @@ class BoardStore:
             self._board.react(card_id, reaction)
             self._publish()
             self._forward(ReactionSet(kind=EventKind.reaction_set, id=card_id, reaction=reaction))
+
+    def comment(self, card_id: TCardId, text: str) -> None:
+        """Add the user's comment to the card, if the agent has not removed it since the page showed it."""
+        if card_id in self._board.cards:
+            self._board.comment(card_id, text)
+            self._publish()
+            self._forward(CommentAdded(kind=EventKind.comment_added, id=card_id, text=text))
 
     def _publish(self) -> None:
         self._changed.set()

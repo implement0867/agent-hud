@@ -3,7 +3,7 @@ from typing import assert_never
 from pydantic import ConfigDict, Field
 
 from agent_hud.models.base import Model
-from agent_hud.models.card import Card, Reaction, TCardId
+from agent_hud.models.card import Card, Comment, Reaction, TCardId
 from agent_hud.models.ops import PutOp, RemoveOp, TOp
 
 
@@ -30,3 +30,8 @@ class Board(Model):
     def react(self, card_id: TCardId, reaction: Reaction | None) -> None:
         """Set the user's reaction on the card. KeyError for a missing card."""
         self.cards[card_id] = self.cards[card_id].model_copy(update={"reaction": reaction})
+
+    def comment(self, card_id: TCardId, text: str) -> None:
+        """Add the user's comment to the card. KeyError for a missing card."""
+        card = self.cards[card_id]
+        self.cards[card_id] = card.model_copy(update={"comments": [*card.comments, Comment(text=text)]})

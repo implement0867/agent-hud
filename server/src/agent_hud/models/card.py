@@ -1,5 +1,6 @@
 from enum import StrEnum
 from typing import Annotated
+from uuid import uuid4
 
 from pydantic import Field, StringConstraints
 
@@ -14,6 +15,12 @@ class Reaction(StrEnum):
     question = "question"
 
 
+class Comment(Model):
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    text: str
+
+
 class Card(Model):
     md: str = Field(min_length=1)
     reaction: Reaction | None = None
+    comments: list[Comment] = Field(default_factory=list)

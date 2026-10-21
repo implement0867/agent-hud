@@ -10,7 +10,13 @@ const BoardContent = ({ connection }: { connection: TConnection }) => {
     case ConnectionStatus.enum.connecting:
       return <Notice>Connecting to the agent…</Notice>;
     case ConnectionStatus.enum.live:
-      return <Cards board={connection.board} react={connection.react} />;
+      return (
+        <Cards
+          board={connection.board}
+          react={connection.react}
+          comment={connection.comment}
+        />
+      );
     case ConnectionStatus.enum.closed:
       return (
         <Notice>
