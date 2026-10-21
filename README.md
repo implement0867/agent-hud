@@ -23,7 +23,7 @@ claude mcp add --transport http agent-hud <URL>/mcp/
 | Tool | Does |
 |---|---|
 | `write(ops)` | `put {id, md}` creates or replaces a card; `remove {id}` deletes one. All or nothing. |
-| `read()` | the board as JSON: `{"cards": {"plan": {"md": "1. a", "reaction": "approve", "comments": ["why a?"]}}}` |
+| `read()` | the board as JSON: `{"cards": {"plan": {"md": "1. a", "reaction": "approve", "comments": [{"id": "9f2c…", "text": "why a?"}]}}}` |
 | `listen()` | the websocket URL of the user's messages, reactions and comments; open it with Claude Code's Monitor tool |
 
 ## Layout

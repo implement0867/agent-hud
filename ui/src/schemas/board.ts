@@ -5,7 +5,7 @@ export const Reaction = z.enum(["approve", "reject", "question"]);
 export const cardSchema = z.strictObject({
   md: z.string().min(1),
   reaction: Reaction.nullable(),
-  comments: z.array(z.string()),
+  comments: z.array(z.strictObject({ id: z.string(), text: z.string() })),
 });
 
 export const boardSchema = z.strictObject({

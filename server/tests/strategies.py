@@ -2,7 +2,7 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
 from agent_hud.models.board import Board
-from agent_hud.models.card import Card, Reaction, TCardId
+from agent_hud.models.card import Card, Comment, Reaction, TCardId
 from agent_hud.models.events import TMessage
 from agent_hud.models.ops import TOp
 from tests.factories import put, remove
@@ -16,7 +16,13 @@ def boards(ids: st.SearchStrategy[str]) -> st.SearchStrategy[Board]:
     return st.builds(
         Board,
         cards=st.dictionaries(
-            ids, st.builds(Card, md=st.text(min_size=1), reaction=reactions(), comments=st.lists(messages()))
+            ids,
+            st.builds(
+                Card,
+                md=st.text(min_size=1),
+                reaction=reactions(),
+                comments=st.lists(st.builds(Comment, text=messages())),
+            ),
         ),
     )
 

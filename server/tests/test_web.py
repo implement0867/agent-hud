@@ -170,7 +170,7 @@ async def test_page_and_agents_get_the_comment_on_the_card(
         await agent.call_tool("write", {"ops": as_json(put(card_id, md))})
         await page.recv()
         await page.send(comment_added.model_dump_json())
-        assert BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].comments == [text]
+        assert BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].comments[0].text == text
         for listener in listeners:
             assert CommentAdded.model_validate_json(await listener.recv()) == comment_added
 

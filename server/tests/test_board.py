@@ -67,9 +67,12 @@ def test_react_sets_the_reaction_on_that_card_only(
 def test_comments_add_to_that_card_only_in_order(board: Board, card_id: str, md: str, texts: list[str]) -> None:
     """Assemble: any board with a card put on it.
     Act: comment on the card with each text.
-    Assert: the card has the comments in order, and the other cards are unchanged."""
+    Assert: the card has the comments in order with distinct ids, and the other cards are unchanged."""
     board.apply([put(card_id, md)])
     before = dict(board.cards)
     for text in texts:
         board.comment(card_id, text)
-    assert board.cards == {**before, card_id: Card(md=md, comments=texts)}
+    comments = board.cards[card_id].comments
+    assert [comment.text for comment in comments] == texts
+    assert len({comment.id for comment in comments}) == len(texts)
+    assert {**board.cards, card_id: before[card_id]} == before
