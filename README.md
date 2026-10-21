@@ -16,9 +16,11 @@ port 7676 unless the app already runs there, so all sessions share one board. Th
 server `board` at `http://127.0.0.1:7676/mcp/`, and adds the `board` skill and the `/agent-hud:board`
 command, which gives the page URL and follows the user's actions.
 
-The app serves the board page at `/`. The page shows each card and updates when the agent writes. On the
-page, the user reacts to, comments on and links the cards and their parts, fills input cells, adds notes
-(cards by the user) and sends messages. With `AGENT_HUD_STATE_FILE` set, the app appends each action to
+The app serves the board page at `/`. The page shows each card and updates when the agent writes. The user
+pans the board with a drag on empty space or a scroll, and zooms with Ctrl or ⌘ and a scroll or with the zoom
+buttons. On the page, the user creates notes (cards by the user), edits the markdown of any card, reacts to,
+comments on and links the cards and their parts, fills input cells and sends messages. An edit is a `put`, so
+it clears the feedback on that card. With `AGENT_HUD_STATE_FILE` set, the app appends each action to
 that JSONL file and replays it on start.
 
 ## Tools

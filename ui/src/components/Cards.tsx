@@ -288,6 +288,59 @@ const TableCell = ({ node, children }: ComponentProps<"td"> & ExtraProps) => {
   );
 };
 
+/** Save puts the card with the new markdown, which clears its feedback, and closes the editor once the server takes it. */
+const CardEditor = ({
+  id,
+  md,
+  act,
+  close,
+}: {
+  id: string;
+  md: string;
+  act: TAct;
+  close: () => void;
+}) => {
+  const [text, setText] = useState(md);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    if (await act({ kind: ActionKind.enum.put, id, md: text })) close();
+    setSaving(false);
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <textarea
+        className="min-h-32 rounded border border-stone-300 p-2 font-mono text-sm"
+        aria-label={`Markdown of ${id}`}
+        value={text}
+        readOnly={saving}
+        onChange={(event) => {
+          setText(event.target.value);
+        }}
+      />
+      <div className="flex justify-end gap-1">
+        <button
+          type="button"
+          className="rounded border border-stone-300 px-2 text-xs text-stone-600 hover:bg-stone-100"
+          onClick={close}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="rounded bg-stone-800 px-2 text-xs text-white hover:bg-stone-700 disabled:bg-stone-400"
+          disabled={saving || text === md}
+          onClick={() => {
+            void save();
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const CardView = ({
   id,
   card,
@@ -305,38 +358,66 @@ const CardView = ({
     () => ({ id, threads, values, act }),
     [id, threads, values, act],
   );
+  const [editing, setEditing] = useState(false);
   return (
     <article
       data-ref={id}
-      className={`rounded-lg border p-4 shadow-sm ${card.author === Author.enum.user ? "border-amber-200 bg-amber-50" : "border-stone-200 bg-white"}`}
+      className={`pointer-events-auto w-md cursor-auto rounded-lg border p-4 shadow-sm ${card.author === Author.enum.user ? "border-amber-200 bg-amber-50" : "border-stone-200 bg-white"}`}
     >
       <header className="mb-2 flex justify-between font-mono text-xs text-stone-400">
         {id}
-        {card.author === Author.enum.user && (
-          <button
-            type="button"
-            aria-label={`Remove ${id}`}
-            className="rounded px-1 hover:bg-stone-200"
-            onClick={() => {
-              void act({ kind: ActionKind.enum.remove, id });
-            }}
-          >
-            ×
-          </button>
-        )}
+        <span className="flex gap-1">
+          {!editing && (
+            <button
+              type="button"
+              aria-label={`Edit ${id}`}
+              className="rounded px-1 hover:bg-stone-200"
+              onClick={() => {
+                setEditing(true);
+              }}
+            >
+              edit
+            </button>
+          )}
+          {card.author === Author.enum.user && (
+            <button
+              type="button"
+              aria-label={`Remove ${id}`}
+              className="rounded px-1 hover:bg-stone-200"
+              onClick={() => {
+                void act({ kind: ActionKind.enum.remove, id });
+              }}
+            >
+              ×
+            </button>
+          )}
+        </span>
       </header>
-      <div className="prose prose-sm prose-stone max-w-none">
-        <CardContext value={context}>
-          <Markdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[numberParts]}
-            components={{ li: ListItem, tr: TableRow, td: TableCell }}
-          >
-            {card.md}
-          </Markdown>
-        </CardContext>
-      </div>
-      <Feedback target={id} thread={threads[id] ?? emptyThread} act={act} />
+      {editing ? (
+        <CardEditor
+          id={id}
+          md={card.md}
+          act={act}
+          close={() => {
+            setEditing(false);
+          }}
+        />
+      ) : (
+        <>
+          <div className="prose prose-sm prose-stone max-w-none">
+            <CardContext value={context}>
+              <Markdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[numberParts]}
+                components={{ li: ListItem, tr: TableRow, td: TableCell }}
+              >
+                {card.md}
+              </Markdown>
+            </CardContext>
+          </div>
+          <Feedback target={id} thread={threads[id] ?? emptyThread} act={act} />
+        </>
+      )}
     </article>
   );
 };
