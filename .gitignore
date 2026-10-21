@@ -4,11 +4,10 @@
 !.gitattributes
 !.prettierrc.json
 !.prettierignore
+!.claude-plugin/
 
 __pycache__/
 node_modules/
 *.egg-info/
 *.tsbuildinfo
 dist/
-# Built by `npm run build` in ui/.
-server/src/agent_hud/static/

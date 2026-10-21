@@ -4,22 +4,22 @@ A shared browser canvas for Claude Code. The agent puts plans, options and table
 canvas. The user approves, rejects or questions each item, and the agent reads that feedback
 over MCP.
 
-## Run
+## Install
 
 ```sh
-cd ui && npm install && npm run build && cd ..
-make serve
+claude plugin marketplace add implement0867/agent-hud
+claude plugin install agent-hud@agent-hud
 ```
 
-`make serve` starts the app and prints its URL. The app serves MCP at `/mcp/` and the board page at
-`/`. The page shows each card and updates when the agent writes. On the page, the user reacts to,
-comments on and links the cards and their parts, fills input cells, adds notes (cards by the user)
-and sends messages. With `AGENT_HUD_STATE_FILE` set, the app appends each action to that JSONL file
-and replays it on start. To connect Claude Code:
+The plugin needs [uv](https://docs.astral.sh/uv/). At the start of each session, its hook starts the app on
+port 7676 unless the app already runs there, so all sessions share one board. The plugin connects the MCP
+server `board` at `http://127.0.0.1:7676/mcp/`, and adds the `board` skill and the `/agent-hud:board`
+command, which gives the page URL and follows the user's actions.
 
-```sh
-claude mcp add --transport http agent-hud <URL>/mcp/
-```
+The app serves the board page at `/`. The page shows each card and updates when the agent writes. On the
+page, the user reacts to, comments on and links the cards and their parts, fills input cells, adds notes
+(cards by the user) and sends messages. With `AGENT_HUD_STATE_FILE` set, the app appends each action to
+that JSONL file and replays it on start.
 
 ## Tools
 
@@ -32,8 +32,11 @@ claude mcp add --transport http agent-hud <URL>/mcp/
 ## Layout
 
 ```text
-server/   Python 3.12 package (uv, ruff, basedpyright)
-ui/       React + Vite + strict TypeScript (ESLint strictTypeChecked, Prettier)
+server/          Python 3.12 package (uv, ruff, basedpyright), with the built UI in agent_hud/static
+ui/              React + Vite + strict TypeScript (ESLint strictTypeChecked, Prettier)
+.claude-plugin/  plugin and marketplace manifests
+hooks/           the hook that starts the app
+skills/ commands/  the board skill and command
 ```
 
 ## Development
@@ -43,6 +46,7 @@ Requires [uv](https://docs.astral.sh/uv/) and Node 22.
 | Command | Does |
 |---|---|
 | `make check` | ruff format and lint, basedpyright; tsc, eslint, prettier |
-| `make serve` | start the app |
-| `cd ui && npm run build` | build the UI into the server package |
+| `make serve` | start the app on port 7676 |
+| `cd ui && npm run build` | build the UI into the server package; commit the build |
+| `claude --plugin-dir .` | run Claude Code with the plugin from this checkout |
 | `cd ui && npm run dev` | Vite dev server, which sends `/ws` to the running server |
