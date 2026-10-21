@@ -16,6 +16,7 @@ export type TConnection =
       react: TBoardSocket["react"];
       reactToItem: TBoardSocket["reactToItem"];
       comment: TBoardSocket["comment"];
+      commentOnItem: TBoardSocket["commentOnItem"];
     }
   | { status: typeof ConnectionStatus.enum.closed };
 
@@ -35,6 +36,7 @@ export const useBoard = (): TConnection => {
           react: socket.react,
           reactToItem: socket.reactToItem,
           comment: socket.comment,
+          commentOnItem: socket.commentOnItem,
         });
       },
       () => {

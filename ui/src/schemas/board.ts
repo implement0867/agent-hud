@@ -21,5 +21,6 @@ export const boardSchema = z.strictObject({
 });
 
 export type TReaction = z.infer<typeof Reaction>;
+export type TComment = z.infer<typeof commentSchema>;
 export type TCard = z.infer<typeof cardSchema>;
 export type TBoard = z.infer<typeof boardSchema>;

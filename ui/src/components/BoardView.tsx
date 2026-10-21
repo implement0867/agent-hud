@@ -16,6 +16,7 @@ const BoardContent = ({ connection }: { connection: TConnection }) => {
           react={connection.react}
           reactToItem={connection.reactToItem}
           comment={connection.comment}
+          commentOnItem={connection.commentOnItem}
         />
       );
     case ConnectionStatus.enum.closed:

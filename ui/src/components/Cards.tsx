@@ -6,30 +6,48 @@ import type { ExtraProps } from "react-markdown";
 import { Notice } from "~/components/Notice";
 import type { TBoardSocket } from "~/api/boardSocket";
 import { Reaction } from "~/schemas/board";
-import type { TBoard, TCard, TReaction } from "~/schemas/board";
+import type { TBoard, TCard, TComment, TReaction } from "~/schemas/board";
 import { invariant } from "~/lib/invariant";
 import { numberListItems } from "~/lib/numberListItems";
 import { messageSchema } from "~/schemas/events";
 
 type TReact = TBoardSocket["react"];
 type TReactToItem = TBoardSocket["reactToItem"];
-type TComment = TBoardSocket["comment"];
+type TCommentOnCard = TBoardSocket["comment"];
+type TCommentOnItem = TBoardSocket["commentOnItem"];
 
 const CardContext = createContext<{
   id: string;
   card: TCard;
   reactToItem: TReactToItem;
+  commentOnItem: TCommentOnItem;
 } | null>(null);
 
+const CommentList = ({ comments }: { comments: TComment[] }) => (
+  <ul className="mt-2 space-y-1 text-sm text-stone-700">
+    {comments.map(({ id, text }) => (
+      <li key={id} className="rounded bg-stone-100 px-2 py-1">
+        {text}
+      </li>
+    ))}
+  </ul>
+);
+
 /** The page clears the box when it sends the comment. */
-const CommentForm = ({ id, comment }: { id: string; comment: TComment }) => {
+const CommentForm = ({
+  label,
+  comment,
+}: {
+  label: string;
+  comment: (text: string) => void;
+}) => {
   const [text, setText] = useState("");
   return (
     <div className="mt-2 flex gap-1">
       <input
         className="flex-1 rounded border border-stone-300 px-2 text-sm"
         placeholder="Comment"
-        aria-label={`Comment on ${id}`}
+        aria-label={label}
         value={text}
         onChange={(event) => {
           setText(event.target.value);
@@ -40,7 +58,7 @@ const CommentForm = ({ id, comment }: { id: string; comment: TComment }) => {
         className="rounded border border-stone-300 px-2 text-xs text-stone-600 hover:bg-stone-100 disabled:text-stone-300"
         disabled={!messageSchema.safeParse(text).success}
         onClick={() => {
-          comment(id, text);
+          comment(text);
           setText("");
         }}
       >
@@ -82,7 +100,7 @@ const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => {
   const number = node?.properties["dataItem"];
   invariant(context !== null, "list items render inside a card");
   invariant(typeof number === "number", "numberListItems numbers each li");
-  const { id, card, reactToItem } = context;
+  const { id, card, reactToItem, commentOnItem } = context;
   return (
     <li>
       {children}
@@ -91,6 +109,13 @@ const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => {
         current={card.items[number]?.reaction ?? null}
         react={(reaction) => {
           reactToItem(id, number, reaction);
+        }}
+      />
+      <CommentList comments={card.items[number]?.comments ?? []} />
+      <CommentForm
+        label={`Comment on ${id} item ${String(number)}`}
+        comment={(text) => {
+          commentOnItem(id, number, text);
         }}
       />
     </li>
@@ -103,16 +128,18 @@ const CardView = ({
   react,
   reactToItem,
   comment,
+  commentOnItem,
 }: {
   id: string;
   card: TCard;
   react: TReact;
   reactToItem: TReactToItem;
-  comment: TComment;
+  comment: TCommentOnCard;
+  commentOnItem: TCommentOnItem;
 }) => {
   const context = useMemo(
-    () => ({ id, card, reactToItem }),
-    [id, card, reactToItem],
+    () => ({ id, card, reactToItem, commentOnItem }),
+    [id, card, reactToItem, commentOnItem],
   );
   return (
     <article className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
@@ -134,14 +161,13 @@ const CardView = ({
           react(id, reaction);
         }}
       />
-      <ul className="mt-2 space-y-1 text-sm text-stone-700">
-        {card.comments.map(({ id, text }) => (
-          <li key={id} className="rounded bg-stone-100 px-2 py-1">
-            {text}
-          </li>
-        ))}
-      </ul>
-      <CommentForm id={id} comment={comment} />
+      <CommentList comments={card.comments} />
+      <CommentForm
+        label={`Comment on ${id}`}
+        comment={(text) => {
+          comment(id, text);
+        }}
+      />
     </article>
   );
 };
@@ -151,11 +177,13 @@ export const Cards = ({
   react,
   reactToItem,
   comment,
+  commentOnItem,
 }: {
   board: TBoard;
   react: TReact;
   reactToItem: TReactToItem;
-  comment: TComment;
+  comment: TCommentOnCard;
+  commentOnItem: TCommentOnItem;
 }) => {
   const cards = Object.entries(board.cards);
   if (cards.length === 0) return <Notice>No cards yet.</Notice>;
@@ -167,6 +195,7 @@ export const Cards = ({
       react={react}
       reactToItem={reactToItem}
       comment={comment}
+      commentOnItem={commentOnItem}
     />
   ));
 };
