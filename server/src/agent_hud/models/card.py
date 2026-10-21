@@ -17,3 +17,4 @@ class Reaction(StrEnum):
 class Card(Model):
     md: str = Field(min_length=1)
     reaction: Reaction | None = None
+    comments: list[str] = Field(default_factory=list)

@@ -18,7 +18,7 @@ from websockets.exceptions import InvalidStatus
 from agent_hud.deps import get_store
 from agent_hud.models.board import Board
 from agent_hud.models.card import Reaction
-from agent_hud.models.events import BoardChanged, EventKind, MessageReceived, MessageSent, ReactionSet
+from agent_hud.models.events import BoardChanged, CommentAdded, EventKind, MessageReceived, MessageSent, ReactionSet
 from agent_hud.models.ops import TOp
 from agent_hud.server import build
 from agent_hud.settings import get_settings
@@ -152,6 +152,29 @@ async def test_page_and_agents_get_the_reaction_on_the_card(
             assert ReactionSet.model_validate_json(await listener.recv()) == reaction_set
 
 
+@given(card_ids(), st.text(min_size=1), messages())
+@settings(deadline=None)
+async def test_page_and_agents_get_the_comment_on_the_card(
+    page: ClientConnection,
+    listeners: list[ClientConnection],
+    agent: Client[Any],
+    card_id: str,
+    md: str,
+    text: str,
+) -> None:
+    """Assemble: a card that the agent put, a page that got the board, and two agents' listeners.
+    Act: the page adds a comment to the card.
+    Assert: the page gets the board with the comment on the card, and each listener gets the comment."""
+    comment_added = CommentAdded(kind=EventKind.comment_added, id=card_id, text=text)
+    async with asyncio.timeout(5):
+        await agent.call_tool("write", {"ops": as_json(put(card_id, md))})
+        await page.recv()
+        await page.send(comment_added.model_dump_json())
+        assert BoardChanged.model_validate_json(await page.recv()).board.cards[card_id].comments == [text]
+        for listener in listeners:
+            assert CommentAdded.model_validate_json(await listener.recv()) == comment_added
+
+
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
 @given(host_names())
 @settings(deadline=None)
@@ -220,6 +243,15 @@ async def test_a_reaction_to_a_missing_card_changes_nothing(
     Act: react to the card.
     Assert: the board is still empty."""
     new_store.react(card_id, reaction)
+    assert new_store.read() == Board()
+
+
+@given(st.builds(BoardStore), card_ids(), messages())
+async def test_a_comment_on_a_missing_card_changes_nothing(new_store: BoardStore, card_id: str, text: str) -> None:
+    """Assemble: an empty store, as after the agent removed the card the page showed.
+    Act: comment on the card.
+    Assert: the board is still empty."""
+    new_store.comment(card_id, text)
     assert new_store.read() == Board()
 
 

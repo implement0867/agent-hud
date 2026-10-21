@@ -22,11 +22,11 @@ def build() -> FastMCP:
         store.apply(ops)
 
     async def read(store: BoardStore = McpStoreDep) -> Board:
-        """Every card on the board with its markdown and the user's reaction."""
+        """Every card on the board with its markdown and the user's reaction and comments."""
         return store.read()
 
     async def listen() -> str:
-        """The websocket URL of the user's messages and reactions. Open it with the Monitor tool, and again when the monitor ends."""
+        """The websocket URL of the user's messages, reactions and comments. Open it with the Monitor tool, and again when the monitor ends."""
         return str(get_http_request().url.replace(scheme="ws", path="/agent"))
 
     mcp.tool(write)

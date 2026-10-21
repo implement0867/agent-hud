@@ -8,6 +8,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from agent_hud.deps import SameOriginDep, StoreDep
 from agent_hud.models.events import (
     BoardChanged,
+    CommentAdded,
     EventKind,
     MessageReceived,
     MessageSent,
@@ -51,6 +52,8 @@ def create_app() -> FastAPI:
                         await websocket.send_text(MessageReceived(kind=EventKind.message_received).model_dump_json())
                     case ReactionSet(id=card_id, reaction=reaction):
                         store.react(card_id, reaction)
+                    case CommentAdded(id=card_id, text=comment):
+                        store.comment(card_id, comment)
                     case _:
                         assert_never(event)
             sender.cancel()

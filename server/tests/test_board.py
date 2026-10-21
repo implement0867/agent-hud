@@ -8,7 +8,7 @@ from agent_hud.models.board import Board
 from agent_hud.models.card import Card, Reaction
 from agent_hud.models.ops import PutOp, RemoveOp, TOp
 from tests.factories import put
-from tests.strategies import boards, card_ids, ops, reactions
+from tests.strategies import boards, card_ids, messages, ops, reactions
 
 
 @st.composite
@@ -61,3 +61,15 @@ def test_react_sets_the_reaction_on_that_card_only(
     before = dict(board.cards)
     board.react(card_id, reaction)
     assert board.cards == {**before, card_id: Card(md=md, reaction=reaction)}
+
+
+@given(boards(card_ids()), card_ids(), st.text(min_size=1), st.lists(messages(), min_size=1))
+def test_comments_add_to_that_card_only_in_order(board: Board, card_id: str, md: str, texts: list[str]) -> None:
+    """Assemble: any board with a card put on it.
+    Act: comment on the card with each text.
+    Assert: the card has the comments in order, and the other cards are unchanged."""
+    board.apply([put(card_id, md)])
+    before = dict(board.cards)
+    for text in texts:
+        board.comment(card_id, text)
+    assert board.cards == {**before, card_id: Card(md=md, comments=texts)}

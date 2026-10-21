@@ -15,6 +15,7 @@ class EventKind(StrEnum):
     message_sent = "message_sent"
     message_received = "message_received"
     reaction_set = "reaction_set"
+    comment_added = "comment_added"
 
 
 class BoardChanged(Model):
@@ -37,6 +38,12 @@ class ReactionSet(Model):
     reaction: Reaction | None
 
 
-type TPageEvent = Annotated[MessageSent | ReactionSet, Discriminator("kind")]
+class CommentAdded(Model):
+    kind: Literal[EventKind.comment_added]
+    id: TCardId
+    text: TMessage
+
+
+type TPageEvent = Annotated[MessageSent | ReactionSet | CommentAdded, Discriminator("kind")]
 
 PageEventAdapter = TypeAdapter[TPageEvent](TPageEvent)

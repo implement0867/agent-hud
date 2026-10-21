@@ -13,7 +13,12 @@ def card_ids() -> st.SearchStrategy[str]:
 
 
 def boards(ids: st.SearchStrategy[str]) -> st.SearchStrategy[Board]:
-    return st.builds(Board, cards=st.dictionaries(ids, st.builds(Card, md=st.text(min_size=1), reaction=reactions())))
+    return st.builds(
+        Board,
+        cards=st.dictionaries(
+            ids, st.builds(Card, md=st.text(min_size=1), reaction=reactions(), comments=st.lists(messages()))
+        ),
+    )
 
 
 def reactions() -> st.SearchStrategy[Reaction | None]:
