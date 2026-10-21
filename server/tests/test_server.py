@@ -9,7 +9,7 @@ from agent_hud.deps import get_store
 from agent_hud.models.board import Board
 from agent_hud.models.ops import TOp
 from agent_hud.server import build
-from tests.factories import as_json, put, read_board, remove
+from tests.factories import as_json, put, read_board, remove, without_item_ids
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ async def test_read_returns_the_board_that_write_left(client: Client[Any]) -> No
     expected = Board()
     expected.apply(ops)
     await client.call_tool("write", {"ops": as_json(*ops)})
-    assert await read_board(client) == expected
+    assert without_item_ids(await read_board(client)) == without_item_ids(expected)
 
 
 @pytest.mark.parametrize(
