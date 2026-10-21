@@ -4,22 +4,22 @@ import type { TBoardSocket } from "~/api/boardSocket";
 import { ConnectionStatus } from "~/hooks/useBoard";
 import type { TConnection } from "~/hooks/useBoard";
 import { invariant } from "~/lib/invariant";
-import { messageSchema } from "~/schemas/events";
+import { ActionKind, messageSchema } from "~/schemas/actions";
 
 /** Send is on while the page is live and the message has text. The message stays until the server confirms it. */
 export const SendForm = ({ connection }: { connection: TConnection }) => {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const send =
+  const act =
     connection.status === ConnectionStatus.enum.live &&
     !sending &&
     messageSchema.safeParse(message).success
-      ? connection.send
+      ? connection.act
       : null;
 
-  const sendMessage = async (send: TBoardSocket["send"]) => {
+  const sendMessage = async (act: TBoardSocket["act"]) => {
     setSending(true);
-    if (await send(message)) setMessage("");
+    if (await act({ kind: ActionKind.enum.say, text: message })) setMessage("");
     setSending(false);
   };
 
@@ -38,10 +38,10 @@ export const SendForm = ({ connection }: { connection: TConnection }) => {
       <button
         type="button"
         className="rounded-lg bg-stone-800 px-4 text-white hover:bg-stone-700 disabled:bg-stone-400"
-        disabled={send === null}
+        disabled={act === null}
         onClick={() => {
-          invariant(send !== null, "the button is off without send");
-          void sendMessage(send);
+          invariant(act !== null, "the button is off without act");
+          void sendMessage(act);
         }}
       >
         Send

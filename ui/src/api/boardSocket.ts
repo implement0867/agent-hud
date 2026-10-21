@@ -1,21 +1,13 @@
 import { assertNever } from "~/lib/assertNever";
 import { invariant } from "~/lib/invariant";
-import {
-  EventKind,
-  commentAddedSchema,
-  messageSentSchema,
-  reactionSetSchema,
-  serverEventSchema,
-} from "~/schemas/events";
-import type { TBoard, TReaction } from "~/schemas/board";
+import { requestSchema } from "~/schemas/actions";
+import type { TBody } from "~/schemas/actions";
+import type { TBoard } from "~/schemas/board";
+import { EventKind, serverEventSchema } from "~/schemas/events";
 
 export type TBoardSocket = {
-  /** Resolves true when the server confirms the message, or false when the connection closes first. */
-  send: (message: string) => Promise<boolean>;
-  /** The page gets the board with the reaction on the card. */
-  react: (id: string, reaction: TReaction | null) => void;
-  /** The page gets the board with the comment on the card. */
-  comment: (id: string, text: string) => void;
+  /** Resolves true when the server takes the action, or false when it rejects it or the connection closes first. */
+  act: (body: TBody) => Promise<boolean>;
   close: () => void;
 };
 
@@ -29,26 +21,28 @@ export const openBoardSocket = (
   const socket = new WebSocket(url);
   const listening = new AbortController();
   const { signal } = listening;
-  // The server confirms messages in the order sent.
-  const unconfirmed: ((received: boolean) => void)[] = [];
+  const pending = new Map<string, (taken: boolean) => void>();
+  const settle = (id: string, taken: boolean) => {
+    const resolve = pending.get(id);
+    invariant(resolve !== undefined, "the server answers only sent actions");
+    pending.delete(id);
+    resolve(taken);
+  };
   socket.addEventListener(
     "message",
     (message: MessageEvent<unknown>) => {
       invariant(typeof message.data === "string", "the server sends text");
       const event = serverEventSchema.parse(JSON.parse(message.data));
       switch (event.kind) {
-        case EventKind.enum.board_changed:
+        case EventKind.enum.snapshot:
           onBoard(event.board);
           return;
-        case EventKind.enum.message_received: {
-          const confirm = unconfirmed.shift();
-          invariant(
-            confirm !== undefined,
-            "the server confirms only sent messages",
-          );
-          confirm(true);
+        case EventKind.enum.accepted:
+          settle(event.id, true);
           return;
-        }
+        case EventKind.enum.rejected:
+          settle(event.id, false);
+          return;
         default:
           return assertNever(event);
       }
@@ -58,37 +52,19 @@ export const openBoardSocket = (
   socket.addEventListener(
     "close",
     () => {
-      for (const confirm of unconfirmed.splice(0)) confirm(false);
+      for (const resolve of pending.values()) resolve(false);
+      pending.clear();
       onClose();
     },
     { signal },
   );
   return {
-    send: (message) => {
-      const event = messageSentSchema.parse({
-        kind: EventKind.enum.message_sent,
-        message,
-      });
-      socket.send(JSON.stringify(event));
+    act: (body) => {
+      const request = requestSchema.parse({ id: crypto.randomUUID(), body });
+      socket.send(JSON.stringify(request));
       return new Promise((resolve) => {
-        unconfirmed.push(resolve);
+        pending.set(request.id, resolve);
       });
-    },
-    react: (id, reaction) => {
-      const event = reactionSetSchema.parse({
-        kind: EventKind.enum.reaction_set,
-        id,
-        reaction,
-      });
-      socket.send(JSON.stringify(event));
-    },
-    comment: (id, text) => {
-      const event = commentAddedSchema.parse({
-        kind: EventKind.enum.comment_added,
-        id,
-        text,
-      });
-      socket.send(JSON.stringify(event));
     },
     close: () => {
       listening.abort();
