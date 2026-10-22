@@ -36,7 +36,7 @@ const ArrowLabel = ({
   if (!selected)
     return arrow.text === "" ? null : (
       <span
-        className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white px-2 py-0.5 text-xs whitespace-nowrap text-stone-600 shadow-sm ring-1 ring-stone-200"
+        className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[calc(100%+4px)] rounded-full bg-white px-2 py-0.5 text-xs whitespace-nowrap text-stone-600 shadow-sm ring-1 ring-stone-200"
         style={{ left: middle.x, top: middle.y }}
       >
         {arrow.text}
@@ -44,7 +44,7 @@ const ArrowLabel = ({
     );
   return (
     <span
-      className="pointer-events-auto absolute z-10 flex -translate-x-1/2 -translate-y-1/2 animate-pop items-center gap-1 rounded-full bg-white py-0.5 pr-0.5 pl-2 shadow-md ring-2 ring-sky-400"
+      className="pointer-events-auto absolute z-10 flex -translate-x-1/2 -translate-y-[calc(100%+4px)] animate-pop items-center gap-1 rounded-full bg-white py-0.5 pr-0.5 pl-2 shadow-md ring-2 ring-sky-400"
       style={{ left: middle.x, top: middle.y }}
       onPointerDown={(event) => {
         event.stopPropagation();
@@ -92,7 +92,7 @@ const ArrowLabel = ({
 };
 
 /**
- * The arrows between parts, measured from the cards after each render of the board.
+ * The arrows between parts, measured from the cards after each render of the board, with each label above the middle of its arrow.
  * A click on an arrow selects it, to label or remove it.
  */
 export const ArrowLayer = ({

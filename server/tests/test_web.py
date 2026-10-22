@@ -15,11 +15,12 @@ from websockets.exceptions import InvalidStatus
 
 from agent_hud.deps import get_hud
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, Author, TBody
-from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot
+from agent_hud.models.actions import ActionKind, TBody
+from agent_hud.models.events import Accepted, Rejected, Snapshot, Turn
 from agent_hud.server import build
+from tests.conversation import User, open_page
 from tests.factories import as_json, put, say
-from tests.strategies import action_ids, blanks, bodies, card_ids, mds, messages
+from tests.strategies import blanks, bodies, card_ids, mds, messages
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -37,17 +38,6 @@ def host_names() -> st.SearchStrategy[str]:
     return domains().map(str.lower)
 
 
-async def reply(page: ClientConnection) -> tuple[Accepted | Rejected, list[Snapshot]]:
-    """The reply to the page's request, and the boards the page got before it."""
-    snapshots: list[Snapshot] = []
-    while True:
-        match PageEventAdapter.validate_json(await page.recv()):
-            case Snapshot() as snapshot:
-                snapshots.append(snapshot)
-            case Accepted() | Rejected() as answer:
-                return answer, snapshots
-
-
 @pytest.fixture(scope="module")
 def hud() -> Hud:
     """A new hud for the module. The app and the agent get the same one from get_hud."""
@@ -56,12 +46,10 @@ def hud() -> Hud:
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def page(address: tuple[str, int], hud: Hud) -> AsyncIterator[ClientConnection]:
-    """A page from the app's origin that has read the board it gets on connect."""
-    host, port = address
-    async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
-        await page.recv()
-        yield page
+async def user(address: tuple[str, int], hud: Hud) -> AsyncIterator[User]:
+    """A page from the app's origin."""
+    async with open_page(address) as user:
+        yield user
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -102,57 +90,45 @@ async def test_page_gets_the_board_on_connect(address: tuple[str, int], hud: Hud
 # Examples go over sockets, so their time varies more than the default deadline allows.
 @given(writes())
 @settings(deadline=None)
-async def test_page_gets_the_board_after_each_write_that_changes_it(
-    page: ClientConnection, agent: Client[Any], hud: Hud, writes: list[list[TBody]]
+async def test_page_gets_the_board_after_each_write(
+    user: User, agent: Client[Any], hud: Hud, writes: list[list[TBody]]
 ) -> None:
     """Assemble: a page on the app.
     Act: the agent writes each batch of actions.
-    Assert: after each write that changes the board, the page gets the board."""
-    async with asyncio.timeout(5):
-        for batch in writes:
-            before = hud.board
-            await agent.call_tool("write", {"actions": as_json(*batch)}, raise_on_error=False)
-            if hud.board != before:
-                assert Snapshot.model_validate_json(await page.recv()).board == hud.board
+    Assert: after each write, the page shows the board."""
+    for batch in writes:
+        await agent.call_tool("write", {"actions": as_json(*batch)}, raise_on_error=False)
+        assert await user.sees(hud.board) == hud.board
 
 
-@given(card_ids(), mds(), action_ids(), st.data())
+@given(card_ids(), mds(), st.data())
 @settings(deadline=None)
-async def test_a_page_action_reaches_the_board_and_each_agent_or_is_rejected(
-    page: ClientConnection,
+async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_rejected(
+    user: User,
     listeners: list[ClientConnection],
     agent: Client[Any],
     hud: Hud,
     card_id: str,
     md: str,
-    action_id: str,
     data: st.DataObject,
 ) -> None:
-    """Assemble: a card that the agent put, a page that got the board, and two agents' listeners.
-    Act: the page asks for any action on the card or its parts.
-    Assert: accepted, the page gets the board if it changed, and each listener gets the action; or rejected, and the board is as it was."""
+    """Assemble: a card that the agent put, a page, and two agents' listeners.
+    Act: the page asks for any action on the card or its parts, then sends if the action did not end the turn.
+    Assert: accepted, the page shows the board and each listener gets a turn of the action; or rejected, and the board is as it was."""
     body = data.draw(bodies(st.just(card_id)))
-    async with asyncio.timeout(5):
-        before = hud.board
-        await agent.call_tool("write", {"actions": as_json(put(card_id, md))})
-        if hud.board != before:
-            await page.recv()
-        before = hud.board
-        await page.send(Request(id=action_id, body=body).model_dump_json())
-        answer, snapshots = await reply(page)
-        match answer:
-            case Accepted(id=accepted) if accepted == action_id:
-                if hud.board != before and not snapshots:
-                    snapshots.append(Snapshot.model_validate_json(await page.recv()))
-                assert [snapshot.board for snapshot in snapshots] == ([] if hud.board == before else [hud.board])
-                for listener in listeners:
-                    assert Action.model_validate_json(await listener.recv()) == Action(
-                        id=action_id, author=Author.user, body=body
-                    )
-            case Rejected(id=rejected) if rejected == action_id:
-                assert (hud.board, snapshots) == (before, [])
-            case other:
-                pytest.fail(f"unexpected events {other}")
+    await agent.call_tool("write", {"actions": as_json(put(card_id, md))})
+    before = hud.board
+    match await user.act(body):
+        case Accepted(id=action_id):
+            assert await user.sees(hud.board) == hud.board
+            if not hud.log.actions[-1].ends_turn:
+                await user.send()
+            heard = [] if body.kind is ActionKind.send else [(action_id, body)]
+            for listener in listeners:
+                turn = Turn.model_validate_json(await asyncio.wait_for(listener.recv(), 5))
+                assert [(action.id, action.body) for action in turn.actions] == heard
+        case Rejected():
+            assert hud.board == before
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
@@ -179,22 +155,23 @@ async def test_other_host_names_cannot_connect(address: tuple[str, int], path: s
         await connect(f"ws://{domain}:{port}{path}", host=host, origin=f"http://{domain}:{port}", proxy=None)
 
 
-@given(st.lists(st.lists(st.tuples(action_ids(), messages()), min_size=1)))
-@settings(deadline=None)
+# Each message grows the module's board, which each snapshot carries, so the lists are short.
+@given(st.lists(st.lists(messages(), min_size=1, max_size=5), max_size=5))
+@settings(deadline=None, max_examples=25)
 async def test_agent_gets_each_message_once_in_order(
-    page: ClientConnection, listeners: list[ClientConnection], batches: list[list[tuple[str, str]]]
+    user: User, listeners: list[ClientConnection], batches: list[list[str]]
 ) -> None:
     """Assemble: a page and two agents' listeners on the app.
     Act: for each batch, the page says its messages.
-    Assert: the page gets each message accepted, and each listener gets each message once, in the order sent."""
-    async with asyncio.timeout(5):
-        for batch in batches:
-            for action_id, text in batch:
-                await page.send(Request(id=action_id, body=say(text)).model_dump_json())
-            assert [(await reply(page))[0].id for _ in batch] == [i for i, _ in batch]
-            expected = [Action(id=i, author=Author.user, body=say(text)) for i, text in batch]
-            for listener in listeners:
-                assert [Action.model_validate_json(await listener.recv()) for _ in batch] == expected
+    Assert: the page gets each message accepted, and each listener gets a turn of each message once, in the order sent."""
+    for batch in batches:
+        answers = [await user.act(say(text)) for text in batch]
+        assert all(isinstance(answer, Accepted) for answer in answers)
+        for listener in listeners:
+            turns = [Turn.model_validate_json(await asyncio.wait_for(listener.recv(), 5)) for _ in batch]
+            assert [[(a.id, a.body) for a in turn.actions] for turn in turns] == [
+                [(answer.id, say(text))] for answer, text in zip(answers, batch, strict=True)
+            ]
 
 
 @given(blanks())

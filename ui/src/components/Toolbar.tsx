@@ -1,8 +1,10 @@
 import {
+  History,
   Maximize2,
   MessageCircle,
   Minus,
   Plus,
+  SendHorizontal,
   StickyNote,
 } from "lucide-react";
 import { useState } from "react";
@@ -15,19 +17,22 @@ import { Reaction } from "~/schemas/actions";
 const ToolButton = ({
   label,
   shortcut,
+  pressed,
   onClick,
   children,
 }: {
   label: string;
   shortcut: string;
+  pressed?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) => (
   <button
     type="button"
     aria-label={label}
+    aria-pressed={pressed}
     title={`${label} (${shortcut})`}
-    className="flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-sm text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900"
+    className={`flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-sm transition-colors ${pressed === true ? "bg-sky-100 text-sky-800" : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"}`}
     onClick={onClick}
   >
     {children}
@@ -83,56 +88,98 @@ const Tally = ({ show }: { show: (ref: string) => void }) => {
   );
 };
 
+/** Sends the user's actions since the last send to the agent, as one turn. */
+const SendButton = ({ unsent, send }: { unsent: number; send: () => void }) => (
+  <button
+    type="button"
+    aria-label="Send to the agent"
+    title="Send your changes to the agent (⌘↵)"
+    disabled={unsent === 0}
+    className="flex h-9 items-center gap-1.5 rounded-xl bg-sky-600 px-3 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:bg-transparent disabled:text-stone-400"
+    onClick={send}
+  >
+    <SendHorizontal className="size-4" />
+    Send
+    {unsent > 0 && (
+      <span
+        aria-label={`${String(unsent)} unsent`}
+        className="rounded-full bg-white/25 px-1.5 text-xs tabular-nums"
+      >
+        {unsent}
+      </span>
+    )}
+  </button>
+);
+
 export const Toolbar = ({
   scale,
   zoom,
   reset,
   fit,
   note,
-  show,
+  unsent,
+  send,
+  history,
+  toggleHistory,
 }: {
   scale: number;
   zoom: (factor: number) => void;
   reset: () => void;
   fit: () => void;
   note: () => void;
-  show: (ref: string) => void;
-}) => (
-  <nav
-    aria-label="Tools"
-    className="pointer-events-auto absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-2xl bg-white p-1 shadow-xl ring-1 ring-stone-900/10"
-  >
-    <Tally show={show} />
-    <ToolButton label="New note" shortcut="N" onClick={note}>
-      <StickyNote className="size-4" />
-      Note
-    </ToolButton>
-    <Divider />
-    <ToolButton
-      label="Zoom out"
-      shortcut="-"
-      onClick={() => {
-        zoom(1 / 1.25);
-      }}
+  unsent: number;
+  send: () => void;
+  history: boolean;
+  toggleHistory: () => void;
+}) => {
+  const { show } = useTools();
+  return (
+    <nav
+      aria-label="Tools"
+      className="pointer-events-auto absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-2xl bg-white p-1 shadow-xl ring-1 ring-stone-900/10"
     >
-      <Minus className="size-4" />
-    </ToolButton>
-    <ToolButton label="Reset zoom" shortcut="0" onClick={reset}>
-      <span className="w-10 text-xs tabular-nums">
-        {Math.round(scale * 100)}%
-      </span>
-    </ToolButton>
-    <ToolButton
-      label="Zoom in"
-      shortcut="+"
-      onClick={() => {
-        zoom(1.25);
-      }}
-    >
-      <Plus className="size-4" />
-    </ToolButton>
-    <ToolButton label="Fit all cards" shortcut="1" onClick={fit}>
-      <Maximize2 className="size-4" />
-    </ToolButton>
-  </nav>
-);
+      <SendButton unsent={unsent} send={send} />
+      <Divider />
+      <Tally show={show} />
+      <ToolButton label="New note" shortcut="N" onClick={note}>
+        <StickyNote className="size-4" />
+        Note
+      </ToolButton>
+      <ToolButton
+        label="History"
+        shortcut="H"
+        pressed={history}
+        onClick={toggleHistory}
+      >
+        <History className="size-4" />
+      </ToolButton>
+      <Divider />
+      <ToolButton
+        label="Zoom out"
+        shortcut="-"
+        onClick={() => {
+          zoom(1 / 1.25);
+        }}
+      >
+        <Minus className="size-4" />
+      </ToolButton>
+      <ToolButton label="Reset zoom" shortcut="0" onClick={reset}>
+        <span className="w-10 text-xs tabular-nums">
+          {Math.round(scale * 100)}%
+        </span>
+      </ToolButton>
+      <ToolButton
+        label="Zoom in"
+        shortcut="+"
+        onClick={() => {
+          zoom(1.25);
+        }}
+      >
+        <Plus className="size-4" />
+      </ToolButton>
+      <ToolButton label="Fit all cards" shortcut="1" onClick={fit}>
+        <Maximize2 className="size-4" />
+      </ToolButton>
+    </nav>
+  );
+};

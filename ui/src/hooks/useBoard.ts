@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { openBoardSocket } from "~/api/boardSocket";
 import type { TBoardSocket } from "~/api/boardSocket";
-import type { TBoard } from "~/schemas/board";
+import type { TSnapshot } from "~/schemas/events";
 
 export const ConnectionStatus = z.enum(["connecting", "live", "closed"]);
 
@@ -11,12 +11,12 @@ export type TConnection =
   | { status: typeof ConnectionStatus.enum.connecting }
   | {
       status: typeof ConnectionStatus.enum.live;
-      board: TBoard;
+      snapshot: TSnapshot;
       act: TBoardSocket["act"];
     }
   | { status: typeof ConnectionStatus.enum.closed };
 
-/** The board from the server, replaced each time the agent changes it. `act` exists only while live. */
+/** The last snapshot from the server: the board, the agent's state and the user's unsent actions. `act` exists only while live. */
 export const useBoard = (): TConnection => {
   const [connection, setConnection] = useState<TConnection>({
     status: ConnectionStatus.enum.connecting,
@@ -24,10 +24,10 @@ export const useBoard = (): TConnection => {
 
   useEffect(() => {
     const socket = openBoardSocket(
-      (board) => {
+      (snapshot) => {
         setConnection({
           status: ConnectionStatus.enum.live,
-          board,
+          snapshot,
           act: socket.act,
         });
       },

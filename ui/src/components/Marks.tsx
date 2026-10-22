@@ -4,16 +4,29 @@ import { useTools } from "~/lib/whiteboard";
 import { ActionKind, Reaction } from "~/schemas/actions";
 import { reactionIcons, reactionTones } from "~/lib/reactions";
 
-/** The reaction and comment count of the ref, and, while the pointer is on the part, a button for each reaction. */
-export const Marks = ({ target }: { target: string }) => {
-  const { board, act } = useTools();
+/**
+ * The reaction and comment count of the ref, and, while the pointer is on the part, a button for each reaction.
+ * The place puts the marks in the part, at the top right unless it says otherwise.
+ */
+export const Marks = ({
+  target,
+  place = "top-0.5 right-1",
+}: {
+  target: string;
+  place?: string;
+}) => {
+  const { board, act, readOnly } = useTools();
   const thread = board.threads[target];
   const reaction = thread?.reaction ?? null;
   const comments = thread?.comments.length ?? 0;
   const ReactionIcon = reaction === null ? null : reactionIcons[reaction];
   return (
-    <span className="not-prose absolute top-0.5 right-1 flex items-center gap-1 text-xs select-none">
-      <span className="flex items-center gap-1 group-hover/part:hidden">
+    <span
+      className={`not-prose absolute flex items-center gap-1 text-xs select-none ${place}`}
+    >
+      <span
+        className={`flex items-center gap-1 ${readOnly ? "" : "group-hover/part:hidden"}`}
+      >
         {comments > 0 && (
           <span className="flex items-center gap-0.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-sky-700">
             <MessageCircle className="size-3" />
@@ -29,7 +42,9 @@ export const Marks = ({ target }: { target: string }) => {
           </span>
         )}
       </span>
-      <span className="hidden items-center gap-0.5 rounded-full bg-white/90 p-0.5 shadow-sm ring-1 ring-stone-200 group-hover/part:flex">
+      <span
+        className={`hidden items-center gap-0.5 rounded-full bg-white/90 p-0.5 shadow-sm ring-1 ring-stone-200 ${readOnly ? "" : "group-hover/part:flex"}`}
+      >
         {Reaction.options.map((option) => {
           const Icon = reactionIcons[option];
           const on = reaction === option;
@@ -65,7 +80,8 @@ export const Marks = ({ target }: { target: string }) => {
 
 /** A dot on the right edge of a part or card; a drag from it draws an arrow. */
 export const Connector = ({ target }: { target: string }) => {
-  const { beginLink } = useTools();
+  const { beginLink, readOnly } = useTools();
+  if (readOnly) return null;
   return (
     <span
       role="button"

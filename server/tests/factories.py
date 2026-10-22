@@ -13,6 +13,8 @@ from agent_hud.models.actions import (
     Reaction,
     Remove,
     Say,
+    Send,
+    Status,
     TBody,
     TValue,
     Unlink,
@@ -61,10 +63,18 @@ def move(card_id: str, x: float, y: float) -> Move:
     return Move(kind=ActionKind.move, id=card_id, x=x, y=y)
 
 
+def send() -> Send:
+    return Send(kind=ActionKind.send)
+
+
+def status(text: str) -> Status:
+    return Status(kind=ActionKind.status, text=text)
+
+
 def as_json(*bodies: TBody) -> list[dict[str, Any]]:
     """The actions as an MCP client sends them."""
     return [body.model_dump(mode="json") for body in bodies]
 
 
-async def read_board(client: Client[Any]) -> Board:
-    return Board.model_validate((await client.call_tool("read", {})).structured_content)
+async def read_board(client: Client[Any], *, history: bool = False) -> Board:
+    return Board.model_validate((await client.call_tool("read", {"history": history})).structured_content)

@@ -29,18 +29,24 @@ The app serves the board page at `/`, a whiteboard that updates when the agent w
 | Delete | removes the selected card or arrow |
 | Drag empty space, Space+drag, scroll | pans |
 | ⌘ or Ctrl + scroll, `+`, `-`, `0`, `1` | zooms, resets, fits all cards |
-| Chat | messages to and from the agent; `M` focuses it |
+| Send, or ⌘↵ | sends the user's actions since the last send to the agent, as one turn; a chat message sends them too |
+| Chat | messages to and from the agent, and each comment on a part; a ref such as `plan/2` shows the part; `M` focuses it |
+| The pill at the top left | whose turn it is: no agent listens, the agent works (with its status), or the user's turn |
+| History, `H`, or a card's version chip | shows the earlier versions of the cards with the feedback they had |
 
-An edit is a `put`, so it clears the feedback on that card. With `AGENT_HUD_STATE_FILE` set, the app appends
+A code block whose fence gives `file=src/app.py start=40` shows the file name and line numbers, and a `diff` block
+tints its added and removed lines. A card with code is wider.
+
+An edit is a `put`, so it moves the feedback on that card to the card's history. With `AGENT_HUD_STATE_FILE` set, the app appends
 each action to that JSONL file and replays it on start.
 
 ## Tools
 
 | Tool | Does |
 |---|---|
-| `write(actions)` | acts on the board as the agent, all or nothing. Each action is `put {id, md}`, `remove {id}`, `react {ref, reaction}`, `unreact {ref}`, `comment {ref, text}`, `say {text}`, `fill {ref, value}`, `link {id, src, dst, text}`, `unlink {id}` or `move {id, x, y}`, with a `kind`. A `ref` is a card id, or a card id and the number of a list item, table body row or code line, counted together in document order, such as `plan/2`. A table header such as `cost {number}`, `done {check}`, `note {text}` or `size {S, M, L}` makes an input column, and `fill` sets its cell by row and column, such as `plan/2/3`. An arrow links two refs; a put or remove of a card drops the arrows that touch it. `move` places a card on the board; a card with no place goes below the others. |
-| `read()` | the board as JSON: `{"cards": {"plan": {"md": "1. a", "author": "agent"}}, "threads": {"plan/1": {"reaction": "approve", "comments": [{"id": "9f2c…", "author": "user", "text": "why a?"}]}}, "values": {"plan/2/3": 3.5}, "arrows": {"why": {"src": "risk", "dst": "plan/1", "text": "blocks", "author": "agent"}}, "messages": [{"id": "1c2d…", "author": "user", "text": "go ahead"}], "positions": {"plan": {"x": 0.0, "y": 0.0}}}` |
-| `listen()` | the websocket URL of the user's actions, in the same shape with an `id` and `author`; open it with Claude Code's Monitor tool |
+| `write(actions)` | acts on the board as the agent, all or nothing. Each action is `put {id, md}`, `remove {id}`, `react {ref, reaction}`, `unreact {ref}`, `comment {ref, text}`, `say {text}`, `fill {ref, value}`, `link {id, src, dst, text}`, `unlink {id}`, `move {id, x, y}` or `status {text}`, with a `kind`. A `ref` is a card id, or a card id and the number of a list item, table body row or code line, counted together in document order, such as `plan/2`. A table header such as `cost {number}`, `done {check}`, `note {text}` or `size {S, M, L}` makes an input column, and `fill` sets its cell by row and column, such as `plan/2/3`. An arrow links two refs; a put or remove of a card drops the arrows that touch it and keeps the card and its feedback in `history`. `move` places a card on the board; a card with no place goes below the others. `status` shows what the agent does while it works on the user's turn. |
+| `read()` | the board as JSON: `{"cards": {"plan": {"md": "1. a", "author": "agent"}}, "threads": {"plan/1": {"reaction": "approve", "comments": [{"id": "9f2c…", "author": "user", "text": "why a?"}]}}, "values": {"plan/2/3": 3.5}, "arrows": {"why": {"src": "risk", "dst": "plan/1", "text": "blocks", "author": "agent"}}, "messages": [{"id": "1c2d…", "author": "user", "text": "go ahead", "ref": null}], "positions": {"plan": {"x": 0.0, "y": 0.0}}, "status": "", "history": {}}`. Each message has a `ref`, which names the part for a comment. `read(history=true)` also returns the earlier versions of each card. |
+| `listen()` | the websocket URL of the user's turns; open it with Claude Code's Monitor tool. Each line is one turn, `{"actions": [{"id": "9f2c…", "author": "user", "body": {"kind": "react", "ref": "plan/2", "reaction": "reject"}, "parts": {"plan/2": "rewrite the cache"}}]}`, where `parts` has the text of each part that the action names, as it was when the user acted. A code line's text starts with its file and line number. |
 
 ## Layout
 

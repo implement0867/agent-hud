@@ -5,8 +5,11 @@ import { Bubble, Composer } from "~/components/FeedbackPanel";
 import { useTools } from "~/lib/whiteboard";
 import { ActionKind, Author } from "~/schemas/actions";
 
-/** The messages between the user and the agent, newest at the bottom. A closed chat counts the agent's new messages. */
-export const Chat = () => {
+/**
+ * The messages between the user and the agent, and the comments on parts, newest at the bottom.
+ * A closed chat counts the agent's new messages and comments. A message also sends the user's unsent actions.
+ */
+export const Chat = ({ unsent }: { unsent: number }) => {
   const { board, act } = useTools();
   const [open, setOpen] = useState(true);
   const fromAgent = board.messages.filter(
@@ -53,7 +56,7 @@ export const Chat = () => {
       </header>
       <ul className="flex min-h-24 flex-col-reverse gap-2 overflow-y-auto px-3 py-3">
         {board.messages.toReversed().map((said) => (
-          <Bubble key={said.id} said={said} />
+          <Bubble key={said.id} said={said} withRef />
         ))}
         {board.messages.length === 0 && (
           <li className="m-auto max-w-52 text-center text-sm text-stone-400">
@@ -67,6 +70,12 @@ export const Chat = () => {
           id="message-box"
           send={(text) => act({ kind: ActionKind.enum.say, text })}
         />
+        {unsent > 0 && (
+          <p className="mt-1.5 px-2 text-[11px] text-stone-400">
+            Your message also sends {unsent}{" "}
+            {unsent === 1 ? "change" : "changes"}.
+          </p>
+        )}
       </div>
     </aside>
   );

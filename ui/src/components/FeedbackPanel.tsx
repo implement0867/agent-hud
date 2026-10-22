@@ -2,13 +2,43 @@ import { Bot, SendHorizontal, Spline, User, X } from "lucide-react";
 import { useState } from "react";
 
 import { reactionIcons, reactionKeys, reactionTones } from "~/lib/reactions";
-import { useTools } from "~/lib/whiteboard";
+import { splitRefs, useTools } from "~/lib/whiteboard";
 import { ActionKind, Author, Reaction, messageSchema } from "~/schemas/actions";
 import type { TSaid } from "~/schemas/board";
 
-export const Bubble = ({ said }: { said: TSaid }) => {
+/** The text, with each ref to a part on the board, such as plan/2, as a link that shows the part. */
+const RefText = ({ text }: { text: string }) => {
+  const { board, show } = useTools();
+  return splitRefs(text, board).map(({ text: piece, ref, at }) =>
+    ref === null ? (
+      <span key={at}>{piece}</span>
+    ) : (
+      <button
+        key={at}
+        type="button"
+        className="font-mono underline decoration-dotted underline-offset-2"
+        onClick={() => {
+          show(ref);
+        }}
+      >
+        {piece}
+      </button>
+    ),
+  );
+};
+
+/** A message or comment; with its ref, a comment starts with a link to the part it is on. */
+export const Bubble = ({
+  said,
+  withRef = false,
+}: {
+  said: TSaid;
+  withRef?: boolean;
+}) => {
+  const { show } = useTools();
   const mine = said.author === Author.enum.user;
   const Icon = mine ? User : Bot;
+  const ref = withRef ? said.ref : null;
   return (
     <li className={`flex items-end gap-1.5 ${mine ? "flex-row-reverse" : ""}`}>
       <span
@@ -19,7 +49,19 @@ export const Bubble = ({ said }: { said: TSaid }) => {
       <span
         className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-sm whitespace-pre-wrap ${mine ? "rounded-br-sm bg-sky-600 text-white" : "rounded-bl-sm bg-stone-100 text-stone-800"}`}
       >
-        {said.text}
+        {ref !== null && (
+          <button
+            type="button"
+            aria-label={`Show ${ref}`}
+            className="mr-1.5 rounded bg-black/10 px-1 font-mono text-[11px]"
+            onClick={() => {
+              show(ref);
+            }}
+          >
+            {ref}
+          </button>
+        )}
+        <RefText text={said.text} />
       </span>
     </li>
   );

@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { TBoardSocket } from "~/api/boardSocket";
 import type { TRect } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
-import type { TBoard, TPoint } from "~/schemas/board";
+import type { TBoard, TPoint, TVersion } from "~/schemas/board";
 
 export type TAct = TBoardSocket["act"];
 
@@ -28,9 +28,15 @@ export type TTools = {
   act: TAct;
   selection: TSelection;
   select: (selection: TSelection) => void;
+  /** Selects the part or card and moves the view to it. */
+  show: (ref: string) => void;
   linking: TLinking | null;
   /** Starts an arrow from the ref; it ends on the part under the pointer when the button goes up. */
   beginLink: (from: string, event: PointerEvent) => void;
+  /** Opens the history of the card, or of all cards. */
+  openHistory: (card: string | null) => void;
+  /** An earlier version of a card shows its feedback, and takes no actions. */
+  readOnly: boolean;
 };
 
 export const ToolContext = createContext<TTools | null>(null);
@@ -56,3 +62,37 @@ export const isSelected = (selection: TSelection, ref: string) =>
 /** An id for a card or an arrow that the user makes. */
 export const newId = (prefix: string) =>
   `${prefix}-${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`;
+
+/** The tools for an earlier version of a card: its feedback on the board, and no actions. */
+export const readOnlyTools = (tools: TTools, version: TVersion): TTools => ({
+  ...tools,
+  board: { ...tools.board, threads: version.threads, values: version.values },
+  act: () => Promise.resolve(false),
+  selection: null,
+  select: () => undefined,
+  linking: null,
+  beginLink: () => undefined,
+  readOnly: true,
+});
+
+const refPattern = /\b[A-Za-z][A-Za-z0-9_-]{0,31}(?:\/[1-9][0-9]*){1,2}\b/;
+
+/** The text in pieces, each with its offset: plain text, and each ref to a part of a card on the board, such as plan/2; a cell's ref names its row. */
+export const splitRefs = (
+  text: string,
+  board: TBoard,
+): { text: string; ref: string | null; at: number }[] => {
+  const pieces = text.split(new RegExp(`(${refPattern.source})`));
+  const offsets = pieces.map((_, index) =>
+    pieces.slice(0, index).reduce((sum, piece) => sum + piece.length, 0),
+  );
+  return pieces.flatMap((piece, index) => {
+    if (piece === "") return [];
+    const [card = "", part = ""] = piece.split("/");
+    const ref =
+      index % 2 === 1 && Object.hasOwn(board.cards, card)
+        ? `${card}/${part}`
+        : null;
+    return [{ text: piece, ref, at: offsets[index] ?? 0 }];
+  });
+};

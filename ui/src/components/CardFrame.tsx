@@ -132,9 +132,15 @@ export const CardFrame = ({
   drop: (to: TPoint) => void;
   measure: (element: HTMLElement | null) => void;
 }) => {
-  const { board, act, selection, select } = useTools();
+  const { board, act, selection, select, openHistory } = useTools();
+  const versions = board.history[id]?.length ?? 0;
   const selected = isSelected(selection, id);
   const note = card.author === Author.enum.user;
+  const width = /^ {0,3}(```|~~~)/m.test(card.md)
+    ? "w-[40rem]"
+    : note
+      ? "w-64"
+      : "w-96";
   const drag = usePointerDrag({
     scale,
     at,
@@ -159,7 +165,7 @@ export const CardFrame = ({
         top: at.y,
         visibility: placed ? "visible" : "hidden",
       }}
-      className={`group/card pointer-events-auto absolute flex animate-rise flex-col rounded-xl transition-shadow ${note ? "w-64 -rotate-[0.6deg] bg-amber-100 shadow-[0_8px_20px_-8px_rgba(120,80,0,0.35)]" : "w-96 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06),0_10px_30px_-12px_rgba(0,0,0,0.18)]"} ${selected ? "ring-2 ring-sky-400" : "ring-1 ring-stone-900/5"}`}
+      className={`group/card pointer-events-auto absolute flex animate-rise flex-col rounded-xl transition-shadow ${width} ${note ? "-rotate-[0.6deg] bg-amber-100 shadow-[0_8px_20px_-8px_rgba(120,80,0,0.35)]" : "bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06),0_10px_30px_-12px_rgba(0,0,0,0.18)]"} ${selected ? "ring-2 ring-sky-400" : "ring-1 ring-stone-900/5"}`}
       onClick={(event) => {
         event.stopPropagation();
       }}
@@ -180,6 +186,23 @@ export const CardFrame = ({
         >
           {id}
         </span>
+        {versions > 0 && (
+          <button
+            type="button"
+            aria-label={`History of ${id}`}
+            title={`Version ${String(versions + 1)}: show the earlier versions and their feedback`}
+            className="rounded-full bg-stone-100 px-1.5 py-px font-mono text-[10px] text-stone-500 hover:bg-sky-100 hover:text-sky-700"
+            onPointerDown={(event) => {
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              openHistory(id);
+            }}
+          >
+            v{versions + 1}
+          </button>
+        )}
         <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/card:opacity-100">
           <IconButton
             label={`Edit ${id}`}
@@ -217,7 +240,7 @@ export const CardFrame = ({
             warning={
               feedback === 0
                 ? null
-                : `saving clears the feedback on ${String(feedback)} ${feedback === 1 ? "part" : "parts"}`
+                : `saving moves the feedback on ${String(feedback)} ${feedback === 1 ? "part" : "parts"} to the history`
             }
             save={(md) => {
               void save(md);
@@ -227,7 +250,9 @@ export const CardFrame = ({
             }}
           />
         ) : (
-          <CardBody id={id} md={card.md} />
+          <div key={versions} className="animate-pop">
+            <CardBody id={id} md={card.md} />
+          </div>
         )}
       </div>
     </article>
