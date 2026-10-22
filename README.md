@@ -4,6 +4,8 @@ A shared browser canvas for Claude Code. The agent puts plans, options and table
 canvas. The user approves, rejects or questions each item, and the agent reads that feedback
 over MCP.
 
+![The agent puts a plan and code; the user rejects a step, comments, asks about a code line and sends; the agent answers and puts a new plan, and the old plan with its feedback shows in the history](docs/demo.gif)
+
 ## Install
 
 ```sh
