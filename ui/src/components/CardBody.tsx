@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import Markdown, { MarkdownHooks } from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -79,6 +79,42 @@ const BodyRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => {
     </tr>
   );
 };
+
+const lineTone = (selected: boolean, linkingFrom: boolean) =>
+  linkingFrom
+    ? "bg-violet-400/25 ring-2 ring-violet-400"
+    : selected
+      ? "bg-sky-400/20 ring-1 ring-sky-400"
+      : "hover:bg-white/10";
+
+const CodeLine = ({
+  node,
+  children,
+}: ExtraProps & { children?: ReactNode }) => {
+  const part = usePart(node);
+  return (
+    <span
+      data-ref={part.ref}
+      className={`group/part relative block min-h-[1lh] cursor-pointer px-4 pr-16 transition-colors ${lineTone(part.selected, part.linkingFrom)}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        part.select();
+      }}
+    >
+      {children}
+      <Marks target={part.ref} />
+      <Connector target={part.ref} />
+    </span>
+  );
+};
+
+/** The lines of code blocks are parts; Shiki's other spans colour the code. */
+const Span = ({ node, ...props }: ComponentProps<"span"> & ExtraProps) =>
+  node?.properties["dataPart"] === undefined ? (
+    <span {...props} />
+  ) : (
+    <CodeLine node={node}>{props.children}</CodeLine>
+  );
 
 /** Header rows get an empty cell above the marks of the body rows. */
 const TableRow = (props: ComponentProps<"tr"> & ExtraProps) =>
@@ -214,17 +250,18 @@ const components = {
   tr: TableRow,
   td: TableCell,
   a: Anchor,
+  span: Span,
 };
 
 const remarkPlugins = [remarkGfm];
 
 const plainPlugins = [numberParts];
 
-const highlightPlugins = [numberParts, highlight];
+const highlightPlugins = [highlight, numberParts];
 
-/** The card's markdown, with each list item and table body row as a part that takes feedback and arrows, and code blocks in colour. */
+/** The card's markdown, with each list item, table body row and code line as a part that takes feedback and arrows, and code blocks in colour. */
 export const CardBody = memo(({ id, md }: { id: string; md: string }) => (
-  <div className="prose prose-sm prose-stone max-w-none prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight prose-p:my-1.5 prose-ol:my-1 prose-ul:my-1 prose-li:my-0.5 prose-table:my-2 prose-th:font-medium prose-th:text-stone-500">
+  <div className="prose prose-sm prose-stone max-w-none prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight prose-p:my-1.5 prose-ol:my-1 prose-ul:my-1 prose-li:my-0.5 prose-table:my-2 prose-th:font-medium prose-th:text-stone-500 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-visible prose-pre:px-0 prose-pre:break-words prose-pre:whitespace-pre-wrap [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-stone-100 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5">
     <CardContext value={id}>
       <MarkdownHooks
         remarkPlugins={remarkPlugins}

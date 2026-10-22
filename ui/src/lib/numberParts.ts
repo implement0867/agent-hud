@@ -13,9 +13,25 @@ const textOf = (node: Root | RootContent): string =>
 const elements = (nodes: ElementContent[]) =>
   nodes.filter((node): node is Element => node.type === "element");
 
+/** The lines of a code block: Shiki's line spans, or spans of the plain text, which ends in one newline as Shiki strips. */
+const codeLines = (code: Element): Element[] => {
+  const lines = elements(code.children);
+  return lines.length > 0
+    ? lines
+    : textOf(code)
+        .replace(/\n$/, "")
+        .split("\n")
+        .map((line) => ({
+          type: "element",
+          tagName: "span",
+          properties: {},
+          children: line === "" ? [] : [{ type: "text", value: line }],
+        }));
+};
+
 /**
- * A rehype plugin, as the server's outline reads parts:
- * data-part on each list item and table body row is its number in the document, from 1;
+ * A rehype plugin, after highlight, as the server's outline reads parts:
+ * data-part on each list item, table body row and line of a code block is its number in the document, from 1;
  * each header cell shows its title, and each cell of an input column has data-input (row/column), data-kind and data-options.
  */
 export const numberParts = () => (tree: Root) => {
@@ -32,6 +48,19 @@ export const numberParts = () => (tree: Root) => {
       node.children = [{ type: "text", value: title }];
     }
     if (node.type === "element" && node.tagName === "thead") columns = [];
+    if (
+      node.type === "element" &&
+      node.tagName === "code" &&
+      parent.type === "element" &&
+      parent.tagName === "pre"
+    ) {
+      const lines = codeLines(node);
+      node.children = lines;
+      for (const line of lines) {
+        count += 1;
+        line.properties["dataPart"] = count;
+      }
+    }
     if (
       node.type === "element" &&
       node.tagName === "tr" &&

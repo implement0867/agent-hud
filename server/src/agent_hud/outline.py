@@ -5,7 +5,7 @@ from agent_hud.models.columns import Column, ColumnKind
 
 
 class Outline:
-    """The parts of a markdown document the board can address: list items and table body rows by number in document order, and input cells as row/column."""
+    """The parts of a markdown document the board can address: list items, table body rows and code lines by number in document order, and input cells as row/column."""
 
     def __init__(self, md: str) -> None:
         self.paths: set[str] = set()
@@ -23,6 +23,10 @@ class Outline:
                     for n, column in enumerate(columns, start=1):
                         if column.kind is not ColumnKind.static:
                             self.inputs[f"{row}/{n}"] = column
+                case "fence" | "code_block", _:
+                    first = len(self.paths) + 1
+                    lines = node.content.removesuffix("\n").count("\n") + 1
+                    self.paths |= {str(n) for n in range(first, first + lines)}
                 case _:
                     pass
 

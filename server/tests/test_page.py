@@ -142,3 +142,23 @@ async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser
     )
     await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_have_value("decides")
     await page.screenshot(path=tmp_path / "2-label.png")
+
+
+async def test_the_user_reviews_a_line_of_code_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:
+    """Assemble: the agent puts a card with inline code and a code block in colour.
+    Act: the user rejects line 2 with the quick reaction and comments on it.
+    Assert: the inline code shows no backticks, the agent hears the reaction and the comment on line 2, and the page marks the line; a screenshot goes in tmp_path."""
+    await agent.write(put("code", "Call `render` once.\n\n```python\ndef render(md: str) -> str:\n    return md\n```"))
+    await expect(page.locator('[data-ref="code"] pre.shiki')).to_be_visible()
+    await expect(page.locator('[data-ref="code/2"]')).to_have_text("    return md")
+    inline = page.locator('[data-ref="code"] p code')
+    assert await inline.evaluate("code => getComputedStyle(code, '::before').content") == "none"
+
+    await page.locator('[data-ref="code/2"]').hover()
+    await page.get_by_label("reject code/2").click()
+    await page.locator('[data-ref="code/2"]').click()
+    await page.get_by_label("Comment").fill("md is not html")
+    await page.get_by_label("Comment").press("Enter")
+    assert await agent.hear(2) == [react("code/2", Reaction.reject), comment("code/2", "md is not html")]
+    await expect(page.get_by_label("reject code/2")).to_have_attribute("aria-pressed", "true")
+    await page.screenshot(path=tmp_path / "1-line.png")

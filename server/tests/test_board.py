@@ -199,6 +199,15 @@ def test_outline_numbers_list_items_and_table_rows_together(texts: list[str], ro
     assert Outline(md).paths == {str(n) for n in range(1, len(texts) + len(rows) + 1)}
 
 
+@given(st.lists(item_texts(), min_size=1), st.lists(st.one_of(item_texts(), st.just("")), min_size=1))
+def test_outline_numbers_list_items_and_code_lines_together(texts: list[str], lines: list[str]) -> None:
+    """Assemble: a list, then a fenced code block of lines, some of them empty.
+    Act: outline them.
+    Assert: one path for each list item and each code line."""
+    md = list_md("1. ", texts) + "\n\n```python\n" + "\n".join(lines) + "\n```"
+    assert Outline(md).paths == {str(n) for n in range(1, len(texts) + len(lines) + 1)}
+
+
 @pytest.mark.parametrize(
     ("header", "column"),
     [
