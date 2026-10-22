@@ -1,12 +1,13 @@
 import { memo } from "react";
 import type { ComponentProps } from "react";
-import Markdown from "react-markdown";
+import Markdown, { MarkdownHooks } from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { Connector, Marks } from "~/components/Marks";
 import { ColumnKind } from "~/lib/columns";
 import { invariant } from "~/lib/invariant";
+import { highlight } from "~/lib/highlight";
 import { numberParts } from "~/lib/numberParts";
 import {
   CardContext,
@@ -215,17 +216,32 @@ const components = {
   a: Anchor,
 };
 
-/** The card's markdown, with each list item and table body row as a part that takes feedback and arrows. */
+const remarkPlugins = [remarkGfm];
+
+const plainPlugins = [numberParts];
+
+const highlightPlugins = [numberParts, highlight];
+
+/** The card's markdown, with each list item and table body row as a part that takes feedback and arrows, and code blocks in colour. */
 export const CardBody = memo(({ id, md }: { id: string; md: string }) => (
   <div className="prose prose-sm prose-stone max-w-none prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight prose-p:my-1.5 prose-ol:my-1 prose-ul:my-1 prose-li:my-0.5 prose-table:my-2 prose-th:font-medium prose-th:text-stone-500">
     <CardContext value={id}>
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[numberParts]}
+      <MarkdownHooks
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={highlightPlugins}
         components={components}
+        fallback={
+          <Markdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={plainPlugins}
+            components={components}
+          >
+            {md}
+          </Markdown>
+        }
       >
         {md}
-      </Markdown>
+      </MarkdownHooks>
     </CardContext>
   </div>
 ));
