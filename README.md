@@ -50,6 +50,9 @@ each action to that JSONL file and replays it on start.
 | `read()` | the whole board as JSON, to read once and again when the agent is unsure: `{"cards": {"plan": {"md": "1. a", "author": "agent"}}, "threads": {"plan/1": {"reaction": "approve", "comments": [{"id": "9f2c…", "author": "user", "text": "why a?"}]}}, "values": {"plan/2/3": 3.5}, "arrows": {"why": {"src": "risk", "dst": "plan/1", "text": "blocks", "author": "agent"}}, "messages": [{"id": "1c2d…", "author": "user", "text": "go ahead", "ref": null}], "positions": {"plan": {"x": 0.0, "y": 0.0}}, "history": {}}`. Each message has a `ref`, which names the part for a comment. `read(history=true)` also returns the earlier versions of each card. |
 | `listen()` | the websocket URL of the user's turns; open it with Claude Code's Monitor tool. Each line is one turn, the changes that the user made since the last send: `{"actions": [{"id": "9f2c…", "author": "user", "body": {"kind": "react", "ref": "plan/2", "reaction": "reject"}, "parts": {"plan/2": "rewrite the cache"}}]}`, where `parts` has the text of each part that the action names, as it was when the user acted. A code line's text starts with its file and line number. A `put` on a card that was on the board comes as `{"kind": "edit", "id": "plan", "diff": "@@ -1,2 +1,2 @@…"}`, a unified diff of its markdown. |
 
+The listed schema of `write` is one object with the fields of all kinds of action, and the description gives the fields of
+each kind, so that the tools cost the agent fewer tokens. The server still checks each action against the model of its kind.
+
 ## Layout
 
 ```text
