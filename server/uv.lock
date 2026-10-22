@@ -25,6 +25,7 @@ dependencies = [
 dev = [
     { name = "basedpyright" },
     { name = "hypothesis" },
+    { name = "jsonschema" },
     { name = "playwright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -46,6 +47,7 @@ requires-dist = [
 dev = [
     { name = "basedpyright", specifier = ">=1.40.2" },
     { name = "hypothesis", specifier = ">=6.170.3" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "playwright", specifier = ">=1.56.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
