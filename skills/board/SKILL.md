@@ -12,6 +12,7 @@ The board is a page in the browser that you and the user share. Its MCP tools ar
 Call `write` with a list of actions. They run in order, all or nothing.
 
 - `put {id, md}` adds a card of markdown, or replaces the card with that id. A replaced card loses its feedback, values and arrows.
+  - A fenced code block with a language name, such as ```` ```python ````, shows in colour. A block with an unknown language shows as plain text.
 - `remove {id}` removes a card.
 - `say {text}` sends a message to the user. It shows in the chat on the page.
 - `move {id, x, y}` places a card on the board, in pixels. A card with no place goes below the others.
