@@ -5,7 +5,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from agent_hud.models.actions import Action, Author, Reaction, TBody, TValue
-from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread
+from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread, Version
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
 from tests.factories import comment, fill, link, move, put, react, remove, say, unlink, unreact
@@ -44,15 +44,31 @@ def outside(board: Board, card_id: str) -> tuple[dict[str, Card], dict[str, Thre
     return cards, threads
 
 
+def retired(board: Board, card_id: str) -> tuple[Version, ...]:
+    """The history of the card after a put or remove of it on the board."""
+    on_card = {ref for ref in [*board.threads, *board.values] if ref.partition("/")[0] == card_id}
+    version = Version(
+        card=board.cards[card_id],
+        threads={ref: thread for ref, thread in board.threads.items() if ref in on_card},
+        values={ref: value for ref, value in board.values.items() if ref in on_card},
+    )
+    return (*board.history.get(card_id, ()), version)
+
+
 @given(boards(), card_ids(), mds(), st.from_type(Author))
-def test_put_sets_the_card_and_clears_its_threads(board: Board, card_id: str, md: str, author: Author) -> None:
+def test_put_sets_the_card_and_moves_its_feedback_to_its_history(
+    board: Board, card_id: str, md: str, author: Author
+) -> None:
     """Assemble: any board.
     Act: put a card.
-    Assert: the card has the markdown and author, it has no threads, and the rest of the board is unchanged."""
+    Assert: the card has the markdown and author and no threads, the card as it was is last in its history with its threads and values, and the rest of the board is unchanged."""
     after = act(board, put(card_id, md), author)
     assert after.cards[card_id] == Card(md=md, author=author)
     assert outside(after, card_id) == outside(board, card_id)
     assert not any(ref.partition("/")[0] == card_id for ref in after.threads)
+    assert after.history.get(card_id, ()) == (
+        retired(board, card_id) if card_id in board.cards else board.history.get(card_id, ())
+    )
 
 
 @given(boards(), card_ids())
@@ -64,6 +80,7 @@ def test_remove_drops_the_card_and_its_threads_or_raises(board: Board, card_id: 
         after = act(board, remove(card_id))
         assert (after.cards, after.threads) == outside(board, card_id)
         assert after.positions == {k: v for k, v in board.positions.items() if k != card_id}
+        assert after.history[card_id] == retired(board, card_id)
     else:
         with pytest.raises(ValueError):
             act(board, remove(card_id))
@@ -137,11 +154,12 @@ def test_comments_add_in_order_with_their_action_and_author(
 ) -> None:
     """Assemble: a board with a card.
     Act: comment on the card with each text.
-    Assert: the thread has each comment in order, with the id of its action and its author."""
+    Assert: the thread and the chat have each comment in order, with the id of its action, its author and the card's ref."""
     board = act(Board(), put(card_id, md))
     for action_id, author, text in comments:
         board = act(board, comment(card_id, text), author, action_id)
-    assert board.threads[card_id].comments == tuple(Said(id=i, author=a, text=t) for i, a, t in comments)
+    said = tuple(Said(id=i, author=a, text=t, ref=card_id) for i, a, t in comments)
+    assert (board.threads[card_id].comments, board.messages) == (said, said)
 
 
 @given(boards(), st.lists(st.tuples(action_ids(), st.from_type(Author), messages())))
@@ -154,6 +172,21 @@ def test_say_adds_each_message_to_the_board(board: Board, messages: list[tuple[s
         said = act(said, say(text), author, action_id)
     added = tuple(Said(id=i, author=a, text=t) for i, a, t in messages)
     assert said == board.model_copy(update={"messages": (*board.messages, *added)})
+
+
+@given(card_ids().filter(lambda card_id: card_id != "t"), st.lists(item_texts(), min_size=2), st.from_type(Reaction))
+def test_part_texts_name_the_text_of_each_part_an_action_names(
+    card_id: str, texts: list[str], reaction: Reaction
+) -> None:
+    """Assemble: a board with a list card and a table card.
+    Act: get the part texts of a reaction, a link, a fill and a put.
+    Assert: the text of the list item, of both ends of the link, of the row of the cell, and none for the put."""
+    board = act(Board(), put(card_id, list_md("1. ", texts)))
+    board = act(board, put("t", "| a | b {number} |\n|---|---|\n| x | |"))
+    assert board.part_texts(react(f"{card_id}/2", reaction)) == {f"{card_id}/2": texts[1]}
+    assert board.part_texts(link("l", f"{card_id}/1", card_id)) == {f"{card_id}/1": texts[0]}
+    assert board.part_texts(fill("t/1/2", 3)) == {"t/1": "x | "}
+    assert board.part_texts(put(card_id, "x")) == {}
 
 
 @pytest.mark.parametrize("marker", ["- ", "1. "])
@@ -206,6 +239,19 @@ def test_outline_numbers_list_items_and_code_lines_together(texts: list[str], li
     Assert: one path for each list item and each code line."""
     md = list_md("1. ", texts) + "\n\n```python\n" + "\n".join(lines) + "\n```"
     assert Outline(md).paths == {str(n) for n in range(1, len(texts) + len(lines) + 1)}
+
+
+@given(st.lists(item_texts(), min_size=1), st.integers(1, 999))
+def test_a_code_line_names_its_file_and_line_when_its_block_has_a_file(lines: list[str], start: int) -> None:
+    """Assemble: a fenced code block with a file and a first line number, and one with neither.
+    Act: outline them.
+    Assert: the text of each line of the first starts with the file and its number, and the second has the plain lines."""
+    code = "\n".join(lines)
+    outline = Outline(f"```python file=src/app.py start={start}\n{code}\n```\n\n```\n{code}\n```")
+    assert list(outline.texts.values()) == [
+        *(f"src/app.py:{n}: {line}" for n, line in enumerate(lines, start=start)),
+        *lines,
+    ]
 
 
 @pytest.mark.parametrize(

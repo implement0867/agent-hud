@@ -28,6 +28,15 @@ async def test_read_returns_the_board_with_its_threads(client: Client[Any]) -> N
     assert await read_board(client) == get_hud().board
 
 
+async def test_read_leaves_out_the_history_unless_asked(client: Client[Any]) -> None:
+    """Assemble: a server where the agent put a card, then put it again.
+    Act: read, and read with the history.
+    Assert: the first has no history, and the second has the hud's whole board."""
+    await client.call_tool("write", {"actions": as_json(put("plan", "1. a"), put("plan", "1. b"))})
+    assert (await read_board(client)).history == {}
+    assert await read_board(client, history=True) == get_hud().board
+
+
 @pytest.mark.parametrize(
     "actions",
     [as_json(put("b", "y"), remove("missing")), as_json(put("b", "y"), react("a/1", Reaction.reject)), []],

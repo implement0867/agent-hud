@@ -29,9 +29,59 @@ const codeLines = (code: Element): Element[] => {
         }));
 };
 
+/** The key=value words after the language of a fenced code block, such as file=src/app.py start=40. */
+const fenceOptions = (meta: string): Record<string, string> =>
+  Object.fromEntries(
+    meta
+      .split(/\s+/)
+      .flatMap((word) =>
+        word.includes("=")
+          ? [
+              [
+                word.slice(0, word.indexOf("=")),
+                word.slice(word.indexOf("=") + 1),
+              ],
+            ]
+          : [],
+      ),
+  );
+
+/** The language and the info after it of a code block, from Shiki's pre or from the plain code element. */
+const codeInfo = (pre: Element, code: Element) => {
+  const className = code.properties.className;
+  const plainLang = Array.isArray(className)
+    ? className
+        .map(String)
+        .find((name) => name.startsWith("language-"))
+        ?.slice("language-".length)
+    : undefined;
+  const lang = pre.properties["dataLang"] ?? plainLang ?? "";
+  const meta = pre.properties["dataMeta"] ?? code.data?.meta ?? "";
+  return { lang: String(lang), meta: String(meta) };
+};
+
+/** Data for the lines of a code block: the line numbers when the fence has a file or a first line, and the diff marks of a diff. */
+const markLines = (pre: Element, code: Element, lines: Element[]) => {
+  const { lang, meta } = codeInfo(pre, code);
+  const options = fenceOptions(meta);
+  const start = /^\d+$/.test(options["start"] ?? "")
+    ? Number(options["start"])
+    : 1;
+  if (options["file"] !== undefined)
+    pre.properties["dataFile"] = options["file"];
+  lines.forEach((line, index) => {
+    if (options["file"] !== undefined || options["start"] !== undefined)
+      line.properties["dataLine"] = start + index;
+    const first = textOf(line).charAt(0);
+    if (lang === "diff" && (first === "+" || first === "-"))
+      line.properties["dataDiff"] = first === "+" ? "add" : "remove";
+  });
+};
+
 /**
  * A rehype plugin, after highlight, as the server's outline reads parts:
  * data-part on each list item, table body row and line of a code block is its number in the document, from 1;
+ * a code line has data-line, its number in the file, when its fence has file= or start=, and data-diff in a diff;
  * each header cell shows its title, and each cell of an input column has data-input (row/column), data-kind and data-options.
  */
 export const numberParts = () => (tree: Root) => {
@@ -56,6 +106,7 @@ export const numberParts = () => (tree: Root) => {
     ) {
       const lines = codeLines(node);
       node.children = lines;
+      markLines(parent, node, lines);
       for (const line of lines) {
         count += 1;
         line.properties["dataPart"] = count;

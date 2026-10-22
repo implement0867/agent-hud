@@ -2,8 +2,8 @@ import { assertNever } from "~/lib/assertNever";
 import { invariant } from "~/lib/invariant";
 import { requestSchema } from "~/schemas/actions";
 import type { TBody } from "~/schemas/actions";
-import type { TBoard } from "~/schemas/board";
 import { EventKind, serverEventSchema } from "~/schemas/events";
+import type { TSnapshot } from "~/schemas/events";
 
 export type TBoardSocket = {
   /** Resolves true when the server takes the action, or false when it rejects it or the connection closes first. */
@@ -11,9 +11,9 @@ export type TBoardSocket = {
   close: () => void;
 };
 
-/** The page's websocket. The server sends the board on connect and after each change. */
+/** The page's websocket. The server sends a snapshot on connect and after each change. */
 export const openBoardSocket = (
-  onBoard: (board: TBoard) => void,
+  onSnapshot: (snapshot: TSnapshot) => void,
   onClose: () => void,
 ): TBoardSocket => {
   const url = new URL("/ws", window.location.href);
@@ -35,7 +35,7 @@ export const openBoardSocket = (
       const event = serverEventSchema.parse(JSON.parse(message.data));
       switch (event.kind) {
         case EventKind.enum.snapshot:
-          onBoard(event.board);
+          onSnapshot(event);
           return;
         case EventKind.enum.accepted:
           settle(event.id, true);

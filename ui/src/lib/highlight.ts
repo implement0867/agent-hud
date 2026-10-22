@@ -19,7 +19,7 @@ const { getSingletonHighlighter } = createSingletonShorthands(
 );
 
 /**
- * A rehype plugin that colours fenced code blocks.
+ * A rehype plugin that colours fenced code blocks, and keeps the language and the rest of the fence's info on each pre as data-lang and data-meta.
  * The first code block loads the one chunk with Shiki's grammars, theme and WebAssembly; a language Shiki does not know shows as plain text.
  */
 export const highlight = () => async (tree: Root, file: VFile) => {
@@ -31,5 +31,14 @@ export const highlight = () => async (tree: Root, file: VFile) => {
     theme,
     lazy: true,
     fallbackLanguage: "text",
+    transformers: [
+      {
+        name: "code-info",
+        pre(node) {
+          node.properties["dataLang"] = this.options.lang;
+          node.properties["dataMeta"] = this.options.meta?.__raw ?? "";
+        },
+      },
+    ],
   })(tree, file, () => undefined);
 };

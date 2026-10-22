@@ -94,7 +94,7 @@ const pointAt = (t: number, points: [TPoint, TPoint, TPoint, TPoint]) => {
 
 /**
  * A curve from the side of the source card that faces the target card, at the height of the source part,
- * to the facing side of the target card, at the height of the target part. Cards one above the other loop out to the right.
+ * to a small gap before the facing side of the target card, at the height of the target part. Cards one above the other loop out to the right.
  */
 export const arrowCurve = (
   from: { card: TRect; y: number },
@@ -108,8 +108,9 @@ export const arrowCurve = (
     x: apart && !rightward ? from.card.x : from.card.x + from.card.width,
     y: from.y,
   };
+  const gap = 4;
   const end = {
-    x: apart && rightward ? to.card.x : to.card.x + to.card.width,
+    x: apart && rightward ? to.card.x - gap : to.card.x + to.card.width + gap,
     y: to.y,
   };
   const reach = Math.max(48, Math.abs(end.x - start.x) / 2);

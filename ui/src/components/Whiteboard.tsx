@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
+import { AgentPill } from "~/components/AgentPill";
 import { ArrowLayer } from "~/components/ArrowLayer";
 import { Canvas } from "~/components/Canvas";
 import { CardFrame, Editor } from "~/components/CardFrame";
 import { Chat } from "~/components/Chat";
 import { FeedbackPanel } from "~/components/FeedbackPanel";
+import { HistoryDrawer } from "~/components/HistoryDrawer";
 import { reactionKeys } from "~/lib/reactions";
 import { Toolbar } from "~/components/Toolbar";
 import {
@@ -21,7 +23,8 @@ import type { TRect, TView } from "~/lib/geometry";
 import { SelectionKind, ToolContext, newId, useTools } from "~/lib/whiteboard";
 import type { TAct, TLinking, TSelection } from "~/lib/whiteboard";
 import { ActionKind, Reaction } from "~/schemas/actions";
-import type { TBoard, TPoint } from "~/schemas/board";
+import type { TPoint } from "~/schemas/board";
+import type { TSnapshot } from "~/schemas/events";
 
 const home: TView = { x: 64, y: 64, scale: 1 };
 
@@ -61,8 +64,18 @@ const DraftNote = ({ at, close }: { at: TPoint; close: () => void }) => {
   );
 };
 
-/** The live board as a whiteboard: cards at their places, arrows between parts, feedback beside the selection, and the chat. */
-export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
+/**
+ * The live board as a whiteboard: cards at their places, arrows between parts, feedback beside the selection, the chat,
+ * whose turn it is, and the history of the cards when the user opens it.
+ */
+export const Whiteboard = ({
+  snapshot,
+  act,
+}: {
+  snapshot: TSnapshot;
+  act: TAct;
+}) => {
+  const { board, agent, unsent } = snapshot;
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
@@ -82,6 +95,7 @@ export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
   );
   const [settling, setSettling] = useState<Record<string, TPoint>>({});
   const [placed, setPlaced] = useState<Record<string, TPoint>>({});
+  const [history, setHistory] = useState<{ card: string | null } | null>(null);
 
   const [positionsSeen, setPositionsSeen] = useState(board.positions);
   if (positionsSeen !== board.positions) {
@@ -147,6 +161,18 @@ export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
     selection?.kind === SelectionKind.enum.ref ? selection.ref : null;
 
   const [selectedCard = ""] = (selectedRef ?? "").split("/");
+
+  /** A new version of the card of the selected part closes the part's feedback, which went to the history. */
+  const version = board.history[selectedCard]?.length ?? 0;
+  const [versionSeen, setVersionSeen] = useState({
+    card: selectedCard,
+    version,
+  });
+  if (versionSeen.card !== selectedCard || versionSeen.version !== version) {
+    setVersionSeen({ card: selectedCard, version });
+    if (versionSeen.card === selectedCard && selectedRef?.includes("/"))
+      setSelection(null);
+  }
   const cardAt = shown[selectedCard];
   const panelAt =
     cardAt === undefined || panelOffset === null
@@ -174,14 +200,26 @@ export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
     if (rects.length > 0) setView(fitAll(rects, size()));
   };
 
-  const show = (ref: string) => {
-    const root = world.current;
-    const element = root?.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
-    if (root == null || element == null) return;
-    select({ kind: SelectionKind.enum.ref, ref });
-    setView((current) =>
-      centreOn(current, rectOnBoard(element, root, current.scale), size()),
-    );
+  const show = useCallback(
+    (ref: string) => {
+      const root = world.current;
+      const element = root?.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
+      const box = viewport.current?.getBoundingClientRect();
+      if (root == null || element == null || box === undefined) return;
+      select({ kind: SelectionKind.enum.ref, ref });
+      setView((current) =>
+        centreOn(current, rectOnBoard(element, root, current.scale), box),
+      );
+    },
+    [select, setView],
+  );
+
+  const openHistory = useCallback((card: string | null) => {
+    setHistory({ card });
+  }, []);
+
+  const send = () => {
+    if (unsent > 0) void act({ kind: ActionKind.enum.send });
   };
 
   const note = (at?: TPoint) => {
@@ -248,14 +286,20 @@ export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
   );
 
   const onKey = (event: KeyboardEvent) => {
-    if (typing(event.target) || event.metaKey || event.ctrlKey || event.altKey)
+    if (typing(event.target)) return;
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      send();
       return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     const key = event.key.toLowerCase();
     const reaction = Reaction.options.find(
       (option) => reactionKeys[option] === key,
     );
     if (key === "escape") select(null);
     else if (key === "n") note();
+    else if (key === "h") setHistory(history === null ? { card: null } : null);
     else if (key === "1") fit();
     else if (key === "0") setView(home);
     else if (key === "+" || key === "=") zoom(1.25);
@@ -300,8 +344,18 @@ export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
   }, []);
 
   const tools = useMemo(
-    () => ({ board, act, selection, select, linking, beginLink }),
-    [board, act, selection, select, linking, beginLink],
+    () => ({
+      board,
+      act,
+      selection,
+      select,
+      show,
+      linking,
+      beginLink,
+      openHistory,
+      readOnly: false,
+    }),
+    [board, act, selection, select, show, linking, beginLink, openHistory],
   );
 
   const empty =
@@ -319,10 +373,16 @@ export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
         create={note}
         overlay={
           <>
-            <div className="absolute top-4 left-4 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-sm font-semibold tracking-tight text-stone-800 shadow-sm ring-1 ring-stone-900/5">
-              <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.2)]" />
-              agent-hud
-            </div>
+            <AgentPill agent={agent} />
+            {history !== null && (
+              <HistoryDrawer
+                card={history.card}
+                choose={openHistory}
+                close={() => {
+                  setHistory(null);
+                }}
+              />
+            )}
             {linking !== null && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-violet-600 px-4 py-1.5 text-sm text-white shadow-lg">
                 Release on a part or a card · Esc cancels
@@ -351,9 +411,14 @@ export const Whiteboard = ({ board, act }: { board: TBoard; act: TAct }) => {
               note={() => {
                 note();
               }}
-              show={show}
+              unsent={unsent}
+              send={send}
+              history={history !== null}
+              toggleHistory={() => {
+                setHistory(history === null ? { card: null } : null);
+              }}
             />
-            <Chat />
+            <Chat unsent={unsent} />
           </>
         }
       >

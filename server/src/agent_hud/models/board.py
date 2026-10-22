@@ -14,7 +14,9 @@ from agent_hud.models.actions import (
     Reaction,
     Remove,
     Say,
+    Send,
     TActionId,
+    TBody,
     TCardId,
     TMessage,
     TRef,
@@ -39,9 +41,12 @@ class Card(Model):
 
 
 class Said(Model):
+    """A chat message, or a comment on the part that ref names."""
+
     id: TActionId
     author: Author
     text: TMessage
+    ref: TRef | None = None
 
 
 class Arrow(Model):
@@ -68,13 +73,21 @@ class Thread(Model):
                 return self.model_copy(update={"reaction": reaction})
             case Unreact():
                 return self.model_copy(update={"reaction": None})
-            case Comment(text=text):
-                said = Said(id=action.id, author=action.author, text=text)
+            case Comment(ref=ref, text=text):
+                said = Said(id=action.id, author=action.author, text=text, ref=ref)
                 return self.model_copy(update={"comments": (*self.comments, said)})
-            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move():
+            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Send():
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
+
+
+class Version(Model):
+    """A card as it was before a put replaced it or a remove took it away, with its feedback."""
+
+    card: Card
+    threads: dict[TRef, Thread] = Field(default_factory=dict)
+    values: dict[TRef, TValue] = Field(default_factory=dict)
 
 
 class Board(Model):
@@ -82,24 +95,48 @@ class Board(Model):
     threads: dict[TRef, Thread] = Field(default_factory=dict)
     values: dict[TRef, TValue] = Field(default_factory=dict)
     arrows: dict[TCardId, Arrow] = Field(default_factory=dict)
-    messages: tuple[Said, ...] = ()
+    messages: tuple[Said, ...] = Field(default=(), description="The chat, and each comment on a part, in order")
     positions: dict[TCardId, Point] = Field(default_factory=dict)
+    history: dict[TCardId, tuple[Version, ...]] = Field(
+        default_factory=dict, description="The earlier versions of each card, oldest first"
+    )
+
+    def part_texts(self, body: TBody) -> dict[TRef, str]:
+        """The text of each part that the action names, as the board has it now."""
+        match body:
+            case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref):
+                refs = [ref]
+            case Fill(ref=ref):
+                refs = [ref.rpartition("/")[0]]
+            case Link(src=src, dst=dst):
+                refs = [src, dst]
+            case _:
+                refs = []
+        return {ref: text for ref in refs if (text := self._text(ref)) is not None}
+
+    def _text(self, ref: TRef) -> str | None:
+        card_id, _, path = ref.partition("/")
+        return Outline(self.cards[card_id].md).texts.get(path) if card_id in self.cards else None
 
     def apply(self, action: Action) -> "Board":
         """The board after the action. ValueError if the action does not fit the board."""
         match action.body:
             case Put(id=card_id, md=md):
                 cards = {**self.cards, card_id: Card(md=md, author=action.author)}
-                return self._clear(card_id).model_copy(update={"cards": cards})
+                return self._retire(card_id).model_copy(update={"cards": cards})
             case Remove(id=card_id) if card_id in self.cards:
                 cards = {k: v for k, v in self.cards.items() if k != card_id}
                 positions = {k: v for k, v in self.positions.items() if k != card_id}
-                return self._clear(card_id).model_copy(update={"cards": cards, "positions": positions})
+                return self._retire(card_id).model_copy(update={"cards": cards, "positions": positions})
             case Remove(id=card_id):
                 raise ValueError(f"no card '{card_id}'")
             case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref) if ref not in self._parts(ref):
                 raise ValueError(f"no part '{ref}'")
-            case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref):
+            case Comment(ref=ref):
+                thread = self.threads.get(ref, Thread()).apply(action)
+                messages = (*self.messages, thread.comments[-1])
+                return self.model_copy(update={"threads": {**self.threads, ref: thread}, "messages": messages})
+            case React(ref=ref) | Unreact(ref=ref):
                 thread = self.threads.get(ref, Thread()).apply(action)
                 return self.model_copy(update={"threads": {**self.threads, ref: thread}})
             case Fill(ref=ref, value=value):
@@ -128,6 +165,8 @@ class Board(Model):
             case Say(text=text):
                 said = Said(id=action.id, author=action.author, text=text)
                 return self.model_copy(update={"messages": (*self.messages, said)})
+            case Send():
+                return self
             case _:
                 assert_never(action.body)
 
@@ -145,13 +184,26 @@ class Board(Model):
             return {}
         return {f"{card_id}/{path}": column for path, column in Outline(self.cards[card_id].md).inputs.items()}
 
-    def _clear(self, card_id: TCardId) -> "Board":
-        """The board without the threads, values and arrows on the card."""
-        threads = {ref: thread for ref, thread in self.threads.items() if ref.partition("/")[0] != card_id}
-        values = {ref: value for ref, value in self.values.items() if ref.partition("/")[0] != card_id}
+    def _retire(self, card_id: TCardId) -> "Board":
+        """The board without the threads, values and arrows on the card, and with the card and its feedback in its history."""
+        if card_id not in self.cards:
+            return self
+        on_card = {ref for ref in [*self.threads, *self.values] if ref.partition("/")[0] == card_id}
+        version = Version(
+            card=self.cards[card_id],
+            threads={ref: thread for ref, thread in self.threads.items() if ref in on_card},
+            values={ref: value for ref, value in self.values.items() if ref in on_card},
+        )
         arrows = {
             arrow_id: arrow
             for arrow_id, arrow in self.arrows.items()
             if card_id not in (arrow.src.partition("/")[0], arrow.dst.partition("/")[0])
         }
-        return self.model_copy(update={"threads": threads, "values": values, "arrows": arrows})
+        return self.model_copy(
+            update={
+                "threads": {ref: thread for ref, thread in self.threads.items() if ref not in on_card},
+                "values": {ref: value for ref, value in self.values.items() if ref not in on_card},
+                "arrows": arrows,
+                "history": {**self.history, card_id: (*self.history.get(card_id, ()), version)},
+            }
+        )

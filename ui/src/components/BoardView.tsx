@@ -9,7 +9,7 @@ export const BoardView = () => {
     case ConnectionStatus.enum.connecting:
       return <Notice>Connecting to the agent…</Notice>;
     case ConnectionStatus.enum.live:
-      return <Whiteboard board={connection.board} act={connection.act} />;
+      return <Whiteboard snapshot={connection.snapshot} act={connection.act} />;
     case ConnectionStatus.enum.closed:
       return (
         <Notice>

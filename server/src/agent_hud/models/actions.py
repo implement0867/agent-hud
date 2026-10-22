@@ -34,6 +34,7 @@ class ActionKind(StrEnum):
     link = "link"
     unlink = "unlink"
     move = "move"
+    send = "send"
 
 
 class Put(Model):
@@ -99,8 +100,14 @@ class Move(Model):
     y: float = Field(allow_inf_nan=False, description="Top edge of the card on the board, in pixels")
 
 
+class Send(Model):
+    """The end of the user's turn: the agent's monitor gets the user's actions since the last send."""
+
+    kind: Literal[ActionKind.send]
+
+
 type TBody = Annotated[
-    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move, Discriminator("kind")
+    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Send, Discriminator("kind")
 ]
 
 
@@ -108,3 +115,12 @@ class Action(Model):
     id: TActionId
     author: Author
     body: TBody
+
+    @property
+    def ends_turn(self) -> bool:
+        """A send or a chat message from the user ends the user's turn."""
+        match self.author, self.body:
+            case Author.user, Send() | Say():
+                return True
+            case _:
+                return False
