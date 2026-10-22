@@ -1,0 +1,144 @@
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from playwright.async_api import Browser, Page, async_playwright, expect
+
+from agent_hud.deps import get_hud
+from agent_hud.models.actions import ActionKind, Author, Link, Reaction
+from agent_hud.models.board import Arrow
+from agent_hud.settings import find_static_dir
+from tests.conversation import Agent, open_agent
+from tests.factories import comment, fill, link, move, put, react, read_board, say
+
+pytestmark = pytest.mark.asyncio(loop_scope="module")
+
+
+@pytest.fixture(scope="module")
+def static_dir() -> Path:
+    """The built UI, so that the browser opens the page that users see."""
+    return find_static_dir()
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def browser() -> AsyncIterator[Browser]:
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        yield browser
+        await browser.close()
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def agent(address: tuple[str, int]) -> AsyncIterator[Agent]:
+    """An agent on a new board."""
+    get_hud.cache_clear()
+    async with open_agent(address) as agent:
+        yield agent
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def page(browser: Browser, address: tuple[str, int], agent: Agent) -> AsyncIterator[Page]:
+    """The board page in the browser, live on the agent's board."""
+    host, port = address
+    page = await browser.new_page(viewport={"width": 1440, "height": 900})
+    await page.goto(f"http://{host}:{port}/")
+    await expect(page.get_by_label("Message the agent")).to_be_visible()
+    yield page
+    await page.close()
+
+
+async def test_the_user_reviews_a_plan_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:
+    """Assemble: the agent puts a plan of three steps and asks the user to review it.
+    Act: the user rejects step 2 with the quick reaction and comments on it; the agent answers and puts a new plan; the user sends a chat message.
+    Assert: the agent hears each of the user's clicks and texts, and the page shows the agent's answer, then the new plan without the old marks; a screenshot of each turn goes in tmp_path."""
+    await agent.write(put("plan", "1. parse\n2. rewrite the cache\n3. render"), say("Review the plan"))
+    await expect(page.locator('[data-ref="plan/3"]')).to_have_text("render")
+    await expect(page.get_by_label("Chat with the agent")).to_contain_text("Review the plan")
+    await page.screenshot(path=tmp_path / "1-plan.png")
+
+    await page.locator('[data-ref="plan/2"]').hover()
+    await page.get_by_label("reject plan/2").click()
+    await page.locator('[data-ref="plan/2"]').click()
+    await page.get_by_label("Comment").fill("the cache is shared")
+    await page.get_by_label("Comment").press("Enter")
+    assert await agent.hear(2) == [react("plan/2", Reaction.reject), comment("plan/2", "the cache is shared")]
+    await expect(page.get_by_label("reject plan/2")).to_have_attribute("aria-pressed", "true")
+    await page.screenshot(path=tmp_path / "2-review.png")
+
+    await agent.write(comment("plan/2", "then I keep it"))
+    await expect(page.get_by_label("Feedback on plan/2")).to_contain_text("then I keep it")
+    await page.screenshot(path=tmp_path / "3-answer.png")
+
+    await agent.write(put("plan", "1. parse\n2. keep the cache\n3. render"), say("I kept the cache"))
+    await expect(page.locator('[data-ref="plan/2"]')).to_have_text("keep the cache")
+    await expect(page.get_by_label("reject plan/2")).to_have_attribute("aria-pressed", "false")
+    await page.get_by_label("Message the agent").fill("go ahead")
+    await page.get_by_label("Message the agent").press("Enter")
+    assert await agent.hear(1) == [say("go ahead")]
+    await expect(page.get_by_label("Chat with the agent")).to_contain_text("go ahead")
+    await page.screenshot(path=tmp_path / "4-go.png")
+
+
+async def test_the_user_fills_a_table_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:
+    """Assemble: the agent puts a table of tasks with a size, hours and done column.
+    Act: the user chooses a size, types the hours and checks a task as done; then the agent asks about the hours.
+    Assert: the agent hears each value with the type of its column, reads the same values, and the page keeps them; a screenshot of each turn goes in tmp_path."""
+    await agent.write(
+        put(
+            "tasks",
+            "| Task | Size {S, M, L} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n| render | | | |",
+        )
+    )
+    await page.get_by_label("Input tasks/1/2").select_option("M")
+    await page.get_by_label("Input tasks/1/3").fill("4")
+    await page.get_by_label("Input tasks/1/3").press("Enter")
+    await page.get_by_label("Input tasks/2/4").click()
+    filled = [fill("tasks/1/2", "M"), fill("tasks/1/3", 4), fill("tasks/2/4", value=True)]
+    assert await agent.hear(len(filled)) == filled
+    assert (await read_board(agent.tools)).values == {"tasks/1/2": "M", "tasks/1/3": 4, "tasks/2/4": True}
+    await page.screenshot(path=tmp_path / "1-filled.png")
+
+    await agent.write(comment("tasks/1", "Do 4 hours cover the tests?"))
+    await expect(page.get_by_label("Input tasks/1/3")).to_have_value("4")
+    await expect(page.get_by_label("Input tasks/2/4")).to_be_checked()
+    await page.screenshot(path=tmp_path / "2-question.png")
+
+
+async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser(
+    page: Page, agent: Agent, tmp_path: Path
+) -> None:
+    """Assemble: the agent puts a code card in colour, a card of options and a card of questions side by side.
+    Act: the user drags the dot of option 2 to the question; then the agent labels the arrow.
+    Assert: the agent hears a link from option 2 to the question and reads it with the label, and the page shows the label; a screenshot of each turn goes in tmp_path."""
+    await agent.write(
+        put("code", "```python\ndef render(md: str) -> str:\n    return md\n```"),
+        put("options", "1. highlight on the server\n2. highlight in the browser"),
+        put("questions", "1. Which languages?"),
+        move("code", 0, 0),
+        move("options", 440, 0),
+        move("questions", 880, 0),
+    )
+    await expect(page.locator('[data-ref="code"] pre.shiki')).to_be_visible()
+
+    await page.locator('[data-ref="options/2"]').hover()
+    dot = await page.get_by_label("Draw an arrow from options/2").bounding_box()
+    goal = await page.locator('[data-ref="questions/1"]').bounding_box()
+    assert dot is not None and goal is not None
+    await page.mouse.move(dot["x"] + dot["width"] / 2, dot["y"] + dot["height"] / 2)
+    await page.mouse.down()
+    await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=10)
+    await page.mouse.up()
+    match await agent.hear(1):
+        case [Link(kind=ActionKind.link, id=arrow_id, src="options/2", dst="questions/1")]:
+            pass
+        case other:
+            pytest.fail(f"the agent heard {other}, not a link from options/2 to questions/1")
+    await page.screenshot(path=tmp_path / "1-arrow.png")
+
+    await agent.write(link(arrow_id, "options/2", "questions/1", "decides"))
+    assert (await read_board(agent.tools)).arrows[arrow_id] == Arrow(
+        src="options/2", dst="questions/1", text="decides", author=Author.agent
+    )
+    await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_have_value("decides")
+    await page.screenshot(path=tmp_path / "2-label.png")

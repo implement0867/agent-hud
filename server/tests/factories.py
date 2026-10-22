@@ -49,8 +49,8 @@ def fill(ref: str, value: TValue) -> Fill:
     return Fill(kind=ActionKind.fill, ref=ref, value=value)
 
 
-def link(arrow_id: str, src: str, dst: str) -> Link:
-    return Link(kind=ActionKind.link, id=arrow_id, src=src, dst=dst)
+def link(arrow_id: str, src: str, dst: str, text: str = "") -> Link:
+    return Link(kind=ActionKind.link, id=arrow_id, src=src, dst=dst, text=text)
 
 
 def unlink(arrow_id: str) -> Unlink:
