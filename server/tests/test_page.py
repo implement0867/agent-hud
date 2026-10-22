@@ -10,7 +10,7 @@ from agent_hud.models.actions import ActionKind, Author, Link, Reaction
 from agent_hud.models.board import Arrow
 from agent_hud.settings import find_static_dir
 from tests.conversation import Agent, open_agent
-from tests.factories import comment, fill, link, move, put, react, read_board, say, status
+from tests.factories import comment, fill, link, move, put, react, read_board, say
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -69,7 +69,7 @@ async def test_the_user_reviews_a_plan_in_the_browser(page: Page, agent: Agent, 
     await agent.write(put("plan", "1. parse\n2. rewrite the cache\n3. render"), say("Review the plan"))
     await expect(page.locator('[data-ref="plan/3"]')).to_have_text("render")
     await expect(page.get_by_label("Chat with the agent")).to_contain_text("Review the plan")
-    await expect(page.get_by_role("status", name="Agent")).to_contain_text("Your turn")
+    await expect(page.get_by_role("status", name="Agent")).to_contain_text("your turn")
     await snap(page, tmp_path / "1-plan.png")
 
     await page.locator('[data-ref="plan/2"]').hover()
@@ -80,14 +80,12 @@ async def test_the_user_reviews_a_plan_in_the_browser(page: Page, agent: Agent, 
     await expect(page.get_by_label("2 unsent")).to_be_visible()
     await send(page)
     assert await agent.hear() == [react("plan/2", Reaction.reject), comment("plan/2", "the cache is shared")]
-    await expect(page.get_by_role("status", name="Agent")).to_contain_text("The agent is working")
+    await expect(page.get_by_role("status", name="Agent")).to_contain_text("working on your turn")
     await expect(page.get_by_label("reject plan/2")).to_have_attribute("aria-pressed", "true")
     await snap(page, tmp_path / "2-review.png")
 
-    await agent.write(status("reading the cache code"))
-    await expect(page.get_by_role("status", name="Agent")).to_contain_text("reading the cache code")
     await agent.write(comment("plan/2", "Who else reads it?"))
-    await expect(page.get_by_role("status", name="Agent")).to_have_text("agent-hudYour turn")
+    await expect(page.get_by_role("status", name="Agent")).to_contain_text("Agent connected · your turn")
     await expect(page.get_by_label("Feedback on plan/2")).to_contain_text("Who else reads it?")
     chat = page.get_by_label("Chat with the agent")
     await expect(chat).to_contain_text("Who else reads it?")
@@ -226,5 +224,5 @@ async def test_a_ref_in_the_chat_shows_the_part(page: Page, agent: Agent, tmp_pa
     await page.get_by_label("Chat with the agent").get_by_role("button", name="plan/2").click()
     await expect(page.get_by_label("Feedback on plan/2")).to_be_visible()
     await agent.monitor.close()
-    await expect(page.get_by_role("status", name="Agent")).to_contain_text("No agent is listening")
+    await expect(page.get_by_role("status", name="Agent")).to_contain_text("No agent connected")
     await snap(page, tmp_path / "1-ref.png")

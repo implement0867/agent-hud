@@ -9,9 +9,9 @@ from agent_hud.deps import get_hud
 from agent_hud.hud import Hud
 from agent_hud.models.actions import ActionKind, Author, Reaction, TBody
 from agent_hud.models.board import Arrow, Board, Point, Thread, Version
-from agent_hud.models.events import Accepted, AgentState, EventKind, Rejected
+from agent_hud.models.events import Accepted, AgentState, Edit, EventKind, Rejected
 from tests.conversation import Agent, User, open_agent, open_page
-from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, say, status
+from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, say
 from tests.strategies import bodies, card_ids
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -162,7 +162,7 @@ async def test_the_user_and_the_agent_discuss_code_with_arrows(agent: Agent, use
 async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, user: User) -> None:
     """Assemble: a board with an agent's plan card and an arrow from it to the user's note.
     Act: the user writes a note, places it, edits the agent's card and then removes the note.
-    Assert: the agent hears each action, and reads the user as the author of the note and of the edited card, whose arrow is gone."""
+    Assert: the agent hears each action, with the edit as a diff, and reads the user as the author of the note and of the edited card, whose arrow is gone."""
     note = [put("note", "Also check the docs"), move("note", 40, 300), say("see my note")]
     assert kinds([await user.act(body) for body in note]) == [EventKind.accepted] * len(note)
     assert await agent.hear() == note
@@ -173,7 +173,8 @@ async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, use
     edits = [put("plan", "1. read the docs\n2. write the tests\n3. write the code"), remove("note")]
     assert kinds([await user.act(body) for body in edits]) == [EventKind.accepted] * len(edits)
     await user.send()
-    assert await agent.hear() == edits
+    diff = "@@ -1,2 +1,3 @@\n 1. read the docs\n-2. write the code\n+2. write the tests\n+3. write the code"
+    assert await agent.hear() == [Edit(kind="edit", id="plan", diff=diff), remove("note")]
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
     assert ({k: v.author for k, v in board.cards.items()}, board.arrows) == ({"plan": Author.user}, {})
@@ -216,8 +217,8 @@ async def test_an_agent_monitor_gets_what_the_user_did_while_no_monitor_was_open
 
 async def test_the_page_shows_whose_turn_it_is(agent: Agent, user: User) -> None:
     """Assemble: an agent with a monitor and a plan on the board.
-    Act: the user reacts and sends; the agent sets a status, then answers; then the agent's monitor ends.
-    Assert: the page shows one unsent action before the send, then the agent working, its status, waiting after its answer, and away."""
+    Act: the user reacts and sends; the agent answers; then the agent's monitor ends.
+    Assert: the page shows one unsent action before the send, then the agent working, waiting after its answer, and away."""
     await agent.write(put("plan", "1. a"))
     assert (await user.notes(lambda snapshot: snapshot.agent is AgentState.waiting)).agent is AgentState.waiting
     await user.act(react("plan/1", Reaction.approve))
@@ -226,9 +227,6 @@ async def test_the_page_shows_whose_turn_it_is(agent: Agent, user: User) -> None
     await agent.hear()
     working = await user.notes(lambda snapshot: snapshot.agent is AgentState.working)
     assert (working.agent, working.unsent) == (AgentState.working, 0)
-    await agent.write(status("checking a"))
-    shown = await user.notes(lambda snapshot: snapshot.board.status == "checking a")
-    assert (shown.agent, shown.board.status) == (AgentState.working, "checking a")
     await agent.write(say("a is fine"))
     assert (await user.notes(lambda snapshot: snapshot.agent is AgentState.waiting)).agent is AgentState.waiting
     await agent.monitor.close()
@@ -252,22 +250,23 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
     Act: the user and the agent take turns; the page sends each of the user's actions alone, and the agent writes each turn in one call.
     Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each action that the board took from the user, in order."""
     get_hud.cache_clear()
-    taken: list[TBody] = []
+    taken: list[str] = []
     async with open_agent(address) as agent, open_page(address) as user:
         for author, batch in turns:
             match author:
                 case Author.user:
+                    answers = [(await user.act(body), body) for body in batch]
                     taken += [
-                        body
-                        for body in batch
-                        if isinstance(await user.act(body), Accepted) and body.kind is not ActionKind.send
+                        answer.id
+                        for answer, body in answers
+                        if isinstance(answer, Accepted) and body.kind is not ActionKind.send
                     ]
                 case Author.agent:
                     await agent.tools.call_tool("write", {"actions": as_json(*batch)}, raise_on_error=False)
             board = await read_board(agent.tools, history=True)
             assert await user.sees(board) == board
         await user.send()
-        heard: list[TBody] = []
+        heard: list[str] = []
         while len(heard) < len(taken):
-            heard += await agent.hear()
+            heard += [action.id for action in (await agent.turn()).actions]
         assert heard == taken

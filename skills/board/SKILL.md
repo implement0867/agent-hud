@@ -19,7 +19,6 @@ Call `write` with a list of actions. They run in order, all or nothing.
 - `say {text}` sends a message to the user. It shows in the chat on the page.
 - `move {id, x, y}` places a card on the board, in pixels. A card with no place goes below the others.
 - `react {ref, reaction}`, `comment {ref, text}`, `fill {ref, value}` and `link {id, src, dst, text}` act on cards as the user does. A comment also shows in the chat, with a link to its part.
-- `status {text}` tells the user what you do while you work on their turn, such as `reading src/app.py`. The page shows it until you write another action.
 
 Put one subject on each card, with a short id such as `plan` or `risks`. Write each step or option as a list item or a table body row, so that the user can give feedback on it.
 
@@ -50,6 +49,8 @@ A table header with a spec makes an input column that the user fills:
 - `read` returns the board: the cards, the threads of reactions and comments by ref, the values by cell ref, the arrows, the chat messages and comments, and the card positions. `read` with `history` true also returns the earlier versions of each card with their feedback. Cards with the author `user` are notes from the user, or cards that the user edited. Cards that the user placed near each other belong together for the user.
 - `listen` returns the websocket URL of the user's turns. Open it with the Monitor tool, and open it again when the monitor ends. The user's reactions, comments, fills and edits collect until the user clicks Send or sends a chat message. Then the monitor gets one line with all of them, and each action has the text of the parts it names, as the user saw them.
 
-While your monitor is open, the page shows the user that you listen. After you get a turn, the page shows that you work until you write an action other than `status`.
+Each turn has only the changes, as an edit of a file has only a diff. A `put` of the user on a card that was on the board comes as an `edit` with a unified diff of the card's markdown. Read the board once, then follow the turns, and read it again only when you are not sure what the board shows.
 
-After you show content for review, tell the user what to review and to click Send, then wait for their turn. Read the board before you act on the feedback.
+While your monitor is open, the page shows the user that an agent is connected. After you get a turn, the page shows that you work on it until you write an action.
+
+After you show content for review, tell the user what to review and to click Send, then wait for their turn.

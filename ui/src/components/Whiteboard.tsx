@@ -373,7 +373,7 @@ export const Whiteboard = ({
         create={note}
         overlay={
           <>
-            <AgentPill agent={agent} status={board.status} />
+            <AgentPill agent={agent} />
             {history !== null && (
               <HistoryDrawer
                 card={history.card}

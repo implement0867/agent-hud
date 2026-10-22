@@ -1,20 +1,16 @@
-import { AgentState } from "~/schemas/events";
 import type { TAgentState } from "~/schemas/events";
 
 const looks: Record<TAgentState, { dot: string; label: string }> = {
-  away: { dot: "bg-stone-300", label: "No agent is listening" },
-  working: { dot: "animate-pulse bg-amber-500", label: "The agent is working" },
-  waiting: { dot: "bg-emerald-500", label: "Your turn" },
+  away: { dot: "bg-stone-300", label: "No agent connected" },
+  working: {
+    dot: "animate-pulse bg-amber-500",
+    label: "Agent connected · working on your turn",
+  },
+  waiting: { dot: "bg-emerald-500", label: "Agent connected · your turn" },
 };
 
-/** Whose turn it is: the agent's state, and, while the agent works, the status it set. */
-export const AgentPill = ({
-  agent,
-  status,
-}: {
-  agent: TAgentState;
-  status: string;
-}) => {
+/** The state of the agent's socket: whether an agent's monitor is open, and whether it has the user's last turn. */
+export const AgentPill = ({ agent }: { agent: TAgentState }) => {
   const { dot, label } = looks[agent];
   return (
     <div
@@ -26,11 +22,7 @@ export const AgentPill = ({
       <span className="font-semibold tracking-tight text-stone-800">
         agent-hud
       </span>
-      <span className="truncate text-stone-500">
-        {status !== "" && agent === AgentState.enum.working
-          ? `${label} · ${status}`
-          : label}
-      </span>
+      <span className="truncate text-stone-500">{label}</span>
     </div>
   );
 };

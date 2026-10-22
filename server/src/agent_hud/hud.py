@@ -1,13 +1,25 @@
 import asyncio
 from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
+from difflib import unified_diff
 from itertools import accumulate
 from pathlib import Path
 
 from agent_hud.log import Log
-from agent_hud.models.actions import Action, ActionKind, Author, TActionId, TRef
+from agent_hud.models.actions import Action, ActionKind, Author, Put, TActionId
 from agent_hud.models.board import Board
-from agent_hud.models.events import AgentState, EventKind, Heard, Snapshot, Turn
+from agent_hud.models.events import AgentState, Edit, EventKind, Heard, Snapshot, Turn
+
+
+def hear(board: Board, action: Action) -> Heard:
+    """The action as the agent hears it on the board before it: a put on a card of the board as a diff, and the text of the parts it names."""
+    match action.body:
+        case Put(id=card_id, md=md) if card_id in board.cards:
+            lines = unified_diff(board.cards[card_id].md.splitlines(), md.splitlines(), lineterm="", n=1)
+            body = Edit(kind="edit", id=card_id, diff="\n".join(list(lines)[2:]))
+        case _:
+            body = action.body
+    return Heard(id=action.id, author=action.author, body=body, parts=board.part_texts(action.body))
 
 
 class Hud:
@@ -18,7 +30,7 @@ class Hud:
         self.log = Log()
         self.monitors = 0
         self.working = False
-        self._parts: dict[TActionId, dict[TRef, str]] = {}
+        self._heard: dict[TActionId, Heard] = {}
         self._changed = asyncio.Event()
         self._state_file = state_file
         if state_file is not None and state_file.exists():
@@ -75,7 +87,7 @@ class Hud:
             while (end := self._turn_end(start)) is not None:
                 turn = Turn(
                     actions=tuple(
-                        Heard(id=action.id, author=action.author, body=action.body, parts=self._parts[action.id])
+                        self._heard[action.id]
                         for action in self.log.actions[start:end]
                         if action.author is Author.user and action.body.kind is not ActionKind.send
                     )
@@ -89,14 +101,14 @@ class Hud:
 
     def _take(self, actions: list[Action]) -> None:
         boards = list(accumulate(actions, Board.apply, initial=self.board))
-        self._parts |= {
-            action.id: board.part_texts(action.body)
+        self._heard |= {
+            action.id: hear(board, action)
             for action, board in zip(actions, boards[:-1], strict=True)
             if action.author is Author.user
         }
         self.board = boards[-1]
         self.log.extend(actions)
-        if any(action.author is Author.agent and action.body.kind is not ActionKind.status for action in actions):
+        if any(action.author is Author.agent for action in actions):
             self.working = False
         self._notify()
 

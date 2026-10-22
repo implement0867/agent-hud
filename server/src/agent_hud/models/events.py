@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import Discriminator, Field, TypeAdapter
 
-from agent_hud.models.actions import Action, TActionId, TBody, TRef
+from agent_hud.models.actions import Author, TActionId, TBody, TCardId, TRef
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
 
@@ -18,7 +18,7 @@ class AgentState(StrEnum):
     away = "away"
     """No agent's monitor is open."""
     working = "working"
-    """An agent has the user's last turn, and has not written since."""
+    """An agent's monitor has the user's last turn, and the agent has not written since."""
     waiting = "waiting"
     """An agent's monitor is open, and the agent waits for the user's next turn."""
 
@@ -53,15 +53,29 @@ type TPageEvent = Annotated[Snapshot | Accepted | Rejected, Discriminator("kind"
 PageEventAdapter = TypeAdapter[TPageEvent](TPageEvent)
 
 
-class Heard(Action):
+class Edit(Model):
+    """The user's put on a card that was on the board, as the change to its markdown."""
+
+    kind: Literal["edit"]
+    id: TCardId
+    diff: str = Field(description="A unified diff of the card's markdown, without the file header")
+
+
+type THeardBody = Annotated[TBody | Edit, Discriminator("kind")]
+
+
+class Heard(Model):
     """A user's action as the agent's monitor gets it."""
 
+    id: TActionId
+    author: Author
+    body: THeardBody
     parts: dict[TRef, str] = Field(
         description="The text of each part that the action names, as it was when the user acted"
     )
 
 
 class Turn(Model):
-    """The user's actions from one send to the next, as one line on the agent's monitor."""
+    """The changes that the user made from one send to the next, as one line on the agent's monitor."""
 
     actions: tuple[Heard, ...]

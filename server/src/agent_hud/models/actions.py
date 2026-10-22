@@ -35,7 +35,6 @@ class ActionKind(StrEnum):
     unlink = "unlink"
     move = "move"
     send = "send"
-    status = "status"
 
 
 class Put(Model):
@@ -107,16 +106,8 @@ class Send(Model):
     kind: Literal[ActionKind.send]
 
 
-class Status(Model):
-    kind: Literal[ActionKind.status]
-    text: str = Field(
-        max_length=80,
-        description="What the agent does now, shown to the user while the agent works; empty clears it",
-    )
-
-
 type TBody = Annotated[
-    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Send | Status, Discriminator("kind")
+    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Send, Discriminator("kind")
 ]
 
 

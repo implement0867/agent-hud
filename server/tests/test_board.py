@@ -8,7 +8,7 @@ from agent_hud.models.actions import Action, Author, Reaction, TBody, TValue
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread, Version
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
-from tests.factories import comment, fill, link, move, put, react, remove, say, send, status, unlink, unreact
+from tests.factories import comment, fill, link, move, put, react, remove, say, unlink, unreact
 from tests.strategies import (
     action_ids,
     actions,
@@ -66,7 +66,9 @@ def test_put_sets_the_card_and_moves_its_feedback_to_its_history(
     assert after.cards[card_id] == Card(md=md, author=author)
     assert outside(after, card_id) == outside(board, card_id)
     assert not any(ref.partition("/")[0] == card_id for ref in after.threads)
-    assert after.history.get(card_id, ()) == (retired(board, card_id) if card_id in board.cards else ())
+    assert after.history.get(card_id, ()) == (
+        retired(board, card_id) if card_id in board.cards else board.history.get(card_id, ())
+    )
 
 
 @given(boards(), card_ids())
@@ -164,27 +166,15 @@ def test_comments_add_in_order_with_their_action_and_author(
 def test_say_adds_each_message_to_the_board(board: Board, messages: list[tuple[str, Author, str]]) -> None:
     """Assemble: any board.
     Act: say each message.
-    Assert: the board has the messages in order, with the id of its action and its author, and is otherwise unchanged but for the agent's status, which a message from the user clears."""
+    Assert: the board has the messages in order, with the id of its action and its author, and is otherwise unchanged."""
     said = board
     for action_id, author, text in messages:
         said = act(said, say(text), author, action_id)
     added = tuple(Said(id=i, author=a, text=t) for i, a, t in messages)
-    status_after = "" if any(author is Author.user for _, author, _ in messages) else board.status
-    assert said == board.model_copy(update={"messages": (*board.messages, *added), "status": status_after})
+    assert said == board.model_copy(update={"messages": (*board.messages, *added)})
 
 
-@given(boards(), st.text(max_size=80))
-def test_the_agents_status_lasts_until_the_user_sends(board: Board, text: str) -> None:
-    """Assemble: any board.
-    Act: the agent sets its status, the agent sends, then the user sends.
-    Assert: the board has the status until the user sends, and is otherwise unchanged."""
-    with_status = act(board, status(text), Author.agent)
-    assert with_status == board.model_copy(update={"status": text})
-    assert act(with_status, send(), Author.agent) == with_status
-    assert act(with_status, send(), Author.user) == board.model_copy(update={"status": ""})
-
-
-@given(card_ids(), st.lists(item_texts(), min_size=2), st.from_type(Reaction))
+@given(card_ids().filter(lambda card_id: card_id != "t"), st.lists(item_texts(), min_size=2), st.from_type(Reaction))
 def test_part_texts_name_the_text_of_each_part_an_action_names(
     card_id: str, texts: list[str], reaction: Reaction
 ) -> None:

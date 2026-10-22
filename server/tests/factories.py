@@ -14,7 +14,6 @@ from agent_hud.models.actions import (
     Remove,
     Say,
     Send,
-    Status,
     TBody,
     TValue,
     Unlink,
@@ -65,10 +64,6 @@ def move(card_id: str, x: float, y: float) -> Move:
 
 def send() -> Send:
     return Send(kind=ActionKind.send)
-
-
-def status(text: str) -> Status:
-    return Status(kind=ActionKind.status, text=text)
 
 
 def as_json(*bodies: TBody) -> list[dict[str, Any]]:

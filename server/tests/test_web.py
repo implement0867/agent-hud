@@ -123,10 +123,10 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
             assert await user.sees(hud.board) == hud.board
             if not hud.log.actions[-1].ends_turn:
                 await user.send()
-            heard = [] if body.kind is ActionKind.send else [(action_id, body)]
+            heard = [] if body.kind is ActionKind.send else [action_id]
             for listener in listeners:
                 turn = Turn.model_validate_json(await asyncio.wait_for(listener.recv(), 5))
-                assert [(action.id, action.body) for action in turn.actions] == heard
+                assert [action.id for action in turn.actions] == heard
         case Rejected():
             assert hud.board == before
 

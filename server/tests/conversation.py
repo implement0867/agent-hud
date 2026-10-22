@@ -10,7 +10,7 @@ from websockets.asyncio.client import ClientConnection, connect
 
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
-from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, Turn
+from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, THeardBody, Turn
 from tests.factories import as_json, send
 
 
@@ -29,7 +29,7 @@ class Agent:
         async with asyncio.timeout(5):
             return Turn.model_validate_json(await self.monitor.recv())
 
-    async def hear(self) -> list[TBody]:
+    async def hear(self) -> list[THeardBody]:
         """The user's actions in the next turn that the monitor gets, in order."""
         return [heard.body for heard in (await self.turn()).actions]
 

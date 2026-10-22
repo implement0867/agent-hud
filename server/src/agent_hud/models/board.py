@@ -15,7 +15,6 @@ from agent_hud.models.actions import (
     Remove,
     Say,
     Send,
-    Status,
     TActionId,
     TBody,
     TCardId,
@@ -77,7 +76,7 @@ class Thread(Model):
             case Comment(ref=ref, text=text):
                 said = Said(id=action.id, author=action.author, text=text, ref=ref)
                 return self.model_copy(update={"comments": (*self.comments, said)})
-            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Send() | Status():
+            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Send():
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
@@ -98,15 +97,9 @@ class Board(Model):
     arrows: dict[TCardId, Arrow] = Field(default_factory=dict)
     messages: tuple[Said, ...] = Field(default=(), description="The chat, and each comment on a part, in order")
     positions: dict[TCardId, Point] = Field(default_factory=dict)
-    status: str = Field(default="", description="The agent's status, until the user's turn ends")
     history: dict[TCardId, tuple[Version, ...]] = Field(
         default_factory=dict, description="The earlier versions of each card, oldest first"
     )
-
-    def apply(self, action: Action) -> "Board":
-        """The board after the action. ValueError if the action does not fit the board."""
-        board = self._take(action)
-        return board.model_copy(update={"status": ""}) if action.ends_turn else board
 
     def part_texts(self, body: TBody) -> dict[TRef, str]:
         """The text of each part that the action names, as the board has it now."""
@@ -125,7 +118,8 @@ class Board(Model):
         card_id, _, path = ref.partition("/")
         return Outline(self.cards[card_id].md).texts.get(path) if card_id in self.cards else None
 
-    def _take(self, action: Action) -> "Board":
+    def apply(self, action: Action) -> "Board":
+        """The board after the action. ValueError if the action does not fit the board."""
         match action.body:
             case Put(id=card_id, md=md):
                 cards = {**self.cards, card_id: Card(md=md, author=action.author)}
@@ -171,8 +165,6 @@ class Board(Model):
             case Say(text=text):
                 said = Said(id=action.id, author=action.author, text=text)
                 return self.model_copy(update={"messages": (*self.messages, said)})
-            case Status(text=text):
-                return self.model_copy(update={"status": text})
             case Send():
                 return self
             case _:
