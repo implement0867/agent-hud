@@ -5,7 +5,7 @@ import {
   createBundledHighlighter,
   createSingletonShorthands,
 } from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { bundledLanguages } from "shiki/langs";
 
 const theme = "github-dark";
@@ -14,13 +14,13 @@ const { getSingletonHighlighter } = createSingletonShorthands(
   createBundledHighlighter({
     langs: bundledLanguages,
     themes: { [theme]: () => import("shiki/themes/github-dark.mjs") },
-    engine: () => createJavaScriptRegexEngine({ forgiving: true }),
+    engine: () => createOnigurumaEngine(import("shiki/wasm")),
   }),
 );
 
 /**
  * A rehype plugin that colours fenced code blocks.
- * The first block of any language loads the one chunk with all grammars; a language Shiki does not know shows as plain text.
+ * The first code block loads the one chunk with Shiki's grammars, theme and WebAssembly; a language Shiki does not know shows as plain text.
  */
 export const highlight = () => async (tree: Root, file: VFile) => {
   const highlighter = await getSingletonHighlighter({
