@@ -124,3 +124,18 @@ class Action(Model):
                 return True
             case _:
                 return False
+
+
+class Misfit(ValueError):
+    """An action of a batch that the board does not take: its index in the batch, counted from 1, its kind and the reason."""
+
+    def __init__(self, index: int, kind: ActionKind | None, reason: str) -> None:
+        super().__init__(reason)
+        self.index = index
+        self.kind = kind
+        self.reason = reason
+
+    def in_batch(self) -> str:
+        """The reason with the action's index and kind, and that the batch was not applied."""
+        action = f"action {self.index} ({self.kind})" if self.kind else f"action {self.index}"
+        return f"{action}: {self.reason}; no actions were applied"

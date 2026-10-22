@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -11,7 +12,7 @@ from mcp.types import Tool
 from agent_hud.deps import get_hud
 from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
 from agent_hud.server import build
-from tests.factories import as_json, comment, put, react, read_board, remove
+from tests.factories import as_json, comment, put, react, read_board, remove, say
 from tests.strategies import bodies, card_ids
 
 
@@ -92,22 +93,53 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TBod
 
 
 @pytest.mark.parametrize(
-    "action",
+    ("action", "reason"),
     [
-        {"kind": "put", "id": "a"},
-        {"kind": "remove", "id": "a", "md": "x"},
-        {"kind": "say", "text": " "},
-        {"kind": "react", "ref": "a/1"},
+        ({"kind": "put", "id": "a"}, "action 2 (put): md: Field required"),
+        ({"kind": "remove", "id": "a", "md": "x"}, "action 2 (remove): md: not a field of remove"),
+        ({"kind": "say", "text": " "}, "action 2 (say): text: String should match pattern '\\S'"),
+        ({"kind": "react", "ref": "a/1"}, "action 2 (react): reaction: Field required"),
     ],
     ids=["missing-field", "field-of-another-kind", "blank-text", "missing-reaction"],
 )
-async def test_write_checks_each_action_against_its_kind(client: Client[Any], action: dict[str, Any]) -> None:
+async def test_write_checks_each_action_against_its_kind(
+    client: Client[Any], action: dict[str, Any], reason: str
+) -> None:
     """Assemble: a server with card a.
-    Act: write an action that the listed schema takes and the model of its kind does not.
-    Assert: ToolError, and read returns the same board as before."""
+    Act: write a say and an action that the listed schema takes and the model of its kind does not.
+    Assert: ToolError that names the action, its kind and the field in one line, and read returns the same board as before."""
     await client.call_tool("write", {"actions": as_json(put("a", "1. x"))})
     before = await read_board(client)
     jsonschema.validate({"actions": [action]}, (await listed_write(client)).input_schema)
-    with pytest.raises(ToolError):
-        await client.call_tool("write", {"actions": [action]})
+    with pytest.raises(ToolError, match=f"{re.escape(reason)}.*; no actions were applied$") as info:
+        await client.call_tool("write", {"actions": [*as_json(say("hi")), action]})
+    assert "\n" not in str(info.value), "the error must be one line"
     assert await read_board(client) == before, "the server must check each action against the model of its kind"
+
+
+@pytest.mark.parametrize(
+    ("action", "reason"),
+    [({"kind": "foo", "id": "a"}, "kind 'foo' is not one of"), ({"id": "a"}, "kind is missing: one of")],
+    ids=["unknown-kind", "no-kind"],
+)
+async def test_write_lists_the_kinds_for_an_action_of_no_kind(
+    client: Client[Any], action: dict[str, Any], reason: str
+) -> None:
+    """Assemble: a client connected to a new server.
+    Act: write an action whose kind is not one of the kinds, or that has no kind.
+    Assert: ToolError that names the action and lists the kinds in one line."""
+    kinds = ", ".join(ActionKind)
+    with pytest.raises(ToolError, match=f"action 1: {re.escape(reason)} {kinds}; no actions were applied$") as info:
+        await client.call_tool("write", {"actions": [action]})
+    assert "\n" not in str(info.value), "the error must be one line"
+
+
+async def test_write_names_the_action_that_does_not_fit_the_board(client: Client[Any]) -> None:
+    """Assemble: a server with card a of one list item.
+    Act: write a say, a react to a part that card a does not have, and a say.
+    Assert: ToolError names the second action and its kind, gives the parts that the card has, and says that no action was applied."""
+    await client.call_tool("write", {"actions": as_json(put("a", "1. x"))})
+    reason = "action 2 (react): no part 'a/2': card 'a' has parts 1 to 1; no actions were applied"
+    with pytest.raises(ToolError, match=f"{re.escape(reason)}$"):
+        actions = as_json(say("hi"), react("a/2", Reaction.approve), say("there"))
+        await client.call_tool("write", {"actions": actions})

@@ -1,6 +1,6 @@
 from typing import assert_never
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationError, field_validator
 
 from agent_hud.models.actions import (
     Action,
@@ -27,6 +27,22 @@ from agent_hud.models.actions import (
 from agent_hud.models.base import Model
 from agent_hud.models.columns import Column
 from agent_hud.outline import Outline
+
+
+def one_line(error: ValidationError) -> str:
+    """The messages of a validation error on one line, without pydantic's prefix and footer."""
+    return ", ".join(str(detail["msg"]).removeprefix("Value error, ") for detail in error.errors())
+
+
+def parts_of(card_id: TCardId, outline: Outline) -> str:
+    """The range of the card's parts, for an error on a ref that is not one of them."""
+    count = len(outline.texts)
+    return f"card '{card_id}' has parts 1 to {count}" if count else f"card '{card_id}' has no parts"
+
+
+def describe(label: str, column: Column) -> str:
+    """The label of a cell or column with the column's name, such as 3 (size)."""
+    return f"{label} ({column.name})" if column.name else label
 
 
 class Card(Model):
@@ -119,49 +135,45 @@ class Board(Model):
         return Outline(self.cards[card_id].md).texts.get(path) if card_id in self.cards else None
 
     def apply(self, action: Action) -> "Board":
-        """The board after the action. ValueError if the action does not fit the board."""
+        """The board after the action. ValueError, which names the valid choices, if the action does not fit the board."""
         match action.body:
             case Put(id=card_id, md=md):
-                cards = {**self.cards, card_id: Card(md=md, author=action.author)}
-                return self._retire(card_id).model_copy(update={"cards": cards})
-            case Remove(id=card_id) if card_id in self.cards:
+                try:
+                    card = Card(md=md, author=action.author)
+                except ValidationError as error:
+                    raise ValueError(f"card '{card_id}': {one_line(error)}") from error
+                return self._retire(card_id).model_copy(update={"cards": {**self.cards, card_id: card}})
+            case Remove(id=card_id):
+                self._check_card(card_id)
                 cards = {k: v for k, v in self.cards.items() if k != card_id}
                 positions = {k: v for k, v in self.positions.items() if k != card_id}
                 return self._retire(card_id).model_copy(update={"cards": cards, "positions": positions})
-            case Remove(id=card_id):
-                raise ValueError(f"no card '{card_id}'")
-            case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref) if ref not in self._parts(ref):
-                raise ValueError(f"no part '{ref}'")
             case Comment(ref=ref):
+                self._check_part(ref)
                 thread = self.threads.get(ref, Thread()).apply(action)
                 messages = (*self.messages, thread.comments[-1])
                 return self.model_copy(update={"threads": {**self.threads, ref: thread}, "messages": messages})
             case React(ref=ref) | Unreact(ref=ref):
+                self._check_part(ref)
                 thread = self.threads.get(ref, Thread()).apply(action)
                 return self.model_copy(update={"threads": {**self.threads, ref: thread}})
             case Fill(ref=ref, value=value):
-                match self._inputs(ref).get(ref):
-                    case None:
-                        raise ValueError(f"no input '{ref}'")
-                    case column if not column.fits(value):
-                        raise ValueError(f"input '{ref}' takes {column.kind} values")
-                    case _:
-                        return self.model_copy(update={"values": {**self.values, ref: value}})
-            case Link(src=src) if src not in self._parts(src):
-                raise ValueError(f"no part '{src}'")
-            case Link(dst=dst) if dst not in self._parts(dst):
-                raise ValueError(f"no part '{dst}'")
+                column = self._check_cell(ref)
+                if not column.fits(value):
+                    raise ValueError(f"input {describe(f"'{ref}'", column)} takes {column.takes}")
+                return self.model_copy(update={"values": {**self.values, ref: value}})
             case Link(id=arrow_id, src=src, dst=dst, text=text):
+                self._check_part(src)
+                self._check_part(dst)
                 arrow = Arrow(src=src, dst=dst, text=text, author=action.author)
                 return self.model_copy(update={"arrows": {**self.arrows, arrow_id: arrow}})
-            case Unlink(id=arrow_id) if arrow_id in self.arrows:
-                return self.model_copy(update={"arrows": {k: v for k, v in self.arrows.items() if k != arrow_id}})
             case Unlink(id=arrow_id):
-                raise ValueError(f"no arrow '{arrow_id}'")
-            case Move(id=card_id, x=x, y=y) if card_id in self.cards:
+                if arrow_id not in self.arrows:
+                    raise ValueError(f"no arrow '{arrow_id}'")
+                return self.model_copy(update={"arrows": {k: v for k, v in self.arrows.items() if k != arrow_id}})
+            case Move(id=card_id, x=x, y=y):
+                self._check_card(card_id)
                 return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
-            case Move(id=card_id):
-                raise ValueError(f"no card '{card_id}'")
             case Say(text=text):
                 said = Said(id=action.id, author=action.author, text=text)
                 return self.model_copy(update={"messages": (*self.messages, said)})
@@ -170,19 +182,40 @@ class Board(Model):
             case _:
                 assert_never(action.body)
 
-    def _parts(self, ref: TRef) -> set[TRef]:
-        """The card that the ref names, and its parts, as refs."""
-        card_id = ref.partition("/")[0]
+    def _check_card(self, card_id: TCardId) -> Outline:
+        """The outline of the card. ValueError, which lists the cards, if the board has no such card."""
         if card_id not in self.cards:
-            return set()
-        return {card_id, *(f"{card_id}/{path}" for path in Outline(self.cards[card_id].md).paths)}
+            cards = f"the cards are {', '.join(self.cards)}" if self.cards else "the board has no cards"
+            raise ValueError(f"no card '{card_id}': {cards}")
+        return Outline(self.cards[card_id].md)
 
-    def _inputs(self, ref: TRef) -> dict[TRef, Column]:
-        """The input cells of the card that the ref names, by ref."""
-        card_id = ref.partition("/")[0]
-        if card_id not in self.cards:
-            return {}
-        return {f"{card_id}/{path}": column for path, column in Outline(self.cards[card_id].md).inputs.items()}
+    def _check_part(self, ref: TRef) -> None:
+        """ValueError, which gives the range of parts, unless the ref names a card of the board or a part of it."""
+        card_id, _, path = ref.partition("/")
+        outline = self._check_card(card_id)
+        if "/" in path:
+            raise ValueError(f"'{ref}' is a cell, not a part: {parts_of(card_id, outline)}")
+        if path and path not in outline:
+            raise ValueError(f"no part '{ref}': {parts_of(card_id, outline)}")
+
+    def _check_cell(self, ref: TRef) -> Column:
+        """The input column of the cell. ValueError, which names the input columns, unless the ref names an input cell."""
+        card_id, _, path = ref.partition("/")
+        row, _, column = path.partition("/")
+        outline = self._check_card(card_id)
+        if not column:
+            raise ValueError(f"'{ref}' is not a cell: fill takes a card id, row and column such as {card_id}/2/3")
+        if row not in outline:
+            raise ValueError(f"no part '{card_id}/{row}': {parts_of(card_id, outline)}")
+        inputs = {cell.partition("/")[2]: found for cell, found in outline.inputs.items() if cell.startswith(f"{row}/")}
+        match inputs.get(column):
+            case None if not inputs:
+                raise ValueError(f"part '{card_id}/{row}' is not a table row with input columns")
+            case None:
+                columns = ", ".join(describe(n, found) for n, found in inputs.items())
+                raise ValueError(f"no input '{ref}': the input columns of row '{card_id}/{row}' are {columns}")
+            case found:
+                return found
 
     def _retire(self, card_id: TCardId) -> "Board":
         """The board without the threads, values and arrows on the card, and with the card and its feedback in its history."""

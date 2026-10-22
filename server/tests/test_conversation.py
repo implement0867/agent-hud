@@ -111,9 +111,9 @@ async def test_the_agent_hears_only_the_values_that_fit_their_columns(agent: Age
     ]
     assert kinds(answers) == [EventKind.accepted, EventKind.rejected] * 3 + [EventKind.accepted]
     assert [answer.reason for answer in answers if isinstance(answer, Rejected)] == [
-        "input 'tasks/2/2' takes select values",
-        "input 'tasks/2/3' takes number values",
-        "no input 'tasks/1/1'",
+        "input 'tasks/2/2' (Size) takes one of S, M, L",
+        "input 'tasks/2/3' (Hours) takes a number",
+        "no input 'tasks/1/1': the input columns of row 'tasks/1' are 2 (Size), 3 (Hours), 4 (Done)",
     ]
     await user.send()
     assert await agent.hear() == fits
@@ -189,7 +189,9 @@ async def test_a_click_on_a_part_that_the_agent_just_removed_is_rejected(agent: 
 
     await agent.write(put("plan", "1. a\n2. c"))
     stale = await user.act(react("plan/3", Reaction.reject))
-    assert stale == Rejected(kind=EventKind.rejected, id=stale.id, reason="no part 'plan/3'")
+    assert stale == Rejected(
+        kind=EventKind.rejected, id=stale.id, reason="no part 'plan/3': card 'plan' has parts 1 to 2"
+    )
     assert (await user.act(react("plan/2", Reaction.reject))).kind is EventKind.accepted
     await user.send()
     assert await agent.hear() == [react("plan/2", Reaction.reject)]
