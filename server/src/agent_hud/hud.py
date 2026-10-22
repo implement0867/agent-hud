@@ -2,11 +2,10 @@ import asyncio
 from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
 from difflib import unified_diff
-from itertools import accumulate
 from pathlib import Path
 
 from agent_hud.log import Log
-from agent_hud.models.actions import Action, ActionKind, Author, Put, TActionId
+from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Put, TActionId
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, EventKind, Heard, Snapshot, Turn
 
@@ -39,7 +38,7 @@ class Hud:
         self._agent_read = self._turn_start()
 
     def act(self, actions: list[Action]) -> None:
-        """Apply the actions in order, all or nothing. ValueError if one does not fit the board."""
+        """Apply the actions in order, all or nothing. Misfit, with the index of the action, if one does not fit the board."""
         self._take(actions)
         if self._state_file is not None:
             with self._state_file.open("a") as lines:
@@ -100,7 +99,12 @@ class Hud:
                 yield turn
 
     def _take(self, actions: list[Action]) -> None:
-        boards = list(accumulate(actions, Board.apply, initial=self.board))
+        boards = [self.board]
+        for n, action in enumerate(actions, start=1):
+            try:
+                boards.append(boards[-1].apply(action))
+            except ValueError as error:
+                raise Misfit(n, action.body.kind, str(error)) from error
         self._heard |= {
             action.id: hear(board, action)
             for action, board in zip(actions, boards[:-1], strict=True)

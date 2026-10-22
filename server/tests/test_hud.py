@@ -1,4 +1,5 @@
 import asyncio
+import re
 from contextlib import aclosing, suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,7 +9,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
+from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reaction, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, Heard, Turn
 from tests.factories import comment, move, put, react, say, send
@@ -31,6 +32,18 @@ async def test_act_takes_all_the_actions_or_none(hud: Hud, batch: list[Action]) 
     else:
         hud.act(batch)
         assert (hud.board, hud.log.actions) == (expected, batch)
+
+
+def test_act_names_the_action_that_does_not_fit() -> None:
+    """Assemble: a new hud.
+    Act: act with a put, a react to a part that the card does not have, and a say.
+    Assert: Misfit with the index and kind of the second action and the board's reason, which in a batch says that no action was applied."""
+    batch = [put("plan", "1. a"), react("plan/2", Reaction.approve), say("hi")]
+    reason = "no part 'plan/2': card 'plan' has parts 1 to 1"
+    with pytest.raises(Misfit, match=f"^{re.escape(reason)}$") as info:
+        Hud().act([Action(id=str(n), author=Author.agent, body=body) for n, body in enumerate(batch)])
+    assert (info.value.index, info.value.kind) == (2, ActionKind.react)
+    assert info.value.in_batch() == f"action 2 (react): {reason}; no actions were applied"
 
 
 def said(texts: list[str], author: Author) -> list[Action]:

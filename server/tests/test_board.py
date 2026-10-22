@@ -1,3 +1,4 @@
+import re
 from contextlib import suppress
 
 import pytest
@@ -5,6 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from agent_hud.models.actions import Action, Author, Reaction, TBody, TValue
+from agent_hud.models.base import Model
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread, Version
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
@@ -257,17 +259,18 @@ def test_a_code_line_names_its_file_and_line_when_its_block_has_a_file(lines: li
 @pytest.mark.parametrize(
     ("header", "column"),
     [
-        ("cost", Column(kind=ColumnKind.static)),
-        ("note {text}", Column(kind=ColumnKind.text)),
-        ("done { check }", Column(kind=ColumnKind.check)),
-        ("cost {number}", Column(kind=ColumnKind.number)),
-        ("size {S, M,L}", Column(kind=ColumnKind.select, options=("S", "M", "L"))),
+        ("cost", Column(kind=ColumnKind.static, name="cost")),
+        ("note {text}", Column(kind=ColumnKind.text, name="note")),
+        ("done { check }", Column(kind=ColumnKind.check, name="done")),
+        ("cost {number}", Column(kind=ColumnKind.number, name="cost")),
+        ("{number}", Column(kind=ColumnKind.number)),
+        ("size {S, M,L}", Column(kind=ColumnKind.select, name="size", options=("S", "M", "L"))),
     ],
 )
 def test_a_header_names_its_column(header: str, column: Column) -> None:
     """Assemble: a header cell.
     Act: read its column.
-    Assert: the kind and options it names."""
+    Assert: the name, kind and options it names."""
     assert Column.from_header(header) == column
 
 
@@ -305,7 +308,7 @@ def test_outline_has_an_input_for_each_cell_of_an_input_column(texts: list[str],
     Assert: an input at each row's part number and column 1, and none in the other columns."""
     outline = Outline(list_md("1. ", texts) + "\n\n" + table_md(rows, [" {number}"]))
     numbers = range(len(texts) + 1, len(texts) + len(rows) + 1)
-    assert outline.inputs == {f"{n}/1": Column(kind=ColumnKind.number) for n in numbers}
+    assert outline.inputs == {f"{n}/1": Column(kind=ColumnKind.number, name="h") for n in numbers}
 
 
 @given(card_ids(), tables(), st.from_type(Author))
@@ -375,3 +378,45 @@ def test_put_or_remove_drops_the_arrows_that_touch_the_card(body: TBody) -> None
     for arrow_id, src, dst in ("ab", "a/1", "b"), ("bb", "b", "b/1"), ("ba", "b/1", "a"):
         board = act(board, link(arrow_id, src, dst))
     assert list(act(board, body).arrows) == ["bb"]
+
+
+TABLE = "1. a\n2. b\n\n| task | size {S, M, L} | done {check} |\n|---|---|---|\n| x | | |"
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        (remove("risk"), "no card 'risk': the cards are plan"),
+        (react("plan/9", Reaction.approve), "no part 'plan/9': card 'plan' has parts 1 to 3"),
+        (comment("plan/3/1", "why?"), "'plan/3/1' is a cell, not a part: card 'plan' has parts 1 to 3"),
+        (link("why", "plan", "risk/1"), "no card 'risk': the cards are plan"),
+        (fill("plan/3/2", "XL"), "input 'plan/3/2' (size) takes one of S, M, L"),
+        (fill("plan/3/3", "yes"), "input 'plan/3/3' (done) takes true or false"),
+        (fill("plan/3/1", "x"), "no input 'plan/3/1': the input columns of row 'plan/3' are 2 (size), 3 (done)"),
+        (fill("plan/1/1", "x"), "part 'plan/1' is not a table row with input columns"),
+        (fill("plan/9/1", "x"), "no part 'plan/9': card 'plan' has parts 1 to 3"),
+        (fill("plan/1", "x"), "'plan/1' is not a cell: fill takes a card id, row and column such as plan/2/3"),
+        (
+            put("t", "| a {X} |\n|---|\n| x |"),
+            "card 't': column 'a {X}' takes text, check, number or two or more options",
+        ),
+        (unlink("why"), "no arrow 'why'"),
+    ],
+    ids=lambda value: value.kind if isinstance(value, Model) else "",
+)
+def test_an_action_that_does_not_fit_raises_with_the_valid_choices(body: TBody, reason: str) -> None:
+    """Assemble: a board with card plan of two list items and a table row with two input columns.
+    Act: apply an action that names a card, part, cell or value that the board does not have.
+    Assert: ValueError whose message names what the board has instead, in one line."""
+    with pytest.raises(ValueError, match=f"^{re.escape(reason)}$"):
+        act(act(Board(), put("plan", TABLE)), body)
+
+
+def test_a_part_on_a_card_with_no_parts_raises_so() -> None:
+    """Assemble: an empty board.
+    Act: react to a part of a card of plain text, and remove a card.
+    Assert: ValueError says that the card has no parts, and that the board has no cards."""
+    with pytest.raises(ValueError, match=r"^no part 'a/1': card 'a' has no parts$"):
+        act(act(Board(), put("a", "x")), react("a/1", Reaction.approve))
+    with pytest.raises(ValueError, match=r"^no card 'a': the board has no cards$"):
+        act(Board(), remove("a"))

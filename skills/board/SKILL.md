@@ -20,6 +20,8 @@ Call `write` with a list of actions. They run in order, all or nothing.
 - `move {id, x, y}` places a card on the board, in pixels. A card with no place goes below the others.
 - `react {ref, reaction}`, `comment {ref, text}`, `fill {ref, value}` and `link {id, src, dst, text}` act on cards as the user does. A comment also shows in the chat, with a link to its part.
 
+When an action does not fit the board or its kind, `write` applies none of the actions, and its error names the action by number and kind, and the valid choices: the cards on the board, the parts of the card, the input columns of the row, or the values the column takes. Fix that action and send the list again.
+
 Put one subject on each card, with a short id such as `plan` or `risks`. Write each step or option as a list item or a table body row, so that the user can give feedback on it.
 
 ## Refs
