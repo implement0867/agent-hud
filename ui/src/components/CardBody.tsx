@@ -1,13 +1,13 @@
 import { memo } from "react";
 import type { ComponentProps } from "react";
-import rehypeShiki from "@shikijs/rehype";
 import Markdown, { MarkdownHooks } from "react-markdown";
-import type { ExtraProps, Options } from "react-markdown";
+import type { ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { Connector, Marks } from "~/components/Marks";
 import { ColumnKind } from "~/lib/columns";
 import { invariant } from "~/lib/invariant";
+import { highlight } from "~/lib/highlight";
 import { numberParts } from "~/lib/numberParts";
 import {
   CardContext,
@@ -220,14 +220,7 @@ const remarkPlugins = [remarkGfm];
 
 const plainPlugins = [numberParts];
 
-/** Shiki loads each language's grammar when a code block first uses it; a language it does not know shows as plain text. */
-const highlightPlugins = [
-  numberParts,
-  [
-    rehypeShiki,
-    { theme: "github-dark", langs: [], lazy: true, fallbackLanguage: "text" },
-  ],
-] satisfies Options["rehypePlugins"];
+const highlightPlugins = [numberParts, highlight];
 
 /** The card's markdown, with each list item and table body row as a part that takes feedback and arrows, and code blocks in colour. */
 export const CardBody = memo(({ id, md }: { id: string; md: string }) => (

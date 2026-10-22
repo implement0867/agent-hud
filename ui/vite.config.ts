@@ -6,6 +6,17 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { tsconfigPaths: true },
   // The server serves the build from inside its package.
-  build: { outDir: "../server/src/agent_hud/static", emptyOutDir: true },
+  build: {
+    outDir: "../server/src/agent_hud/static",
+    emptyOutDir: true,
+    // Shiki's grammars go in one chunk, which the page loads with the first code block.
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [{ name: "grammars", test: /@shikijs[\\/]langs/ }],
+        },
+      },
+    },
+  },
   server: { proxy: { "/ws": { target: "ws://127.0.0.1:7676", ws: true } } },
 });
