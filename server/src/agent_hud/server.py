@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -10,13 +11,42 @@ from pydantic_core import ErrorDetails
 
 from agent_hud.deps import McpHudDep
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Misfit, TBody
+from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Put, TBody, TCardId
+from agent_hud.models.base import Model
 from agent_hud.models.board import Board
 from agent_hud.schema import compact
 
 type TActions = Annotated[list[TBody], Field(min_length=1)]
+type TParts = dict[TCardId, dict[str, str]]
 
 BodyAdapter = TypeAdapter[TBody](TBody)
+
+
+class Written(Model):
+    """What a write made: the parts of each card it put."""
+
+    parts: TParts = Field(description="The text of each part of each card the write put, by card id and part number")
+
+
+class Reading(Board):
+    """The board as read returns it, with the parts of each card."""
+
+    parts: TParts = Field(description="The text of each part of each card, by card id and part number")
+
+
+def put_ids(bodies: list[TBody]) -> Iterator[TCardId]:
+    """The id of each card that the actions put."""
+    for body in bodies:
+        match body:
+            case Put(id=card_id):
+                yield card_id
+            case _:
+                pass
+
+
+def parts_put(board: Board, bodies: list[TBody]) -> TParts:
+    """The parts of each card that the actions put, as the board has them after the actions."""
+    return {card_id: board.texts_of(card_id) for card_id in put_ids(bodies)}
 
 
 def detail(error: ErrorDetails) -> str:
@@ -51,16 +81,19 @@ def parse(actions: list[dict[str, Any]]) -> list[TBody]:
 def build() -> FastMCP:
     mcp = FastMCP("agent-hud")
 
-    async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)], hud: Hud = McpHudDep) -> None:
+    async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)], hud: Hud = McpHudDep) -> Written:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
         A put replaces the card and moves its feedback to the card's history.
         A ref is a card id, a part of the card such as plan/2, or an input cell such as plan/2/3.
+        Returns the parts of each card put, by number: use these numbers in refs.
         """
         try:
-            hud.act([Action(id=uuid4().hex, author=Author.agent, body=body) for body in parse(actions)])
+            bodies = parse(actions)
+            hud.act([Action(id=uuid4().hex, author=Author.agent, body=body) for body in bodies])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
+        return Written(parts=parts_put(hud.board, bodies))
 
     def listed(actions: TActions) -> None:
         """The signature of write with the model of each kind of action, for the listed schema."""
@@ -69,9 +102,10 @@ def build() -> FastMCP:
         *,
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
         hud: Hud = McpHudDep,
-    ) -> Board:
-        """The whole board: the cards, the threads of feedback on them by ref, the values, the arrows and the chat. Read it once, then follow the turns; read it again when unsure."""
-        return hud.board if history else hud.board.model_copy(update={"history": {}})
+    ) -> Reading:
+        """The whole board: the cards and the parts of each by number, the threads of feedback on them by ref, the values, the arrows and the chat. Read it once, then follow the turns; read it again when unsure."""
+        board = hud.board if history else hud.board.model_copy(update={"history": {}})
+        return Reading(**dict(board), parts={card_id: board.texts_of(card_id) for card_id in board.cards})
 
     async def listen() -> str:
         """

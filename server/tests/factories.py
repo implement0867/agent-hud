@@ -20,6 +20,7 @@ from agent_hud.models.actions import (
     Unreact,
 )
 from agent_hud.models.board import Board
+from agent_hud.server import Reading
 
 
 def put(card_id: str, md: str) -> Put:
@@ -71,5 +72,10 @@ def as_json(*bodies: TBody) -> list[dict[str, Any]]:
     return [body.model_dump(mode="json") for body in bodies]
 
 
+async def read(client: Client[Any], *, history: bool = False) -> Reading:
+    return Reading.model_validate((await client.call_tool("read", {"history": history})).structured_content)
+
+
 async def read_board(client: Client[Any], *, history: bool = False) -> Board:
-    return Board.model_validate((await client.call_tool("read", {"history": history})).structured_content)
+    """The board that read returns, without the parts, to compare with the hud's board."""
+    return Board.model_validate((await read(client, history=history)).model_dump(exclude={"parts"}))
