@@ -18,6 +18,8 @@ export const openBoardSocket = (
 ): TBoardSocket => {
   const url = new URL("/ws", window.location.href);
   url.protocol = "ws:";
+  // The page URL carries the server's token, which the socket needs too.
+  url.search = window.location.search;
   const socket = new WebSocket(url);
   const listening = new AbortController();
   const { signal } = listening;

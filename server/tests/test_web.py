@@ -13,6 +13,7 @@ from fastmcp import Client
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.provisional import domains
+from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
@@ -21,7 +22,9 @@ from agent_hud.hud import Hud
 from agent_hud.models.actions import ActionKind, TBody
 from agent_hud.models.events import Accepted, Rejected, Snapshot, Turn
 from agent_hud.server import build
-from tests.conversation import User, open_page, serve
+from agent_hud.settings import get_settings
+from agent_hud.web import create_app
+from tests.conversation import TOKEN, User, open_page, serve
 from tests.factories import as_json, put, say
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
@@ -65,7 +68,7 @@ async def user(address: tuple[str, int], hud: Hud) -> AsyncIterator[User]:
 async def listeners(address: tuple[str, int], hud: Hud) -> AsyncIterator[list[ClientConnection]]:
     """Two agents' sockets for the user's actions, at the URL that the listen tool returns."""
     host, port = address
-    async with Client(f"http://{host}:{port}/mcp/") as remote:
+    async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
         url = (await remote.call_tool("listen", {})).data
     async with AsyncExitStack() as stack:
         yield [await stack.enter_async_context(connect(url, proxy=None)) for _ in range(2)]
@@ -83,8 +86,36 @@ async def test_app_serves_the_tools_over_http(address: tuple[str, int], agent: C
     Act: list the tools over HTTP at /mcp/.
     Assert: the same tools as in memory."""
     host, port = address
-    async with Client(f"http://{host}:{port}/mcp/") as remote:
+    async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
         assert await remote.list_tools() == await agent.list_tools()
+
+
+async def test_tools_need_the_token_when_the_settings_give_one(address: tuple[str, int]) -> None:
+    """Assemble: the app with a token from the settings.
+    Act: connect to /mcp/ without it.
+    Assert: the server answers with an error and no tools."""
+    host, port = address
+    with pytest.raises(MCPError):
+        async with Client(f"http://{host}:{port}/mcp/") as remote:
+            await remote.list_tools()
+
+
+async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Assemble: settings with a state dir and no token.
+    Act: create the app.
+    Assert: the token file in the state dir has the token of the URL that listen returns, readable by the user only."""
+    monkeypatch.setenv("AGENT_HUD_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("AGENT_HUD_TOKEN", raising=False)
+    get_settings.cache_clear()
+    try:
+        create_app(Hud())
+    finally:
+        get_settings.cache_clear()
+    path = tmp_path / "state" / "token"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert len(path.read_text()) >= 32
 
 
 async def test_health_names_the_app_and_its_version(address: tuple[str, int]) -> None:
@@ -101,8 +132,37 @@ async def test_page_gets_the_board_on_connect(address: tuple[str, int], hud: Hud
     Act: open a page from the app's origin.
     Assert: the first event carries the board."""
     host, port = address
-    async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
+    async with connect(f"ws://{host}:{port}/ws?token={TOKEN}", origin=f"http://{host}:{port}", proxy=None) as page:
         assert Snapshot.model_validate_json(await page.recv()).board == hud.board
+
+
+@pytest.mark.parametrize("path", ["/ws", "/agent"])
+@pytest.mark.parametrize("query", ["", "?token=", "?token=other"])
+async def test_sockets_need_the_token(address: tuple[str, int], path: str, query: str) -> None:
+    """Assemble: the app.
+    Act: open the websocket from the app's origin without the token, or with another.
+    Assert: the handshake fails."""
+    host, port = address
+    with pytest.raises(InvalidStatus):
+        await connect(f"ws://{host}:{port}{path}{query}", origin=f"http://{host}:{port}", proxy=None)
+
+
+async def test_a_request_without_origin_is_not_the_page(address: tuple[str, int]) -> None:
+    """Assemble: the app.
+    Act: open /ws with the token and no Origin, as a local script does.
+    Assert: the handshake fails, since the browser always sends the Origin."""
+    host, port = address
+    with pytest.raises(InvalidStatus):
+        await connect(f"ws://{host}:{port}/ws?token={TOKEN}", proxy=None)
+
+
+async def test_the_agent_socket_takes_the_token_without_origin(address: tuple[str, int]) -> None:
+    """Assemble: the app.
+    Act: open /agent with the token and no Origin, as the monitor does.
+    Assert: the handshake succeeds."""
+    host, port = address
+    async with connect(f"ws://{host}:{port}/agent?token={TOKEN}", proxy=None):
+        pass
 
 
 # Examples go over sockets, so their time varies more than the default deadline allows.
@@ -158,7 +218,7 @@ async def test_pages_of_other_sites_cannot_connect(address: tuple[str, int], pat
     Assert: the handshake fails."""
     host, port = address
     with pytest.raises(InvalidStatus):
-        await connect(f"ws://{host}:{port}{path}", origin=f"http://{domain}", proxy=None)
+        await connect(f"ws://{host}:{port}{path}?token={TOKEN}", origin=f"http://{domain}", proxy=None)
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
@@ -170,7 +230,9 @@ async def test_other_host_names_cannot_connect(address: tuple[str, int], path: s
     Assert: the handshake fails."""
     host, port = address
     with pytest.raises(InvalidStatus):
-        await connect(f"ws://{domain}:{port}{path}", host=host, origin=f"http://{domain}:{port}", proxy=None)
+        await connect(
+            f"ws://{domain}:{port}{path}?token={TOKEN}", host=host, origin=f"http://{domain}:{port}", proxy=None
+        )
 
 
 # Each message grows the module's board, which each snapshot carries, so the lists are short.

@@ -20,6 +20,9 @@ from agent_hud.settings import get_settings
 from agent_hud.web import create_app
 from tests.factories import as_json, send
 
+# The app's token in the tests: /mcp/ needs it as a bearer token, and the sockets as a query parameter.
+TOKEN = "test-token"
+
 
 @dataclass
 class Agent:
@@ -93,7 +96,7 @@ class User:
 async def open_page(address: tuple[str, int]) -> AsyncGenerator[User]:
     """A user on a new page from the app's origin, until the context ends."""
     host, port = address
-    async with connect(f"ws://{host}:{port}/ws", origin=f"http://{host}:{port}", proxy=None) as page:
+    async with connect(f"ws://{host}:{port}/ws?token={TOKEN}", origin=f"http://{host}:{port}", proxy=None) as page:
         yield User(page, Snapshot.model_validate_json(await page.recv()))
 
 
@@ -102,7 +105,7 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
     """An agent that has connected to the MCP server and opened its monitor, until the context ends."""
     host, port = address
     async with AsyncExitStack() as stack:
-        tools = await stack.enter_async_context(Client(f"http://{host}:{port}/mcp/"))
+        tools = await stack.enter_async_context(Client(f"http://{host}:{port}/mcp/", auth=TOKEN))
         url = (await tools.call_tool("listen", {})).data
         yield Agent(tools, await stack.enter_async_context(connect(url, proxy=None)))
 
@@ -112,6 +115,7 @@ async def serve(hud: Hud, static_dir: Path) -> AsyncGenerator[tuple[str, int]]:
     """Host and port of the app on the hud, with the UI in static_dir, on a free port, until the context ends."""
     with pytest.MonkeyPatch.context() as env:
         env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
+        env.setenv("AGENT_HUD_TOKEN", TOKEN)
         get_settings.cache_clear()
         app = create_app(hud)
     get_settings.cache_clear()

@@ -16,6 +16,11 @@ class Settings(BaseSettings):
 
     static_dir: Path = Field(default_factory=find_static_dir, description="Directory of the built UI")
     state_file: Path | None = Field(default=None, description="JSONL file of every action, replayed on start")
+    state_dir: Path | None = Field(default=None, description="Directory for the token file; none means no file")
+    token: str | None = Field(
+        default=None,
+        description="The token that /mcp/ needs as a bearer token and the sockets as a query parameter; none makes one for the sockets only",
+    )
 
 
 @lru_cache(maxsize=1)

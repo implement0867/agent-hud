@@ -118,8 +118,8 @@ def parse(actions: list[dict[str, Any]]) -> list[TAgentBody]:
     return bodies
 
 
-def build(hud: Hud) -> FastMCP:
-    """The MCP server whose tools act on the hud."""
+def build(hud: Hud, token: str | None = None) -> FastMCP:
+    """The MCP server whose tools act on the hud. With a token, the URL that listen returns carries it."""
     mcp = FastMCP("agent-hud")
 
     async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> Written:
@@ -155,7 +155,8 @@ def build(hud: Hud) -> FastMCP:
         Each line is one turn: the changes that the user made up to their send or chat message, with the text of each part that a change names.
         An edit of a card on the board is a diff of its markdown.
         """
-        return str(get_http_request().url.replace(scheme="ws", path="/agent"))
+        url = get_http_request().url.replace(scheme="ws", path="/agent")
+        return str(url if token is None else url.include_query_params(token=token))
 
     tool = FunctionTool.from_function(write)
     parameters, kinds = compact(FunctionTool.from_function(listed).parameters)

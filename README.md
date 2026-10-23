@@ -29,11 +29,17 @@ that pid.
 | Variable | Does |
 |---|---|
 | `AGENT_HUD_PORT` | the port, 7676 by default; the hook, the MCP server URL and `make serve` read it |
+| `AGENT_HUD_TOKEN` | the token that `/mcp/` needs as a bearer token, which the plugin sends from this variable; unset, `/mcp/` is open to local processes and the app makes a token for the sockets alone |
 | `AGENT_HUD_STATE_FILE` | a JSONL file that the app appends each action to and replays on start; none by default |
 | `AGENT_HUD_STATIC_DIR` | the directory of the built UI; the one in the package by default |
 
 The hook of the first session of the day starts the app, so these must be set in the environment that
 starts that session, such as the shell profile.
+
+The app answers `/ws` and `/agent` only with its token as the `token` query parameter. The URL that `listen`
+returns carries it, and so does the page URL that `/agent-hud:board` gives; the app also writes it to
+`$XDG_STATE_HOME/agent-hud/token`, readable by the user only. `/ws` also needs the page's own Origin, which
+the browser always sends, so a local script cannot act as the user.
 
 The app serves the board page at `/`, a whiteboard that updates when the agent writes:
 
