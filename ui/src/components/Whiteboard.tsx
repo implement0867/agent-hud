@@ -49,7 +49,7 @@ const DraftNote = ({ at, close }: { at: TPoint; close: () => void }) => {
   };
   return (
     <div
-      className="pointer-events-auto absolute w-64 -rotate-[0.6deg] animate-pop rounded-xl bg-amber-100 px-4 pt-3 pb-3 shadow-[0_8px_20px_-8px_rgba(120,80,0,0.35)] ring-2 ring-amber-300"
+      className="pointer-events-auto absolute w-96 animate-pop rounded-xl bg-white px-4 pt-3 pb-3 shadow-[0_1px_2px_rgba(0,0,0,0.06),0_10px_30px_-12px_rgba(0,0,0,0.18)] ring-2 ring-sky-400"
       style={{ left: at.x, top: at.y }}
     >
       <Editor
@@ -206,7 +206,9 @@ export const Whiteboard = ({
     void act({ kind: ActionKind.enum.place, id, ...place });
   };
 
-  /** A card that grew with a new version pushes the cards below it down, so that it does not cover them. */
+  /**
+   * A card that grew with a new version or a new width pushes the cards below it down, so that it does not cover them.
+   */
   useEffect(() => {
     for (const id of [...placing.current.keys()].filter(gone)) {
       placing.current.delete(id);
@@ -237,7 +239,7 @@ export const Whiteboard = ({
         void act({ kind: ActionKind.enum.move, id, ...to });
       }
     }
-  }, [act, board.cards, board.positions, gone]);
+  }, [act, board.cards, board.positions, board.widths, gone]);
 
   /** Selecting a part also measures where its feedback panel goes, beside its card. */
   const select = useCallback((next: TSelection) => {
@@ -470,8 +472,6 @@ export const Whiteboard = ({
     ],
   );
 
-  const empty =
-    Object.keys(board.cards).length === 0 && Object.keys(drafts).length === 0;
   return (
     <ToolContext value={tools}>
       <Canvas
@@ -495,24 +495,6 @@ export const Whiteboard = ({
                 }}
               />
             )}
-            {linking !== null && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-violet-600 px-4 py-1.5 text-sm text-white shadow-lg">
-                Release on a part or a card · Esc cancels
-              </div>
-            )}
-            {empty ? (
-              <div className="absolute inset-0 grid place-items-center">
-                <p className="max-w-xs text-center text-stone-400">
-                  The agent&apos;s cards show here.
-                  <br />
-                  Double-click anywhere to write a note.
-                </p>
-              </div>
-            ) : null}
-            <p className="absolute bottom-6 left-4 hidden text-xs text-stone-400 lg:block">
-              Double-click: note · drag a dot: arrow · Space+drag: pan ·
-              ⌘+scroll: zoom
-            </p>
             {undo !== null && (
               <div
                 role="status"

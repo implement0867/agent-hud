@@ -14,6 +14,7 @@ export const ActionKind = z.enum([
   "link",
   "unlink",
   "move",
+  "resize",
   "place",
   "clear",
   "send",
@@ -33,7 +34,8 @@ export const bodySchema = z.discriminatedUnion("kind", [
     kind: z.literal(ActionKind.enum.put),
     id: z.string(),
     md: z.string().min(1),
-    version: z.number().int().nonnegative().optional(),
+    // The server sends null for a put without a version, such as a new note in the pending list.
+    version: z.number().int().nonnegative().nullish(),
   }),
   z.strictObject({ kind: z.literal(ActionKind.enum.remove), id: z.string() }),
   z.strictObject({ kind: z.literal(ActionKind.enum.restore), id: z.string() }),
@@ -67,6 +69,11 @@ export const bodySchema = z.discriminatedUnion("kind", [
     id: z.string(),
     x: z.number(),
     y: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal(ActionKind.enum.resize),
+    id: z.string(),
+    width: z.number().positive(),
   }),
   z.strictObject({
     kind: z.literal(ActionKind.enum.place),

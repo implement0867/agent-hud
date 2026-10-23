@@ -35,6 +35,7 @@ class ActionKind(StrEnum):
     link = "link"
     unlink = "unlink"
     move = "move"
+    resize = "resize"
     place = "place"
     clear = "clear"
     send = "send"
@@ -115,6 +116,14 @@ class Move(Model):
     y: float = Field(strict=True, allow_inf_nan=False, description="Top edge of the card on the board, in pixels")
 
 
+class Resize(Model):
+    kind: Literal[ActionKind.resize]
+    id: TCardId
+    width: float = Field(
+        strict=True, gt=0, allow_inf_nan=False, description="Width of the card on the board, in pixels"
+    )
+
+
 class Place(Model):
     """
     The place that the page gives a card that has none, once the page has the card's size: the first place of a card
@@ -140,12 +149,26 @@ class Send(Model):
 
 
 type TAgentBody = Annotated[
-    Put | Remove | Restore | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Clear,
+    Put | Remove | Restore | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Resize | Clear,
     Discriminator("kind"),
 ]
 """An action of the agent: each kind but place and send, which only the user's page sends."""
 type TBody = Annotated[
-    Put | Remove | Restore | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Place | Clear | Send,
+    Put
+    | Remove
+    | Restore
+    | React
+    | Unreact
+    | Comment
+    | Say
+    | Fill
+    | Link
+    | Unlink
+    | Move
+    | Resize
+    | Place
+    | Clear
+    | Send,
     Discriminator("kind"),
 ]
 

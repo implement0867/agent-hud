@@ -13,7 +13,7 @@ from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reactio
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, Heard, Turn
 from agent_hud.store import Store
-from tests.factories import clear, comment, fill, move, place, put, react, say, send, unreact
+from tests.factories import clear, comment, fill, move, place, put, react, resize, say, send, unreact
 from tests.strategies import actions, item_texts, list_md, messages, table_md
 
 
@@ -88,7 +88,15 @@ async def test_an_agent_gets_the_user_actions_that_no_agent_had(
 
 def plain(action: Action) -> bool:
     """Whether a turn carries the action as it is: not a clear, which compacts the state file, nor a kind a turn nets."""
-    nets = (ActionKind.clear, ActionKind.move, ActionKind.place, ActionKind.react, ActionKind.unreact, ActionKind.fill)
+    nets = (
+        ActionKind.clear,
+        ActionKind.move,
+        ActionKind.resize,
+        ActionKind.place,
+        ActionKind.react,
+        ActionKind.unreact,
+        ActionKind.fill,
+    )
     return action.body.kind not in nets
 
 
@@ -187,8 +195,8 @@ async def test_a_turn_counts_as_had_once_the_agent_asks_for_the_next() -> None:
 @given(st.from_type(Reaction), st.from_type(Reaction))
 async def test_a_turn_carries_the_net_of_the_users_actions(before: Reaction, after: Reaction) -> None:
     """Assemble: a hud with a card of a list and a table, where the user reacted to a part and filled a cell before their turn.
-    Act: in the turn, the user reacts and unreacts, reacts twice, fills a cell twice, fills a cell back as it was, moves and places the card, and sends.
-    Assert: the pending list and the turn carry the last reaction on a part when it differs from the start, the last fill of a cell when it differs, and no move or place."""
+    Act: in the turn, the user reacts and unreacts, reacts twice, fills a cell twice, fills a cell back as it was, moves, resizes and places the card, and sends.
+    Assert: the pending list and the turn carry the last reaction on a part when it differs from the start, the last fill of a cell when it differs, and no move, resize or place."""
     hud = Hud()
     table = table_md([["x", "y"]], [" {number}", " {number}"])
     hud.act(by(Author.agent, put("plan", f"1. a\n2. b\n3. c\n\n{table}")))
@@ -211,6 +219,7 @@ async def test_a_turn_carries_the_net_of_the_users_actions(before: Reaction, aft
         Action(id="n9", author=Author.user, body=fill("plan/4/1", 1)),
         Action(id="n10", author=Author.user, body=move("plan", 5, 5)),
         Action(id="n11", author=Author.user, body=place("plan", 6, 6)),
+        Action(id="n12", author=Author.user, body=resize("plan", 500)),
     ]
     hud.act(turn)
     expected = ([] if before == after else ["n3"]) + ["n5", "n7"]

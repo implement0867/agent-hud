@@ -15,6 +15,7 @@ from agent_hud.models.actions import (
     React,
     Reaction,
     Remove,
+    Resize,
     Restore,
     Say,
     Send,
@@ -102,7 +103,18 @@ class Thread(Model):
                 said = Said(id=action.id, author=action.author, text=text, ref=ref)
                 return self.model_copy(update={"comments": (*self.comments, said)})
             case (
-                Put() | Remove() | Restore() | Say() | Fill() | Link() | Unlink() | Move() | Place() | Clear() | Send()
+                Put()
+                | Remove()
+                | Restore()
+                | Say()
+                | Fill()
+                | Link()
+                | Unlink()
+                | Move()
+                | Resize()
+                | Place()
+                | Clear()
+                | Send()
             ):
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
@@ -138,6 +150,9 @@ class Board(Model):
     arrows: dict[TCardId, Arrow] = Field(default_factory=dict)
     messages: tuple[Said, ...] = Field(default=(), description="The chat, and each comment on a part, in order")
     positions: dict[TCardId, Point] = Field(default_factory=dict)
+    widths: dict[TCardId, float] = Field(
+        default_factory=dict, description="The width of each card that the user or the agent resized, in pixels"
+    )
     history: dict[TCardId, tuple[Version, ...]] = Field(
         default_factory=dict, description="The earlier versions of each card, oldest first"
     )
@@ -184,7 +199,10 @@ class Board(Model):
                 self._check_card(card_id)
                 cards = {k: v for k, v in self.cards.items() if k != card_id}
                 positions = {k: v for k, v in self.positions.items() if k != card_id}
-                return self._retire(card_id).model_copy(update={"cards": cards, "positions": positions})
+                widths = {k: v for k, v in self.widths.items() if k != card_id}
+                return self._retire(card_id).model_copy(
+                    update={"cards": cards, "positions": positions, "widths": widths}
+                )
             case Comment(ref=ref):
                 self._check_part(ref)
                 thread = self.threads.get(ref, Thread()).apply(action)
@@ -211,6 +229,9 @@ class Board(Model):
             case Move(id=card_id, x=x, y=y):
                 self._check_card(card_id)
                 return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
+            case Resize(id=card_id, width=width):
+                self._check_card(card_id)
+                return self.model_copy(update={"widths": {**self.widths, card_id: width}})
             case Place(id=card_id, x=x, y=y):
                 self._check_card(card_id)
                 if card_id in self.positions:
@@ -223,7 +244,7 @@ class Board(Model):
                 retired = self
                 for card_id in self.cards:
                     retired = retired._retire(card_id)
-                return retired.model_copy(update={"cards": {}, "positions": {}, "messages": ()})
+                return retired.model_copy(update={"cards": {}, "positions": {}, "widths": {}, "messages": ()})
             case Send():
                 return self
             case _:
