@@ -1,4 +1,5 @@
 import asyncio
+from importlib.metadata import version
 
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +31,11 @@ def create_app(hud: Hud | None = None) -> FastAPI:
     app = FastAPI(lifespan=mcp_app.lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        """The app and its version, for the hook that starts it: any other answer on the port is another program."""
+        return {"app": "agent-hud", "version": version("agent-hud")}
 
     @app.websocket("/ws", dependencies=[SameOriginDep])
     async def page(websocket: WebSocket) -> None:

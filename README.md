@@ -18,6 +18,23 @@ port 7676 unless the app already runs there, so all sessions share one board. Th
 server `board` at `http://127.0.0.1:7676/mcp/`, and adds the `board` skill and the `/agent-hud:board`
 command, which gives the page URL and follows the user's actions.
 
+The hook asks `GET /health` on the port, which the app answers with its name and version. The same version
+of the app answering means nothing to do. An older version is stopped and the new one started. Another
+program on the port is an error, and the hook says so. The hook waits up to 15 s for the app to answer,
+then exits 1 with a message if it does not, and `uv` missing from PATH is a message too. The first start
+installs the dependencies, which takes longer. The app logs to `$XDG_STATE_HOME/agent-hud/server.log`
+and records its pid in `server.pid` next to it, with `~/.local/state` as the default; to stop it, `kill`
+that pid.
+
+| Variable | Does |
+|---|---|
+| `AGENT_HUD_PORT` | the port, 7676 by default; the hook, the MCP server URL and `make serve` read it |
+| `AGENT_HUD_STATE_FILE` | a JSONL file that the app appends each action to and replays on start; none by default |
+| `AGENT_HUD_STATIC_DIR` | the directory of the built UI; the one in the package by default |
+
+The hook of the first session of the day starts the app, so these must be set in the environment that
+starts that session, such as the shell profile.
+
 The app serves the board page at `/`, a whiteboard that updates when the agent writes:
 
 | On the page | Does |
@@ -40,7 +57,6 @@ A code block whose fence gives `file=src/app.py start=40` shows the file name an
 tints its added and removed lines. A card with code is wider.
 
 An edit is a `put`: the feedback on the parts whose text it keeps stays with them, and the rest moves to the card's history.
-With `AGENT_HUD_STATE_FILE` set, the app appends each action to that JSONL file and replays it on start.
 
 ## Tools
 
@@ -71,7 +87,7 @@ Requires [uv](https://docs.astral.sh/uv/) and Node 22.
 |---|---|
 | `cd server && uv run playwright install chromium` | install the browser that the page tests drive, once |
 | `make check` | ruff format and lint, basedpyright, pytest; tsc, eslint, prettier |
-| `make serve` | start the app on port 7676 |
+| `make serve` | start the app on port 7676, or `AGENT_HUD_PORT` |
 | `cd ui && npm run build` | build the UI into the server package; commit the build |
 | `claude --plugin-dir .` | run Claude Code with the plugin from this checkout |
 | `cd ui && npm run dev` | Vite dev server, which sends `/ws` to the running server |

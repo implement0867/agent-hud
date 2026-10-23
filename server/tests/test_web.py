@@ -1,8 +1,11 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
+from importlib.metadata import version
+from json import load
 from pathlib import Path
 from typing import Any
+from urllib.request import urlopen
 
 import pytest
 import pytest_asyncio
@@ -82,6 +85,15 @@ async def test_app_serves_the_tools_over_http(address: tuple[str, int], agent: C
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/") as remote:
         assert await remote.list_tools() == await agent.list_tools()
+
+
+async def test_health_names_the_app_and_its_version(address: tuple[str, int]) -> None:
+    """Assemble: the app.
+    Act: get /health.
+    Assert: the app's name and the package version, for the hook to tell the app from another program on the port."""
+    host, port = address
+    with await asyncio.to_thread(urlopen, f"http://{host}:{port}/health") as answer:
+        assert (answer.status, load(answer)) == (200, {"app": "agent-hud", "version": version("agent-hud")})
 
 
 async def test_page_gets_the_board_on_connect(address: tuple[str, int], hud: Hud) -> None:
