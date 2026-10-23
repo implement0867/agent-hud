@@ -10,7 +10,7 @@ from agent_hud.models.base import Model
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread, Version
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
-from tests.factories import comment, fill, link, move, put, react, remove, say, unlink, unreact
+from tests.factories import clear, comment, fill, link, move, put, react, remove, say, unlink, unreact
 from tests.strategies import (
     action_ids,
     actions,
@@ -84,6 +84,32 @@ def test_put_sets_the_card_and_keeps_the_feedback_whose_part_text_is_unchanged(
     assert sorted(on_card.values(), key=str) == sorted([*kept.values(), *version.threads.values()], key=str)
     texts = [text_of(board, ref) for ref in on_card]
     assert all(text_of(after, ref) in texts for ref in kept)
+
+
+@given(boards())
+def test_clear_moves_each_card_to_its_history_and_empties_the_rest(board: Board) -> None:
+    """Assemble: any board.
+    Act: clear.
+    Assert: no cards, threads, values, arrows, positions or messages; each card is the last version in its history, with
+    the feedback it had; and the history of the other cards is as it was."""
+    cleared = board.apply(Action(id="c", author=Author.user, body=clear()))
+    assert (cleared.cards, cleared.threads, cleared.values, cleared.arrows, cleared.positions, cleared.messages) == (
+        {},
+        {},
+        {},
+        {},
+        {},
+        (),
+    )
+    assert set(cleared.history) == {*board.history, *board.cards}
+    for card_id, card in board.cards.items():
+        version = cleared.history[card_id][-1]
+        assert version.card == card
+        assert version.threads == {ref: thread for ref, thread in board.threads.items() if ref.split("/")[0] == card_id}
+        assert cleared.history[card_id][:-1] == board.history.get(card_id, ())
+    for card_id in board.history:
+        if card_id not in board.cards:
+            assert cleared.history[card_id] == board.history[card_id]
 
 
 @given(boards(), card_ids())

@@ -222,6 +222,10 @@ export const Whiteboard = ({
     if (unsent > 0) void act({ kind: ActionKind.enum.send });
   };
 
+  const clear = () => {
+    void act({ kind: ActionKind.enum.clear });
+  };
+
   const note = (at?: TPoint) => {
     const { width, height } = size();
     const centre = toBoard(view, { x: width / 2 - 128, y: height / 2 - 60 });
@@ -411,6 +415,7 @@ export const Whiteboard = ({
               note={() => {
                 note();
               }}
+              clear={clear}
               unsent={unsent}
               send={send}
               history={history !== null}

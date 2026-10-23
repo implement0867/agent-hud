@@ -10,7 +10,7 @@ from hypothesis import given
 from mcp.types import Tool
 
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TAgentBody
+from agent_hud.models.actions import Action, ActionKind, Author, Fill, Reaction, TAgentBody
 from agent_hud.server import build
 from tests.factories import as_json, comment, link, put, react, read, read_board, remove, say, unlink
 from tests.strategies import agent_bodies, card_ids
@@ -35,6 +35,37 @@ async def test_read_returns_the_board_with_its_threads(client: Client[Any], hud:
     feedback = react("plan", Reaction.approve), comment("plan/2", "why b?")
     hud.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate(feedback)])
     assert await read_board(client) == hud.board
+
+
+async def test_read_of_cards_returns_what_is_on_them(client: Client[Any], hud: Hud) -> None:
+    """Assemble: two cards with feedback, a value, an arrow between them, a position and a version each, and a chat message.
+    Act: read one card.
+    Assert: that card with the feedback, value, arrow, position and history on it, all the messages, and no more."""
+    first = put("plan", "1. a\n\n| n {number} |\n|---|\n| x |"), put("risk", "1. r")
+    await client.call_tool("write", {"actions": as_json(*first)})
+    again = put("plan", "1. a\n\n| n {number} |\n|---|\n| y |"), put("risk", "1. s")
+    feedback = react("plan/1", Reaction.approve), react("risk/1", Reaction.reject), link("why", "risk/1", "plan/1")
+    await client.call_tool("write", {"actions": as_json(*again, *feedback, say("hello"))})
+    hud.act([Action(id="m", author=Author.user, body=Fill(kind=ActionKind.fill, ref="plan/2/1", value=3))])
+    reading = await read_board(client, history=True, cards=["plan"])
+    assert set(reading.cards) == {"plan"}
+    assert set(reading.threads) == {"plan/1"}
+    assert reading.values == {"plan/2/1": 3}
+    assert set(reading.arrows) == {"why"}
+    assert set(reading.history) == {"plan"}
+    assert [said.text for said in reading.messages] == ["hello"]
+    assert set(reading.positions) == set()
+    assert set((await read_board(client, cards=["risk"])).arrows) == {"why"}
+
+
+async def test_read_since_returns_the_messages_after_the_one_named(client: Client[Any]) -> None:
+    """Assemble: three messages.
+    Act: read since the second, and since an id that no message has.
+    Assert: the third alone, then all three."""
+    await client.call_tool("write", {"actions": as_json(say("one"), say("two"), say("three"))})
+    [_, second, _] = (await read_board(client)).messages
+    assert [said.text for said in (await read_board(client, since=second.id)).messages] == ["three"]
+    assert [said.text for said in (await read_board(client, since="none")).messages] == ["one", "two", "three"]
 
 
 async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], hud: Hud) -> None:

@@ -16,6 +16,7 @@ Call `write` with a list of actions. They run in order, all or nothing.
   - Put `file=` and `start=` after the language, such as ```` ```python file=src/app.py start=40 ````, to show the file name and the line numbers. Then the user's feedback on a code line names its file and line.
   - A ```` ```diff ```` block tints its added and removed lines.
 - `remove {id}` removes a card.
+- `clear` starts over: every card goes to its history with its feedback, and the board, its arrows and the chat empty. Use it when the user moves to a new task, rather than a `remove` per card.
 - `say {text}` sends a message to the user. It shows in the chat on the page.
 - `move {id, x, y}` places a card on the board, in pixels. A card with no place goes below the others.
 - `react {ref, reaction}`, `comment {ref, text}`, `fill {ref, value}` and `link {id, src, dst, text}` act on cards as the user does. A comment also shows in the chat, with a link to its part.
@@ -50,7 +51,7 @@ A table header with a spec makes an input column that the user fills:
 
 ## Read feedback
 
-- `read` returns the board: the cards and the parts of each by number, the threads by ref, each with the reaction of each author and the comments, the values by cell ref, the arrows, the chat messages and comments, and the card positions. `read` with `history` true also returns the earlier versions of each card with their feedback. Cards with the author `user` are notes from the user, or cards that the user edited. Cards that the user placed near each other belong together for the user.
+- `read` returns the board: the cards and the parts of each by number, the threads by ref, each with the reaction of each author and the comments, the values by cell ref, the arrows, the chat messages and comments, and the card positions. `read` with `history` true also returns the earlier versions of each card with their feedback. `read` with `cards` returns those cards alone, with what is on them, and with `since` the messages after the message or comment with that id: use them to read less when the board is large. Cards with the author `user` are notes from the user, or cards that the user edited. Cards that the user placed near each other belong together for the user.
 - `listen` returns the websocket URL of the user's turns. Open it with the Monitor tool, and open it again when the monitor ends. The user's reactions, comments, fills and edits collect until the user clicks Send or sends a chat message. Then the monitor gets one line with all of them, and each action has the text of the parts it names, as the user saw them.
 
 Each turn has only the changes, as an edit of a file has only a diff. A `put` of the user on a card that was on the board comes as an `edit` with a unified diff of the card's markdown. Read the board once, then follow the turns, and read it again only when you are not sure what the board shows.

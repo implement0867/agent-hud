@@ -5,7 +5,7 @@ from difflib import unified_diff
 from pathlib import Path
 
 from agent_hud.log import Log
-from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Put, TActionId
+from agent_hud.models.actions import Action, ActionKind, Author, Clear, Misfit, Put, TActionId
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, EventKind, Heard, Snapshot, Turn
 
@@ -21,8 +21,17 @@ def hear(board: Board, action: Action) -> Heard:
     return Heard(id=action.id, author=action.author, body=body, parts=board.part_texts(action.body))
 
 
+def snapshot_of(state_file: Path) -> Path:
+    """The file next to the state file that holds the board as it was at the start of the state file's actions."""
+    return state_file.with_suffix(".json")
+
+
 class Hud:
-    """The board, and the log of the actions that made it, kept in the state file if there is one; and the agents' monitors."""
+    """
+    The board, and the log of the actions that made it; and the agents' monitors.
+    With a state file, the log is kept there, after the board that its snapshot file holds, and compacted on a clear
+    and on shutdown: the snapshot takes the board at the start of the user's turn, and the log keeps the turn.
+    """
 
     def __init__(self, state_file: Path | None = None) -> None:
         self.board = Board()
@@ -32,6 +41,9 @@ class Hud:
         self._heard: dict[TActionId, Heard] = {}
         self._changed = asyncio.Event()
         self._state_file = state_file
+        if state_file is not None and snapshot_of(state_file).exists():
+            self.board = Board.model_validate_json(snapshot_of(state_file).read_text())
+        self._turn_board = self.board
         if state_file is not None and state_file.exists():
             with state_file.open() as lines:
                 self._take([Action.model_validate_json(line) for line in lines])
@@ -40,9 +52,25 @@ class Hud:
     def act(self, actions: list[Action]) -> None:
         """Apply the actions in order, all or nothing. Misfit, with the index of the action, if one does not fit the board."""
         self._take(actions)
-        if self._state_file is not None:
-            with self._state_file.open("a") as lines:
-                lines.writelines(f"{action.model_dump_json()}\n" for action in actions)
+        if self._state_file is None:
+            return
+        if any(isinstance(action.body, Clear) for action in actions):
+            self.compact()
+            return
+        with self._state_file.open("a") as lines:
+            lines.writelines(f"{action.model_dump_json()}\n" for action in actions)
+
+    def compact(self) -> None:
+        """Write the board at the start of the user's turn to the snapshot file, and only the turn to the state file."""
+        if self._state_file is None:
+            return
+        self._state_file.parent.mkdir(parents=True, exist_ok=True)
+        snapshot = snapshot_of(self._state_file)
+        fresh = snapshot.with_name(f"{snapshot.name}.new")
+        fresh.write_text(self._turn_board.model_dump_json())
+        fresh.replace(snapshot)
+        with self._state_file.open("w") as lines:
+            lines.writelines(f"{action.model_dump_json()}\n" for action in self.log.actions[self._turn_start() :])
 
     def snapshot(self) -> Snapshot:
         match self.monitors, self.working:
@@ -111,6 +139,9 @@ class Hud:
             if action.author is Author.user
         }
         self.board = boards[-1]
+        for n, action in enumerate(actions, start=1):
+            if action.ends_turn:
+                self._turn_board = boards[n]
         self.log.extend(actions)
         if any(action.author is Author.agent for action in actions):
             self.working = False

@@ -249,13 +249,17 @@ def turns(draw: st.DrawFn) -> list[tuple[Author, list[TBody]]]:
 @given(turns())
 @settings(deadline=None, max_examples=50)
 async def test_the_page_and_the_agent_agree_after_each_turn(
-    static_dir: Path, turns: list[tuple[Author, list[TBody]]]
+    static_dir: Path, state_dir: Path, turns: list[tuple[Author, list[TBody]]]
 ) -> None:
     """Assemble: a new board, a page and an agent with a monitor.
     Act: the user and the agent take turns; the page sends each of the user's actions alone, and the agent writes each turn in one call.
     Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each action that the board took from the user, in order."""
     taken: list[str] = []
-    async with serve(Hud(), static_dir) as address, open_agent(address) as agent, open_page(address) as user:
+    async with (
+        serve(Hud(), static_dir, state_dir) as address,
+        open_agent(address) as agent,
+        open_page(address) as user,
+    ):
         for author, batch in turns:
             match author:
                 case Author.user:
