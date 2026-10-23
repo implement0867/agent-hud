@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { CardBody } from "~/components/CardBody";
 import { reactionTones, reactionsOf } from "~/lib/reactions";
 import { ToolContext, readOnlyTools, useTools } from "~/lib/whiteboard";
+import { ActionKind } from "~/schemas/actions";
 import type { TThread } from "~/schemas/board";
 
 /** The reaction of each author and the comments of each part of an earlier version. */
@@ -33,7 +34,7 @@ const Threads = ({ threads }: { threads: Record<string, TThread> }) => {
   );
 };
 
-/** The earlier versions of one card, or of all cards, newest first, each with the feedback it had. */
+/** The earlier versions of one card, or of all cards, newest first, each with the feedback it had; a removed card has Restore. */
 export const HistoryDrawer = ({
   card,
   choose,
@@ -44,8 +45,11 @@ export const HistoryDrawer = ({
   close: () => void;
 }) => {
   const tools = useTools();
-  const { board } = tools;
+  const { board, act } = tools;
   const ids = card === null ? Object.keys(board.history) : [card];
+  const removed = (id: string, number: number) =>
+    !Object.hasOwn(board.cards, id) &&
+    number === (board.history[id]?.length ?? 0);
   return (
     <aside
       aria-label="History"
@@ -96,12 +100,23 @@ export const HistoryDrawer = ({
                   <span>
                     {id} · v{number}
                   </span>
-                  <span>
-                    {Object.hasOwn(board.cards, id) ||
-                    number < (board.history[id]?.length ?? 0)
-                      ? "replaced"
-                      : "removed"}
-                  </span>
+                  {removed(id, number) ? (
+                    <span className="flex gap-2">
+                      removed
+                      <button
+                        type="button"
+                        aria-label={`Restore ${id}`}
+                        className="font-semibold text-sky-700 hover:underline"
+                        onClick={() => {
+                          void act({ kind: ActionKind.enum.restore, id });
+                        }}
+                      >
+                        Restore
+                      </button>
+                    </span>
+                  ) : (
+                    <span>replaced</span>
+                  )}
                 </header>
                 <ToolContext value={readOnlyTools(tools, version)}>
                   <CardBody id={id} md={version.card.md} />

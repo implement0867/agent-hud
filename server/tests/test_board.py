@@ -10,7 +10,21 @@ from agent_hud.models.base import Model
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread, Version
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
-from tests.factories import clear, comment, fill, link, move, place, put, react, remove, say, unlink, unreact
+from tests.factories import (
+    clear,
+    comment,
+    fill,
+    link,
+    move,
+    place,
+    put,
+    react,
+    remove,
+    restore,
+    say,
+    unlink,
+    unreact,
+)
 from tests.strategies import (
     action_ids,
     actions,
@@ -69,9 +83,13 @@ def test_put_sets_the_card_and_keeps_the_feedback_whose_part_text_is_unchanged(
 ) -> None:
     """Assemble: any board.
     Act: put a card.
-    Assert: the card has the markdown and author, the rest of the board is unchanged, and each thread that was on the card is on a part of the new card with the same text, or else in the version the put added to the card's history."""
+    Assert: the card has the markdown; it has the author, or keeps the author of the card it replaces and counts as edited when that author differs; the rest of the board is unchanged, and each thread that was on the card is on a part of the new card with the same text, or else in the version the put added to the card's history."""
     after = act(board, put(card_id, md), author)
-    assert after.cards[card_id] == Card(md=md, author=author)
+    old = board.cards.get(card_id)
+    expected = (
+        Card(md=md, author=author) if old is None else Card(md=md, author=old.author, edited=author != old.author)
+    )
+    assert after.cards[card_id] == expected
     assert outside(after, card_id) == outside(board, card_id)
     if card_id not in board.cards:
         assert after.history.get(card_id, ()) == board.history.get(card_id, ())
@@ -84,6 +102,36 @@ def test_put_sets_the_card_and_keeps_the_feedback_whose_part_text_is_unchanged(
     assert sorted(on_card.values(), key=str) == sorted([*kept.values(), *version.threads.values()], key=str)
     texts = [text_of(board, ref) for ref in on_card]
     assert all(text_of(after, ref) in texts for ref in kept)
+
+
+@given(boards(), card_ids(), mds(), st.integers(min_value=0, max_value=3))
+def test_put_with_a_version_replaces_the_card_at_that_version_or_raises(
+    board: Board, card_id: str, md: str, version: int
+) -> None:
+    """Assemble: any board.
+    Act: put a card with the number of earlier versions it is expected to have, as the page's editor does.
+    Assert: the same board as a put without the number when the card is on the board with that many earlier versions, or ValueError that names the card."""
+    earlier = len(board.history.get(card_id, ()))
+    if card_id in board.cards and earlier == version:
+        assert act(board, put(card_id, md, version)) == act(board, put(card_id, md))
+    else:
+        with pytest.raises(ValueError, match=f"card '{card_id}'"):
+            act(board, put(card_id, md, version))
+
+
+@given(boards(), card_ids())
+def test_restore_puts_the_last_version_of_a_removed_card_back_or_raises(board: Board, card_id: str) -> None:
+    """Assemble: any board.
+    Act: restore a card.
+    Assert: a removed card is back as its last version was, with the history as it was, or ValueError when the card is on the board or was never there."""
+    if card_id not in board.cards and board.history.get(card_id):
+        after = act(board, restore(card_id))
+        assert after.cards[card_id] == board.history[card_id][-1].card
+        assert after.history == board.history
+        assert outside(after, card_id) == outside(board, card_id)
+    else:
+        with pytest.raises(ValueError, match=f"card '{card_id}'"):
+            act(board, restore(card_id))
 
 
 @given(boards())

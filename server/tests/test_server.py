@@ -161,7 +161,7 @@ async def test_write_lists_one_object_for_all_kinds_of_action(client: Client[Any
     assert "oneOf" not in item, "a oneOf with an object for each kind costs the agent more tokens"
     pages = (ActionKind.place, ActionKind.send)
     assert item["properties"]["kind"]["enum"] == [kind for kind in ActionKind if kind not in pages]
-    assert "put {id, md}" in (write.description or "")
+    assert "put {id, md, version?}" in (write.description or "")
     assert "link {id, src, dst, text?}" in (write.description or "")
 
 

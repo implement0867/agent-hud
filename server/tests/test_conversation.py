@@ -165,7 +165,7 @@ async def test_the_user_and_the_agent_discuss_code_with_arrows(agent: Agent, use
 async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, user: User) -> None:
     """Assemble: a board with an agent's plan card and an arrow from it to the user's note.
     Act: the user writes a note, places it, edits the agent's card and then removes the note.
-    Assert: the agent hears each action but the move, with the edit as a diff, and reads the user as the author of the note and of the edited card, whose arrow is gone."""
+    Assert: the agent hears each action but the move, with the edit as a diff, and reads the user as the author of the note and the edited card as the agent's, edited, with its arrow gone."""
     note = [put("note", "Also check the docs"), move("note", 40, 300), say("see my note")]
     assert kinds([await user.act(body) for body in note]) == [EventKind.accepted] * len(note)
     assert await agent.hear() == [note[0], note[2]]
@@ -180,7 +180,10 @@ async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, use
     assert await agent.hear() == [Edit(kind="edit", id="plan", diff=diff), remove("note")]
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
-    assert ({k: v.author for k, v in board.cards.items()}, board.arrows) == ({"plan": Author.user}, {})
+    assert ({k: (v.author, v.edited) for k, v in board.cards.items()}, board.arrows) == (
+        {"plan": (Author.agent, True)},
+        {},
+    )
 
 
 async def test_a_click_on_a_part_that_the_agent_just_removed_is_rejected(agent: Agent, user: User) -> None:

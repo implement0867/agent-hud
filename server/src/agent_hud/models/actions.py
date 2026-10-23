@@ -26,6 +26,7 @@ class Reaction(StrEnum):
 class ActionKind(StrEnum):
     put = "put"
     remove = "remove"
+    restore = "restore"
     react = "react"
     unreact = "unreact"
     comment = "comment"
@@ -43,10 +44,22 @@ class Put(Model):
     kind: Literal[ActionKind.put]
     id: TCardId = Field(description="Card id, such as plan")
     md: str = Field(min_length=1, description="Markdown shown on the card")
+    version: int | None = Field(
+        default=None,
+        ge=0,
+        description="The number of earlier versions the card has, as its history counts them; the put is refused when the card has another number or is gone, so that an edit does not replace a newer card. Without it, the put replaces whatever is there",
+    )
 
 
 class Remove(Model):
     kind: Literal[ActionKind.remove]
+    id: TCardId
+
+
+class Restore(Model):
+    """The last version of a removed card, back on the board as it was; its history stays."""
+
+    kind: Literal[ActionKind.restore]
     id: TCardId
 
 
@@ -127,11 +140,12 @@ class Send(Model):
 
 
 type TAgentBody = Annotated[
-    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Clear, Discriminator("kind")
+    Put | Remove | Restore | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Clear,
+    Discriminator("kind"),
 ]
 """An action of the agent: each kind but place and send, which only the user's page sends."""
 type TBody = Annotated[
-    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Place | Clear | Send,
+    Put | Remove | Restore | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Place | Clear | Send,
     Discriminator("kind"),
 ]
 

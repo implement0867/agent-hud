@@ -14,6 +14,7 @@ from agent_hud.models.actions import (
     React,
     Reaction,
     Remove,
+    Restore,
     Say,
     Send,
     TBody,
@@ -25,12 +26,16 @@ from agent_hud.models.board import Board
 from agent_hud.server import Reading
 
 
-def put(card_id: str, md: str) -> Put:
-    return Put(kind=ActionKind.put, id=card_id, md=md)
+def put(card_id: str, md: str, version: int | None = None) -> Put:
+    return Put(kind=ActionKind.put, id=card_id, md=md, version=version)
 
 
 def remove(card_id: str) -> Remove:
     return Remove(kind=ActionKind.remove, id=card_id)
+
+
+def restore(card_id: str) -> Restore:
+    return Restore(kind=ActionKind.restore, id=card_id)
 
 
 def react(ref: str, reaction: Reaction) -> React:

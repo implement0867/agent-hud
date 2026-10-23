@@ -5,6 +5,7 @@ export const Reaction = z.enum(["approve", "reject", "question"]);
 export const ActionKind = z.enum([
   "put",
   "remove",
+  "restore",
   "react",
   "unreact",
   "comment",
@@ -32,8 +33,10 @@ export const bodySchema = z.discriminatedUnion("kind", [
     kind: z.literal(ActionKind.enum.put),
     id: z.string(),
     md: z.string().min(1),
+    version: z.number().int().nonnegative().optional(),
   }),
   z.strictObject({ kind: z.literal(ActionKind.enum.remove), id: z.string() }),
+  z.strictObject({ kind: z.literal(ActionKind.enum.restore), id: z.string() }),
   z.strictObject({
     kind: z.literal(ActionKind.enum.react),
     ref: z.string(),
