@@ -240,7 +240,7 @@ export const CardFrame = ({
             warning={
               feedback === 0
                 ? null
-                : `saving moves the feedback on ${String(feedback)} ${feedback === 1 ? "part" : "parts"} to the history`
+                : "saving moves the feedback on the parts you change to the history"
             }
             save={(md) => {
               void save(md);

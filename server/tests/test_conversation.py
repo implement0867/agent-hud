@@ -34,9 +34,9 @@ def kinds(answers: list[Accepted | Rejected]) -> list[EventKind]:
 
 
 def feedback(board: Board | Version) -> dict[str, tuple[Reaction | None, list[tuple[Author, str]]]]:
-    """The reaction and the comments, by author and text, of each thread."""
+    """The user's reaction and the comments, by author and text, of each thread."""
     return {
-        ref: (thread.reaction, [(said.author, said.text) for said in thread.comments])
+        ref: (thread.reactions.get(Author.user), [(said.author, said.text) for said in thread.comments])
         for ref, thread in board.threads.items()
     }
 
@@ -44,7 +44,7 @@ def feedback(board: Board | Version) -> dict[str, tuple[Reaction | None, list[tu
 async def test_the_agent_revises_a_plan_from_the_users_feedback(agent: Agent, user: User) -> None:
     """Assemble: the agent puts a plan of three steps and asks the user to review it.
     Act: the user reacts to each step, comments on two and sends; the agent answers a question, puts a new plan, and the user approves it with a message.
-    Assert: after each turn the agent hears the user's actions in order and reads the board that the page shows, the chat has the messages and comments in order, and the old plan has the old feedback in its history."""
+    Assert: after each turn the agent hears the user's actions in order and reads the board that the page shows, the chat has the messages and comments in order, the feedback on the unchanged step stays, and the old plan has the rest in its history."""
     await agent.write(put("plan", "1. parse\n2. rewrite the cache\n3. render"), say("Review the plan"))
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
@@ -77,23 +77,29 @@ async def test_the_agent_revises_a_plan_from_the_users_feedback(agent: Agent, us
     await agent.write(put("plan", "1. parse\n2. keep the cache\n3. render in the browser"), say("I kept the cache"))
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
-    assert (board.threads, [said.text for said in board.messages]) == (
-        {},
+    assert (feedback(board), [said.text for said in board.messages]) == (
+        {"plan/1": (Reaction.approve, [])},
         ["Review the plan", "the cache is shared", "render where?", "in the browser", "I kept the cache"],
     )
     old = (await read_board(agent.tools, history=True)).history["plan"][-1]
-    assert (old.card.md, feedback(old)) == ("1. parse\n2. rewrite the cache\n3. render", feedback(board_before))
+    assert (old.card.md, feedback(old)) == (
+        "1. parse\n2. rewrite the cache\n3. render",
+        {ref: found for ref, found in feedback(board_before).items() if ref != "plan/1"},
+    )
 
     approval = [react("plan", Reaction.approve), say("go ahead")]
     assert kinds([await user.act(body) for body in approval]) == [EventKind.accepted] * len(approval)
     assert await agent.hear() == approval
-    assert (await read_board(agent.tools, history=True)).threads == {"plan": Thread(reaction=Reaction.approve)}
+    assert (await read_board(agent.tools, history=True)).threads == {
+        "plan/1": Thread(reactions={Author.user: Reaction.approve}),
+        "plan": Thread(reactions={Author.user: Reaction.approve}),
+    }
 
 
 async def test_the_agent_hears_only_the_values_that_fit_their_columns(agent: Agent, user: User) -> None:
     """Assemble: the agent puts a table of tasks with a size, hours and done column.
-    Act: the user fills cells with values that fit and values that do not, and clears one; then the agent adds a row.
-    Assert: the board rejects each value that does not fit, the agent hears and reads only the others, and the new card has no values."""
+    Act: the user fills cells with values that fit and values that do not, and clears one; then the agent adds a row, and changes the Hours column to a check column.
+    Assert: the board rejects each value that does not fit, the agent hears and reads only the others, the card with the new row keeps them, and the card with the changed column keeps the values that fit their columns."""
     table = "| Task | Size {S, M, L} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n| render | | | |"
     await agent.write(put("tasks", table))
 
@@ -116,7 +122,11 @@ async def test_the_agent_hears_only_the_values_that_fit_their_columns(agent: Age
 
     await agent.write(put("tasks", f"{table}\n| test | | | |"))
     board = await read_board(agent.tools, history=True)
-    assert (await user.sees(board)).values == {}
+    assert (await user.sees(board)).values == {"tasks/1/2": "M", "tasks/1/3": None, "tasks/2/4": True}
+
+    await agent.write(put("tasks", table.replace("Hours {number}", "Hours {check}")))
+    board = await read_board(agent.tools, history=True)
+    assert (await user.sees(board)).values == {"tasks/1/2": "M", "tasks/1/3": None, "tasks/2/4": True}
 
 
 async def test_the_user_and_the_agent_discuss_code_with_arrows(agent: Agent, user: User) -> None:

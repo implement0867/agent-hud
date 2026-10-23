@@ -71,6 +71,7 @@ export const requestSchema = z.strictObject({
   body: bodySchema,
 });
 
+export type TAuthor = z.infer<typeof Author>;
 export type TReaction = z.infer<typeof Reaction>;
 export type TBody = z.infer<typeof bodySchema>;
 export type TValue = z.infer<typeof valueSchema>;

@@ -12,7 +12,7 @@ const saidSchema = z.strictObject({
 });
 
 const threadSchema = z.strictObject({
-  reaction: Reaction.nullable(),
+  reactions: z.partialRecord(Author, Reaction),
   comments: z.array(saidSchema),
 });
 
