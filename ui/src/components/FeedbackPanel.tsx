@@ -1,7 +1,12 @@
 import { Bot, SendHorizontal, Spline, User, X } from "lucide-react";
 import { useState } from "react";
 
-import { reactionIcons, reactionKeys, reactionTones } from "~/lib/reactions";
+import {
+  reactionIcons,
+  reactionKeys,
+  reactionTones,
+  userReaction,
+} from "~/lib/reactions";
 import { splitRefs, useTools } from "~/lib/whiteboard";
 import { ActionKind, Author, Reaction, messageSchema } from "~/schemas/actions";
 import type { TSaid } from "~/schemas/board";
@@ -126,7 +131,8 @@ export const Composer = ({
 export const FeedbackPanel = ({ target }: { target: string }) => {
   const { board, act, select } = useTools();
   const thread = board.threads[target];
-  const reaction = thread?.reaction ?? null;
+  const reaction = userReaction(thread);
+  const agents = thread?.reactions.agent;
   return (
     <section
       aria-label={`Feedback on ${target}`}
@@ -186,6 +192,17 @@ export const FeedbackPanel = ({ target }: { target: string }) => {
           );
         })}
       </div>
+      {agents !== undefined && (
+        <p className="mb-2 flex items-center gap-1.5 text-xs text-stone-500">
+          <Bot className="size-3.5" />
+          the agent says{" "}
+          <span
+            className={`rounded-full px-1.5 py-px ${reactionTones[agents]}`}
+          >
+            {agents}
+          </span>
+        </p>
+      )}
       {(thread?.comments.length ?? 0) > 0 && (
         <ul className="mb-2 flex max-h-64 flex-col gap-1.5 overflow-y-auto">
           {thread?.comments.map((said) => (

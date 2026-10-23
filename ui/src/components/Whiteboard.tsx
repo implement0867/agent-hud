@@ -8,7 +8,7 @@ import { CardFrame, Editor } from "~/components/CardFrame";
 import { Chat } from "~/components/Chat";
 import { FeedbackPanel } from "~/components/FeedbackPanel";
 import { HistoryDrawer } from "~/components/HistoryDrawer";
-import { reactionKeys } from "~/lib/reactions";
+import { reactionKeys, userReaction } from "~/lib/reactions";
 import { Toolbar } from "~/components/Toolbar";
 import {
   centreOn,
@@ -312,7 +312,7 @@ export const Whiteboard = ({
       const thread = board.threads[selectedRef];
       if (reaction !== undefined)
         void act(
-          thread?.reaction === reaction
+          userReaction(thread) === reaction
             ? { kind: ActionKind.enum.unreact, ref: selectedRef }
             : { kind: ActionKind.enum.react, ref: selectedRef, reaction },
         );

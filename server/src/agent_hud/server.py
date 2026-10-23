@@ -10,20 +10,33 @@ from pydantic import Field, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Put, TBody, TCardId
+from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Put, TAgentBody, TCardId, TRef, Unlink
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
 from agent_hud.schema import compact
 
-type TActions = Annotated[list[TBody], Field(min_length=1)]
+type TActions = Annotated[list[TAgentBody], Field(min_length=1)]
 type TParts = dict[TCardId, dict[str, str]]
 
-BodyAdapter = TypeAdapter[TBody](TBody)
+BodyAdapter = TypeAdapter[TAgentBody](TAgentBody)
+
+
+def agent_kinds() -> list[ActionKind]:
+    """The kinds of action the agent writes: each kind but send, which is the page's."""
+    return [kind for kind in ActionKind if kind is not ActionKind.send]
 
 
 class Written(Model):
-    """What a write made: the parts of each card it put."""
+    """What a write made and what it moved aside."""
 
+    added: list[TCardId] = Field(description="The cards the write put that were not on the board")
+    replaced: list[TCardId] = Field(description="The cards the write put in place of the card with that id")
+    retired: list[TRef] = Field(
+        description="The parts whose feedback moved to the history, since the write changed or removed them"
+    )
+    dropped: list[TCardId] = Field(
+        description="The arrows the write dropped, since an end of each was on a changed part"
+    )
     parts: TParts = Field(description="The text of each part of each card the write put, by card id and part number")
 
 
@@ -33,7 +46,7 @@ class Reading(Board):
     parts: TParts = Field(description="The text of each part of each card, by card id and part number")
 
 
-def put_ids(bodies: list[TBody]) -> Iterator[TCardId]:
+def put_ids(bodies: list[TAgentBody]) -> Iterator[TCardId]:
     """The id of each card that the actions put."""
     for body in bodies:
         match body:
@@ -43,14 +56,31 @@ def put_ids(bodies: list[TBody]) -> Iterator[TCardId]:
                 pass
 
 
-def parts_put(board: Board, bodies: list[TBody]) -> TParts:
-    """The parts of each card that the actions put, as the board has them after the actions."""
-    return {card_id: board.texts_of(card_id) for card_id in put_ids(bodies)}
+def unlinked(bodies: list[TAgentBody]) -> set[TCardId]:
+    """The id of each arrow that the actions unlink."""
+    return {body.id for body in bodies if isinstance(body, Unlink)}
+
+
+def written(before: Board, after: Board, bodies: list[TAgentBody]) -> Written:
+    """What the actions made of the board and moved aside, from the board before them and after."""
+    put = list(put_ids(bodies))
+    return Written(
+        added=[card_id for card_id in put if card_id not in before.cards],
+        replaced=[card_id for card_id in put if card_id in before.cards],
+        retired=[
+            ref
+            for card_id, versions in after.history.items()
+            for version in versions[len(before.history.get(card_id, ())) :]
+            for ref in version.threads
+        ],
+        dropped=[arrow_id for arrow_id in before.arrows if arrow_id not in {*after.arrows, *unlinked(bodies)}],
+        parts={card_id: after.texts_of(card_id) for card_id in put},
+    )
 
 
 def detail(error: ErrorDetails) -> str:
     """One validation error on an action, in a line: the field and what is wrong with it, or the kind that is not one."""
-    kinds = ", ".join(ActionKind)
+    kinds = ", ".join(agent_kinds())
     match error["type"], [str(part) for part in error["loc"]]:
         case "union_tag_invalid", _:
             return f"kind '{error.get('ctx', {}).get('tag')}' is not one of {kinds}"
@@ -64,16 +94,27 @@ def detail(error: ErrorDetails) -> str:
             return error["msg"]
 
 
-def parse(actions: list[dict[str, Any]]) -> list[TBody]:
-    """The actions as the model of their kind takes them. Misfit, with the index of the action, if one does not fit its kind."""
-    bodies: list[TBody] = []
+def parse(actions: list[dict[str, Any]]) -> list[TAgentBody]:
+    """
+    The actions as the model of their kind takes them.
+    Misfit, with the index of the action, if one does not fit its kind, or puts a card that an earlier one puts.
+    """
+    bodies: list[TAgentBody] = []
+    puts: dict[TCardId, int] = {}
     for n, action in enumerate(actions, start=1):
         try:
             bodies.append(BodyAdapter.validate_python(action))
         except ValidationError as error:
             kind = action.get("kind")
             reasons = ", ".join(detail(found) for found in error.errors())
-            raise Misfit(n, ActionKind(kind) if kind in list(ActionKind) else None, reasons) from error
+            raise Misfit(n, ActionKind(kind) if kind in agent_kinds() else None, reasons) from error
+        match bodies[-1]:
+            case Put(id=card_id) if card_id in puts:
+                raise Misfit(n, ActionKind.put, f"card '{card_id}' is already put by action {puts[card_id]}")
+            case Put(id=card_id):
+                puts[card_id] = n
+            case _:
+                pass
     return bodies
 
 
@@ -84,16 +125,18 @@ def build(hud: Hud) -> FastMCP:
     async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> Written:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
-        A put replaces the card and moves its feedback to the card's history.
+        A put replaces the card. Feedback on a part whose text is unchanged stays with it; the rest goes to the card's history.
         A ref is a card id, a part of the card such as plan/2, or an input cell such as plan/2/3.
-        Returns the parts of each card put, by number: use these numbers in refs.
+        Returns the cards added and replaced, the parts whose feedback went to the history, the arrows dropped,
+        and the parts of each card put, by number: use these numbers in refs.
         """
+        before = hud.board
         try:
             bodies = parse(actions)
             hud.act([Action(id=uuid4().hex, author=Author.agent, body=body) for body in bodies])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
-        return Written(parts=parts_put(hud.board, bodies))
+        return written(before, hud.board, bodies)
 
     def listed(actions: TActions) -> None:
         """The signature of write with the model of each kind of action, for the listed schema."""

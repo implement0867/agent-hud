@@ -78,17 +78,19 @@ class Point(Model):
 
 
 class Thread(Model):
-    """The reaction and comments on one part of the board."""
+    """The reaction of each author and the comments on one part of the board."""
 
-    reaction: Reaction | None = None
+    reactions: dict[Author, Reaction] = Field(default_factory=dict)
     comments: tuple[Said, ...] = ()
 
     def apply(self, action: Action) -> "Thread":
         match action.body:
             case React(reaction=reaction):
-                return self.model_copy(update={"reaction": reaction})
+                return self.model_copy(update={"reactions": {**self.reactions, action.author: reaction}})
             case Unreact():
-                return self.model_copy(update={"reaction": None})
+                return self.model_copy(
+                    update={"reactions": {k: v for k, v in self.reactions.items() if k != action.author}}
+                )
             case Comment(ref=ref, text=text):
                 said = Said(id=action.id, author=action.author, text=text, ref=ref)
                 return self.model_copy(update={"comments": (*self.comments, said)})
@@ -96,6 +98,20 @@ class Thread(Model):
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
+
+    def at(self, ref: TRef) -> "Thread":
+        """The thread with its comments on the part that ref names."""
+        return self.model_copy(
+            update={"comments": tuple(said.model_copy(update={"ref": ref}) for said in self.comments)}
+        )
+
+
+def matched(before: Outline, after: Outline) -> dict[str, str]:
+    """The path in the new outline of each part of the old one whose text is there, matched in order."""
+    free: dict[str, list[str]] = {}
+    for path, text in after.texts.items():
+        free.setdefault(text, []).append(path)
+    return {path: free[text].pop(0) for path, text in before.texts.items() if free.get(text)}
 
 
 class Version(Model):
@@ -146,7 +162,7 @@ class Board(Model):
                     card = Card(md=md, author=action.author)
                 except ValidationError as error:
                     raise ValueError(f"card '{card_id}': {one_line(error)}") from error
-                return self._retire(card_id).model_copy(update={"cards": {**self.cards, card_id: card}})
+                return self._revise(card_id, card)
             case Remove(id=card_id):
                 self._check_card(card_id)
                 cards = {k: v for k, v in self.cards.items() if k != card_id}
@@ -220,6 +236,79 @@ class Board(Model):
                 raise ValueError(f"no input '{ref}': the input columns of row '{card_id}/{row}' are {columns}")
             case found:
                 return found
+
+    def _revise(self, card_id: TCardId, card: Card) -> "Board":
+        """
+        The board with the card in place of the one with its id, if there was one.
+        The feedback on the parts whose text is unchanged follows them, matched by text in order, as do the values
+        whose column still takes them; the arrows at those parts and at the card itself stay. The rest of the feedback
+        goes to the card's history with the card as it was.
+        """
+        cards = {**self.cards, card_id: card}
+        if card_id not in self.cards:
+            return self.model_copy(update={"cards": cards})
+        old = self.cards[card_id]
+        after = Outline(card.md)
+        moved = {"": ""} if old.md == card.md else {}
+        moved |= matched(Outline(old.md), after)
+
+        def on_card(ref: TRef) -> bool:
+            return ref.partition("/")[0] == card_id
+
+        def follow(ref: TRef) -> TRef | None:
+            """The ref of the part on the new card, if its text is there; the card itself, if its markdown is unchanged."""
+            row, _, column = ref.partition("/")[2].partition("/")
+            if (new_row := moved.get(row)) is None:
+                return None
+            return "/".join(part for part in (card_id, new_row, column) if part)
+
+        threads: dict[TRef, Thread] = {}
+        gone_threads: dict[TRef, Thread] = {}
+        renamed: dict[TActionId, TRef] = {}
+        for ref, thread in self.threads.items():
+            if not on_card(ref):
+                threads[ref] = thread
+            elif (new := follow(ref)) is not None:
+                threads[new] = thread.at(new)
+                if new != ref:
+                    renamed |= {said.id: new for said in thread.comments}
+            else:
+                gone_threads[ref] = thread
+        values: dict[TRef, TValue] = {}
+        gone_values: dict[TRef, TValue] = {}
+        for ref, value in self.values.items():
+            if not on_card(ref):
+                values[ref] = value
+            elif (
+                (new := follow(ref)) is not None
+                and (column := after.inputs.get(new.partition("/")[2]))
+                and column.fits(value)
+            ):
+                values[new] = value
+            else:
+                gone_values[ref] = value
+        arrows: dict[TCardId, Arrow] = {}
+        for arrow_id, arrow in self.arrows.items():
+            ends = [ref if ref == card_id or not on_card(ref) else follow(ref) for ref in (arrow.src, arrow.dst)]
+            match ends:
+                case [str() as src, str() as dst]:
+                    arrows[arrow_id] = arrow.model_copy(update={"src": src, "dst": dst})
+                case _:
+                    pass
+        version = Version(card=old, threads=gone_threads, values=gone_values)
+        return self.model_copy(
+            update={
+                "cards": cards,
+                "threads": threads,
+                "values": values,
+                "arrows": arrows,
+                "messages": tuple(
+                    said.model_copy(update={"ref": renamed[said.id]}) if said.id in renamed else said
+                    for said in self.messages
+                ),
+                "history": {**self.history, card_id: (*self.history.get(card_id, ()), version)},
+            }
+        )
 
     def _retire(self, card_id: TCardId) -> "Board":
         """The board without the threads, values and arrows on the card, and with the card and its feedback in its history."""

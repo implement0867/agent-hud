@@ -10,7 +10,7 @@ import {
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { reactionIcons, reactionTones } from "~/lib/reactions";
+import { reactionIcons, reactionTones, reactionsOf } from "~/lib/reactions";
 import { useTools } from "~/lib/whiteboard";
 import { Reaction } from "~/schemas/actions";
 
@@ -41,7 +41,7 @@ const ToolButton = ({
 
 const Divider = () => <span className="mx-1 h-5 w-px bg-stone-200" />;
 
-/** A chip for each kind of feedback on the board; a click shows the next part with it. */
+/** A chip for each kind of feedback on the board, by either author; a click shows the next part with it. */
 const Tally = ({ show }: { show: (ref: string) => void }) => {
   const { board } = useTools();
   const [turn, setTurn] = useState(0);
@@ -52,7 +52,9 @@ const Tally = ({ show }: { show: (ref: string) => void }) => {
       Icon: reactionIcons[reaction],
       tone: reactionTones[reaction],
       refs: threads
-        .filter(([, thread]) => thread.reaction === reaction)
+        .filter(([, thread]) =>
+          reactionsOf(thread).some(([, reacted]) => reacted === reaction),
+        )
         .map(([ref]) => ref),
     })),
     {

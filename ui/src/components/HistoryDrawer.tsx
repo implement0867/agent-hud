@@ -1,11 +1,11 @@
 import { X } from "lucide-react";
 
 import { CardBody } from "~/components/CardBody";
-import { reactionTones } from "~/lib/reactions";
+import { reactionTones, reactionsOf } from "~/lib/reactions";
 import { ToolContext, readOnlyTools, useTools } from "~/lib/whiteboard";
 import type { TThread } from "~/schemas/board";
 
-/** The reaction and comments of each part of an earlier version. */
+/** The reaction of each author and the comments of each part of an earlier version. */
 const Threads = ({ threads }: { threads: Record<string, TThread> }) => {
   const entries = Object.entries(threads);
   if (entries.length === 0) return null;
@@ -14,13 +14,14 @@ const Threads = ({ threads }: { threads: Record<string, TThread> }) => {
       {entries.map(([ref, thread]) => (
         <li key={ref}>
           <span className="font-mono text-stone-500">{ref}</span>
-          {thread.reaction !== null && (
+          {reactionsOf(thread).map(([author, reaction]) => (
             <span
-              className={`ml-1.5 rounded-full px-1.5 py-px ${reactionTones[thread.reaction]}`}
+              key={author}
+              className={`ml-1.5 rounded-full px-1.5 py-px ${reactionTones[reaction]}`}
             >
-              {thread.reaction}
+              {author}: {reaction}
             </span>
-          )}
+          ))}
           {thread.comments.map((said) => (
             <p key={said.id} className="mt-0.5 text-stone-700">
               <span className="text-stone-400">{said.author}:</span> {said.text}

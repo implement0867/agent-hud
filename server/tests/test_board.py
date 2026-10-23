@@ -57,20 +57,33 @@ def retired(board: Board, card_id: str) -> tuple[Version, ...]:
     return (*board.history.get(card_id, ()), version)
 
 
+def text_of(board: Board, ref: str) -> str:
+    """The text of the part, or the markdown of the card when the ref is a card id."""
+    card_id, _, path = ref.partition("/")
+    return board.texts_of(card_id)[path] if path else board.cards[card_id].md
+
+
 @given(boards(), card_ids(), mds(), st.from_type(Author))
-def test_put_sets_the_card_and_moves_its_feedback_to_its_history(
+def test_put_sets_the_card_and_keeps_the_feedback_whose_part_text_is_unchanged(
     board: Board, card_id: str, md: str, author: Author
 ) -> None:
     """Assemble: any board.
     Act: put a card.
-    Assert: the card has the markdown and author and no threads, the card as it was is last in its history with its threads and values, and the rest of the board is unchanged."""
+    Assert: the card has the markdown and author, the rest of the board is unchanged, and each thread that was on the card is on a part of the new card with the same text, or else in the version the put added to the card's history."""
     after = act(board, put(card_id, md), author)
     assert after.cards[card_id] == Card(md=md, author=author)
     assert outside(after, card_id) == outside(board, card_id)
-    assert not any(ref.partition("/")[0] == card_id for ref in after.threads)
-    assert after.history.get(card_id, ()) == (
-        retired(board, card_id) if card_id in board.cards else board.history.get(card_id, ())
-    )
+    if card_id not in board.cards:
+        assert after.history.get(card_id, ()) == board.history.get(card_id, ())
+        return
+    assert after.history[card_id][:-1] == board.history.get(card_id, ())
+    version = after.history[card_id][-1]
+    assert version.card == board.cards[card_id]
+    on_card = {ref: thread for ref, thread in board.threads.items() if ref.partition("/")[0] == card_id}
+    kept = {ref: thread for ref, thread in after.threads.items() if ref.partition("/")[0] == card_id}
+    assert sorted(on_card.values(), key=str) == sorted([*kept.values(), *version.threads.values()], key=str)
+    texts = [text_of(board, ref) for ref in on_card]
+    assert all(text_of(after, ref) in texts for ref in kept)
 
 
 @given(boards(), card_ids())
@@ -146,8 +159,19 @@ def test_react_then_unreact_sets_then_clears_the_reaction(
     Assert: the thread has the reaction, then none."""
     board = act(Board(), put(card_id, md))
     reacted = act(board, react(card_id, reaction), author)
-    assert reacted.threads == {card_id: Thread(reaction=reaction)}
+    assert reacted.threads == {card_id: Thread(reactions={author: reaction})}
     assert act(reacted, unreact(card_id), author).threads == {card_id: Thread()}
+
+
+@given(card_ids(), mds(), st.from_type(Reaction), st.from_type(Reaction))
+def test_each_author_has_their_own_reaction(card_id: str, md: str, users: Reaction, agents: Reaction) -> None:
+    """Assemble: a board with a card that the user reacted to.
+    Act: the agent reacts to it, then unreacts.
+    Assert: the thread has both reactions by author, then the user's alone."""
+    board = act(act(Board(), put(card_id, md)), react(card_id, users), Author.user)
+    both = act(board, react(card_id, agents), Author.agent)
+    assert both.threads == {card_id: Thread(reactions={Author.user: users, Author.agent: agents})}
+    assert act(both, unreact(card_id), Author.agent).threads == {card_id: Thread(reactions={Author.user: users})}
 
 
 @given(card_ids(), mds(), st.lists(st.tuples(action_ids(), st.from_type(Author), messages()), min_size=1))
@@ -312,10 +336,12 @@ def test_outline_has_an_input_for_each_cell_of_an_input_column(texts: list[str],
 
 
 @given(card_ids(), tables(), st.from_type(Author))
-def test_fill_sets_a_fitting_value_and_put_clears_it(card_id: str, rows: list[list[str]], author: Author) -> None:
+def test_fill_sets_a_fitting_value_and_a_put_of_a_changed_row_clears_it(
+    card_id: str, rows: list[list[str]], author: Author
+) -> None:
     """Assemble: a card of a table with a select column, then a static column.
-    Act: fill a cell of each column with an option, and fill the select cell with a value that is not an option; then put the card again.
-    Assert: the select cell takes the option, the others raise ValueError, and the put clears the value."""
+    Act: fill a cell of each column with an option, and fill the select cell with a value that is not an option; then put the card again as it is, and with another text in each row.
+    Assert: the select cell takes the option, the others raise ValueError, the put as it is keeps the value, and the put of the changed rows moves it to the history."""
     md = table_md([[*row, "x"] for row in rows], [" {a, b}"])
     board = act(Board(), put(card_id, md))
     filled = act(board, fill(f"{card_id}/1/1", "a"), author)
@@ -323,7 +349,69 @@ def test_fill_sets_a_fitting_value_and_put_clears_it(card_id: str, rows: list[li
     for body in fill(f"{card_id}/1/1", "c"), fill(f"{card_id}/1/{len(rows[0]) + 1}", "a"), fill(f"{card_id}/1", "a"):
         with pytest.raises(ValueError):
             act(board, body)
-    assert act(filled, put(card_id, md)).values == {}
+    assert act(filled, put(card_id, md)).values == {f"{card_id}/1/1": "a"}
+    changed = table_md([[*row, "y"] for row in rows], [" {a, b}"])
+    assert act(filled, put(card_id, changed)).values == {}
+    assert act(filled, put(card_id, changed)).history[card_id][-1].values == {f"{card_id}/1/1": "a"}
+
+
+def test_a_value_follows_its_row_while_its_column_takes_it() -> None:
+    """Assemble: a card of a table of two rows with a number column, with a value in the second row.
+    Act: put the table with the rows swapped, then with the number column as a check column.
+    Assert: the value is on the first row, then gone to the history."""
+    board = act(Board(), put("t", "| task | hours {number} |\n|---|---|\n| parse | |\n| render | |"))
+    filled = act(board, fill("t/2/2", 3))
+    swapped = act(filled, put("t", "| task | hours {number} |\n|---|---|\n| render | |\n| parse | |"))
+    assert swapped.values == {"t/1/2": 3}
+    checks = act(swapped, put("t", "| task | done {check} |\n|---|---|\n| render | |\n| parse | |"))
+    assert (checks.values, checks.history["t"][-1].values) == ({}, {"t/1/2": 3})
+
+
+def test_a_put_keeps_the_feedback_on_the_parts_whose_text_it_keeps() -> None:
+    """Assemble: a card of three items with a reaction on each, a comment on the first and on the card, and an arrow from the first to the third.
+    Act: put the card with the second item changed and the first and third swapped.
+    Assert: the feedback on the first and third items follows them to their new numbers, with the comment's ref in the thread and in the chat, the arrow follows them, and the second item's reaction and the card's comment go to the history."""
+    board = act(Board(), put("plan", "1. parse\n2. rewrite the cache\n3. render"))
+    for n, reaction in enumerate([Reaction.approve, Reaction.reject, Reaction.question], start=1):
+        board = act(board, react(f"plan/{n}", reaction))
+    board = act(board, comment("plan/1", "fast?"), action_id="c1")
+    board = act(board, comment("plan", "looks ok"), action_id="c2")
+    board = act(board, link("why", "plan/1", "plan/3"))
+    after = act(board, put("plan", "1. render\n2. keep the cache\n3. parse"))
+    assert after.threads == {
+        "plan/3": Thread(
+            reactions={Author.user: Reaction.approve},
+            comments=(Said(id="c1", author=Author.user, text="fast?", ref="plan/3"),),
+        ),
+        "plan/1": Thread(reactions={Author.user: Reaction.question}),
+    }
+    assert [said.ref for said in after.messages] == ["plan/3", "plan"]
+    assert after.arrows == {"why": Arrow(src="plan/3", dst="plan/1", text="", author=Author.user)}
+    assert after.history["plan"][-1] == Version(
+        card=board.cards["plan"],
+        threads={
+            "plan/2": Thread(reactions={Author.user: Reaction.reject}),
+            "plan": Thread(comments=(Said(id="c2", author=Author.user, text="looks ok", ref="plan"),)),
+        },
+    )
+
+
+def test_a_put_of_the_same_markdown_keeps_all_the_feedback() -> None:
+    """Assemble: a card with a reaction on it and on an item.
+    Act: put the card with the same markdown.
+    Assert: the threads are unchanged, and the version in the history has none."""
+    board = act(act(act(Board(), put("a", "1. x")), react("a", Reaction.approve)), react("a/1", Reaction.reject))
+    after = act(board, put("a", "1. x"))
+    assert after.threads == board.threads
+    assert after.history["a"] == (Version(card=board.cards["a"]),)
+
+
+def test_parts_with_the_same_text_match_in_order() -> None:
+    """Assemble: a card of two items of the same text, with a reaction on the second.
+    Act: put the card with a new first item and the two items after it.
+    Assert: the reaction is on the third item, which is the second of the same text."""
+    board = act(act(Board(), put("a", "1. x\n2. x")), react("a/2", Reaction.approve))
+    assert list(act(board, put("a", "1. y\n2. x\n3. x")).threads) == ["a/3"]
 
 
 @pytest.mark.parametrize("header", ["pick {}", "pick {only}"])
@@ -369,15 +457,17 @@ def test_unlink_of_no_arrow_raises(arrow_id: str) -> None:
         act(Board(), unlink(arrow_id))
 
 
-@pytest.mark.parametrize("body", [put("a", "1. y"), remove("a")])
-def test_put_or_remove_drops_the_arrows_that_touch_the_card(body: TBody) -> None:
-    """Assemble: a board with arrows from card a to card b, within b, and from b to a.
-    Act: put or remove card a.
-    Assert: only the arrow within b stays."""
+@pytest.mark.parametrize(
+    ("body", "stay"), [(put("a", "1. y"), ["bb", "ba"]), (remove("a"), ["bb"])], ids=["put", "remove"]
+)
+def test_put_or_remove_drops_the_arrows_at_the_parts_it_changes(body: TBody, stay: list[str]) -> None:
+    """Assemble: a board with arrows from a part of card a to card b, within b, and from b to card a.
+    Act: put card a with the part changed, or remove card a.
+    Assert: the put keeps the arrow within b and the one to card a; the remove keeps only the one within b."""
     board = act(act(Board(), put("a", "1. x")), put("b", "1. x"))
     for arrow_id, src, dst in ("ab", "a/1", "b"), ("bb", "b", "b/1"), ("ba", "b/1", "a"):
         board = act(board, link(arrow_id, src, dst))
-    assert list(act(board, body).arrows) == ["bb"]
+    assert list(act(board, body).arrows) == stay
 
 
 TABLE = "1. a\n2. b\n\n| task | size {S, M, L} | done {check} |\n|---|---|---|\n| x | | |"

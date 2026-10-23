@@ -96,8 +96,8 @@ class Unlink(Model):
 class Move(Model):
     kind: Literal[ActionKind.move]
     id: TCardId
-    x: float = Field(allow_inf_nan=False, description="Left edge of the card on the board, in pixels")
-    y: float = Field(allow_inf_nan=False, description="Top edge of the card on the board, in pixels")
+    x: float = Field(strict=True, allow_inf_nan=False, description="Left edge of the card on the board, in pixels")
+    y: float = Field(strict=True, allow_inf_nan=False, description="Top edge of the card on the board, in pixels")
 
 
 class Send(Model):
@@ -106,6 +106,10 @@ class Send(Model):
     kind: Literal[ActionKind.send]
 
 
+type TAgentBody = Annotated[
+    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move, Discriminator("kind")
+]
+"""An action of the agent: each kind but send, which only the user's page sends."""
 type TBody = Annotated[
     Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Send, Discriminator("kind")
 ]

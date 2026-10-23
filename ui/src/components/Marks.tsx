@@ -2,11 +2,16 @@ import { MessageCircle } from "lucide-react";
 
 import { useTools } from "~/lib/whiteboard";
 import { ActionKind, Reaction } from "~/schemas/actions";
-import { reactionIcons, reactionTones } from "~/lib/reactions";
+import {
+  reactionIcons,
+  reactionTones,
+  reactionsOf,
+  userReaction,
+} from "~/lib/reactions";
 
 /**
- * The reaction and comment count of the ref, and, while the pointer is on the part, a button for each reaction.
- * The place puts the marks in the part, at the top right unless it says otherwise.
+ * The reaction of each author and the comment count of the ref, and, while the pointer is on the part, a button for each reaction.
+ * The agent's reaction has a ring. The place puts the marks in the part, at the top right unless it says otherwise.
  */
 export const Marks = ({
   target,
@@ -17,9 +22,8 @@ export const Marks = ({
 }) => {
   const { board, act, readOnly } = useTools();
   const thread = board.threads[target];
-  const reaction = thread?.reaction ?? null;
+  const reaction = userReaction(thread);
   const comments = thread?.comments.length ?? 0;
-  const ReactionIcon = reaction === null ? null : reactionIcons[reaction];
   return (
     <span
       className={`not-prose absolute flex items-center gap-1 text-xs select-none ${place}`}
@@ -33,14 +37,18 @@ export const Marks = ({
             {comments}
           </span>
         )}
-        {reaction !== null && ReactionIcon !== null && (
-          <span
-            className={`grid size-5 place-items-center rounded-full ${reactionTones[reaction]}`}
-            title={reaction}
-          >
-            <ReactionIcon className="size-3.5" strokeWidth={3} />
-          </span>
-        )}
+        {reactionsOf(thread).map(([author, reacted]) => {
+          const Icon = reactionIcons[reacted];
+          return (
+            <span
+              key={author}
+              className={`grid size-5 place-items-center rounded-full ${reactionTones[reacted]} ${author === "agent" ? "ring-2 ring-current ring-inset" : ""}`}
+              title={`${author}: ${reacted}`}
+            >
+              <Icon className="size-3.5" strokeWidth={3} />
+            </span>
+          );
+        })}
       </span>
       <span
         className={`hidden items-center gap-0.5 rounded-full bg-white/90 p-0.5 shadow-sm ring-1 ring-stone-200 ${readOnly ? "" : "group-hover/part:flex"}`}
