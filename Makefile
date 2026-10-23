@@ -9,4 +9,4 @@ check-ui:
 	cd ui && npm run check
 
 serve:
-	cd server && uv run uvicorn agent_hud.web:create_app --factory --port 7676
+	cd server && uv run uvicorn agent_hud.web:create_app --factory --port $${AGENT_HUD_PORT:-7676}

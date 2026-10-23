@@ -9,7 +9,7 @@
   "mcpServers": {
     "board": {
       "type": "http",
-      "url": "http://127.0.0.1:7676/mcp/"
+      "url": "http://127.0.0.1:${AGENT_HUD_PORT:-7676}/mcp/"
     }
   },
   "hooks": {
