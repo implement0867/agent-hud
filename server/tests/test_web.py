@@ -1,5 +1,7 @@
 import asyncio
 import re
+import shlex
+import sys
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from importlib.metadata import version
@@ -21,12 +23,12 @@ from websockets.exceptions import InvalidStatus
 
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
-from agent_hud.models.events import Accepted, Rejected, Snapshot, Turn
+from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import Store
 from agent_hud.web import create_app
-from tests.conversation import TOKEN, User, open_agent, open_page, serve
+from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, serve
 from tests.factories import as_json, put, react, say, send
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
@@ -71,7 +73,7 @@ async def listeners(address: tuple[str, int], hud: Hud) -> AsyncIterator[list[Cl
     """Two agents' sockets for the user's actions, at the URL that the listen tool returns."""
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
-        url = (await remote.call_tool("listen", {})).data
+        url = await listen_url(remote)
     async with AsyncExitStack() as stack:
         yield [await stack.enter_async_context(connect(url, proxy=None)) for _ in range(2)]
 
@@ -162,13 +164,41 @@ async def test_a_second_app_on_the_state_dir_does_not_start(static_dir: Path, tm
             assert answer.status == 200
 
 
+async def test_the_turns_command_prints_each_turn_as_a_line(address: tuple[str, int]) -> None:
+    """Assemble: the app, and the command that listen returns, run as a monitor that takes a command would run it.
+    Act: the user says a message.
+    Assert: the command prints the turn as one line, and listen's command runs agent-hud-turns on its URL."""
+    host, port = address
+    async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as tools:
+        listening = (await tools.call_tool("listen", {})).structured_content
+    assert listening is not None
+    assert listening["command"].endswith(f"agent-hud-turns {shlex.quote(listening['url'])}")
+    turns = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "agent_hud.turns", listening["url"], stdout=asyncio.subprocess.PIPE
+    )
+    assert turns.stdout is not None
+    try:
+        async with open_page(address) as user:
+            await user.notes(lambda snapshot: snapshot.agent is AgentState.waiting)
+            assert isinstance(await user.act(say("hello")), Accepted)
+            async with asyncio.timeout(5):
+                line = await turns.stdout.readline()
+        assert [heard.body for heard in Turn.model_validate_json(line).actions] == [say("hello")]
+    finally:
+        turns.terminate()
+        await turns.wait()
+
+
 async def test_health_names_the_app_and_its_version(address: tuple[str, int]) -> None:
     """Assemble: the app.
     Act: get /health.
-    Assert: the app's name and the package version, for the hook to tell the app from another program on the port."""
+    Assert: the app's name, the package version and the build fingerprint from the settings, for the hook to tell the app from another program on the port."""
     host, port = address
     with await asyncio.to_thread(urlopen, f"http://{host}:{port}/health") as answer:
-        assert (answer.status, load(answer)) == (200, {"app": "agent-hud", "version": version("agent-hud")})
+        assert (answer.status, load(answer)) == (
+            200,
+            {"app": "agent-hud", "version": version("agent-hud"), "build": ""},
+        )
 
 
 async def test_page_gets_the_board_on_connect(address: tuple[str, int], hud: Hud) -> None:
