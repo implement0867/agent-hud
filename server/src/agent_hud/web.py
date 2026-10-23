@@ -4,7 +4,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from agent_hud.deps import HudDep, SameOriginDep
+from agent_hud.deps import SameOriginDep
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request
@@ -22,15 +22,17 @@ async def send_user_turns(websocket: WebSocket, hud: Hud) -> None:
         await websocket.send_text(turn.model_dump_json())
 
 
-def create_app() -> FastAPI:
-    """MCP for the agent at /mcp/, the board websocket at /ws, and the built UI at /."""
-    mcp_app = build().http_app(path="/")
+def create_app(hud: Hud | None = None) -> FastAPI:
+    """MCP for the agent at /mcp/, the board websocket at /ws, and the built UI at /, on the hud, or on a new one from the settings."""
+    if hud is None:
+        hud = Hud(get_settings().state_file)
+    mcp_app = build(hud).http_app(path="/")
     app = FastAPI(lifespan=mcp_app.lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     @app.websocket("/ws", dependencies=[SameOriginDep])
-    async def page(websocket: WebSocket, hud: HudDep) -> None:
+    async def page(websocket: WebSocket) -> None:
         """Send the snapshot on connect and after each change, and act for the user, until the page disconnects."""
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
@@ -47,7 +49,7 @@ def create_app() -> FastAPI:
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[SameOriginDep])
-    async def agent(websocket: WebSocket, hud: HudDep) -> None:
+    async def agent(websocket: WebSocket) -> None:
         """Send each of the user's turns to this agent's monitor, until it disconnects."""
         await websocket.accept()
         with hud.monitor():

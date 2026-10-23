@@ -9,7 +9,7 @@ from fastmcp.exceptions import ToolError
 from hypothesis import given
 from mcp.types import Tool
 
-from agent_hud.deps import get_hud
+from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
 from agent_hud.server import build
 from tests.factories import as_json, comment, put, react, read, read_board, remove, say
@@ -21,29 +21,29 @@ async def listed_write(client: Client[Any]) -> Tool:
 
 
 @pytest.fixture
-async def client() -> AsyncIterator[Client[Any]]:
-    get_hud.cache_clear()
-    async with Client(build()) as client:
+async def client(hud: Hud) -> AsyncIterator[Client[Any]]:
+    """The MCP tools in memory, on the test's hud."""
+    async with Client(build(hud)) as client:
         yield client
 
 
-async def test_read_returns_the_board_with_its_threads(client: Client[Any]) -> None:
+async def test_read_returns_the_board_with_its_threads(client: Client[Any], hud: Hud) -> None:
     """Assemble: a server where the agent put a card of a list and the user reacted and commented on its parts.
     Act: read.
     Assert: read returns the hud's board."""
     await client.call_tool("write", {"actions": as_json(put("plan", "1. a\n2. b"), put("risk", "locks"))})
     feedback = react("plan", Reaction.approve), comment("plan/2", "why b?")
-    get_hud().act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate(feedback)])
-    assert await read_board(client) == get_hud().board
+    hud.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate(feedback)])
+    assert await read_board(client) == hud.board
 
 
-async def test_read_leaves_out_the_history_unless_asked(client: Client[Any]) -> None:
+async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], hud: Hud) -> None:
     """Assemble: a server where the agent put a card, then put it again.
     Act: read, and read with the history.
     Assert: the first has no history, and the second has the hud's whole board."""
     await client.call_tool("write", {"actions": as_json(put("plan", "1. a"), put("plan", "1. b"))})
     assert (await read_board(client)).history == {}
-    assert await read_board(client, history=True) == get_hud().board
+    assert await read_board(client, history=True) == hud.board
 
 
 @pytest.mark.parametrize(
@@ -114,7 +114,7 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TBod
     """Assemble: a client connected to a new server.
     Act: check an action of each kind against the listed schema of write.
     Assert: the schema takes it, so that a client that checks the schema sends each action that the server takes."""
-    async with Client(build()) as client:
+    async with Client(build(Hud())) as client:
         jsonschema.validate({"actions": as_json(body)}, (await listed_write(client)).input_schema)
 
 

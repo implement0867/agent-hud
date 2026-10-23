@@ -9,7 +9,6 @@ from mcp.types import ToolAnnotations
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
-from agent_hud.deps import McpHudDep
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Put, TBody, TCardId
 from agent_hud.models.base import Model
@@ -78,10 +77,11 @@ def parse(actions: list[dict[str, Any]]) -> list[TBody]:
     return bodies
 
 
-def build() -> FastMCP:
+def build(hud: Hud) -> FastMCP:
+    """The MCP server whose tools act on the hud."""
     mcp = FastMCP("agent-hud")
 
-    async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)], hud: Hud = McpHudDep) -> Written:
+    async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> Written:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
         A put replaces the card and moves its feedback to the card's history.
@@ -101,7 +101,6 @@ def build() -> FastMCP:
     async def read(
         *,
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
-        hud: Hud = McpHudDep,
     ) -> Reading:
         """The whole board: the cards and the parts of each by number, the threads of feedback on them by ref, the values, the arrows and the chat. Read it once, then follow the turns; read it again when unsure."""
         board = hud.board if history else hud.board.model_copy(update={"history": {}})
