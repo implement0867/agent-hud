@@ -75,7 +75,7 @@ export const Whiteboard = ({
   snapshot: TSnapshot;
   act: TAct;
 }) => {
-  const { board, agent, unsent } = snapshot;
+  const { board, agent, pending, unsent, waiting } = snapshot;
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
@@ -377,7 +377,7 @@ export const Whiteboard = ({
         create={note}
         overlay={
           <>
-            <AgentPill agent={agent} />
+            <AgentPill agent={agent} waiting={waiting} />
             {history !== null && (
               <HistoryDrawer
                 card={history.card}
@@ -416,7 +416,7 @@ export const Whiteboard = ({
                 note();
               }}
               clear={clear}
-              unsent={unsent}
+              pending={pending}
               send={send}
               history={history !== null}
               toggleHistory={() => {

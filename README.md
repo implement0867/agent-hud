@@ -55,9 +55,9 @@ The app serves the board page at `/`, a whiteboard that updates when the agent w
 | Delete | removes the selected card or arrow |
 | Drag empty space, Space+drag, scroll | pans |
 | ⌘ or Ctrl + scroll, `+`, `-`, `0`, `1` | zooms, resets, fits all cards |
-| Send, or ⌘↵ | sends the user's actions since the last send to the agent, as one turn; a chat message sends them too |
+| Send, or ⌘↵ | sends the user's actions since the last send to the agent, as one turn; a chat message sends them too. The chevron beside it lists what the turn carries: the last reaction on a part and the last value of a cell, when they differ from the start of the turn, and no moves |
 | Chat | messages to and from the agent, and each comment on a part; a ref such as `plan/2` shows the part; `M` focuses it |
-| The pill at the top left | the agent's socket: no agent connected, or connected and working on the user's turn, or connected and waiting for it |
+| The pill at the top left | the agent's socket: no agent connected, or connected and working on the user's turn, or connected and waiting for it; and the turns sent that no agent has taken, which wait for the next monitor, across restarts |
 | History, `H`, or a card's version chip | shows the earlier versions of the cards with the feedback they had |
 | Clear | after a confirm, moves every card to its history with its feedback, and empties the board, its arrows and the chat |
 
