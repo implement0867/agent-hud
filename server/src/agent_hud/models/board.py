@@ -117,6 +117,10 @@ class Board(Model):
         default_factory=dict, description="The earlier versions of each card, oldest first"
     )
 
+    def texts_of(self, card_id: TCardId) -> dict[str, str]:
+        """The text of each part of the card by its number, in document order, such as {"1": "parse", "2": "render"}."""
+        return Outline(self.cards[card_id].md).texts
+
     def part_texts(self, body: TBody) -> dict[TRef, str]:
         """The text of each part that the action names, as the board has it now."""
         match body:
@@ -132,7 +136,7 @@ class Board(Model):
 
     def _text(self, ref: TRef) -> str | None:
         card_id, _, path = ref.partition("/")
-        return Outline(self.cards[card_id].md).texts.get(path) if card_id in self.cards else None
+        return self.texts_of(card_id).get(path) if card_id in self.cards else None
 
     def apply(self, action: Action) -> "Board":
         """The board after the action. ValueError, which names the valid choices, if the action does not fit the board."""

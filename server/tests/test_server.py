@@ -12,7 +12,7 @@ from mcp.types import Tool
 from agent_hud.deps import get_hud
 from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
 from agent_hud.server import build
-from tests.factories import as_json, comment, put, react, read_board, remove, say
+from tests.factories import as_json, comment, put, react, read, read_board, remove, say
 from tests.strategies import bodies, card_ids
 
 
@@ -60,6 +60,32 @@ async def test_rejected_write_changes_nothing(client: Client[Any], actions: list
     with pytest.raises(ToolError):
         await client.call_tool("write", {"actions": actions})
     assert await read_board(client) == before, "a rejected write must leave the board as it was"
+
+
+async def test_write_returns_the_parts_of_each_card_it_put(client: Client[Any]) -> None:
+    """Assemble: a client connected to a new server.
+    Act: write a put of a card with a nested list, a code block in an item and a table, a say, and a put of a plain card.
+    Assert: the result gives the text of each part of both cards by its number, as refs count them."""
+    md = "1. a\n   - a1\n   - a2\n2. b\n\n   ```sh\n   make\n   ```\n3. c\n\n| task | size {S, M} |\n|---|---|\n| parse | |"
+    result = await client.call_tool("write", {"actions": as_json(put("plan", md), say("hi"), put("risk", "locks"))})
+    assert result.structured_content == {
+        "parts": {
+            "plan": {"1": "a", "2": "a1", "3": "a2", "4": "b", "5": "make", "6": "c", "7": "parse | "},
+            "risk": {},
+        }
+    }
+
+
+async def test_read_returns_the_parts_of_each_card(client: Client[Any]) -> None:
+    """Assemble: a server where the agent put a card of a list and a card of code.
+    Act: read.
+    Assert: read gives the text of each part of each card by its number."""
+    md = "```python file=app.py start=3\nx = 1\ny = 2\n```"
+    await client.call_tool("write", {"actions": as_json(put("plan", "1. a\n2. b"), put("code", md))})
+    assert (await read(client)).parts == {
+        "plan": {"1": "a", "2": "b"},
+        "code": {"1": "app.py:3: x = 1", "2": "app.py:4: y = 2"},
+    }
 
 
 async def test_read_and_listen_are_read_only(client: Client[Any]) -> None:
