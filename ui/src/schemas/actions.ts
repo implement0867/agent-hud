@@ -13,6 +13,7 @@ export const ActionKind = z.enum([
   "link",
   "unlink",
   "move",
+  "place",
   "clear",
   "send",
 ]);
@@ -60,6 +61,12 @@ export const bodySchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal(ActionKind.enum.unlink), id: z.string() }),
   z.strictObject({
     kind: z.literal(ActionKind.enum.move),
+    id: z.string(),
+    x: z.number(),
+    y: z.number(),
+  }),
+  z.strictObject({
+    kind: z.literal(ActionKind.enum.place),
     id: z.string(),
     x: z.number(),
     y: z.number(),

@@ -46,6 +46,7 @@ The app serves the board page at `/`, a whiteboard that updates when the agent w
 
 | On the page | Does |
 |---|---|
+| A new card | goes to the free space below the others, on a grid of three columns; the board keeps its place for every tab and reload, and the agent reads it. A card that grows with a new version pushes the cards below it down |
 | Drag a card's header | moves the card; the board keeps its place for everyone |
 | Double-click empty space | writes a note there |
 | Double-click a card's text, or `E` | edits its markdown; ⌘↵ or a click outside saves, Esc cancels |

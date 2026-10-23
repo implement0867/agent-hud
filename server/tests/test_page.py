@@ -8,7 +8,7 @@ from playwright.async_api import Browser, Page, async_playwright, expect
 from agent_hud.models.actions import ActionKind, Author, Link, Reaction
 from agent_hud.models.board import Arrow
 from agent_hud.settings import find_static_dir
-from tests.conversation import TOKEN, Agent, open_agent
+from tests.conversation import TOKEN, Agent, open_agent, open_page
 from tests.factories import comment, fill, link, move, put, react, read_board, say
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -46,13 +46,18 @@ async def page(browser: Browser, address: tuple[str, int], agent: Agent) -> Asyn
     await page.close()
 
 
-async def snap(page: Page, path: Path) -> None:
-    """A screenshot once the animations that end have ended or stopped."""
+async def settled(page: Page) -> None:
+    """Once the animations that end have ended or stopped."""
     await page.evaluate(
         "Promise.all(document.getAnimations()"
         ".filter(a => a.effect?.getComputedTiming().iterations !== Infinity)"
         ".map(a => a.finished.catch(() => null)))"
     )
+
+
+async def snap(page: Page, path: Path) -> None:
+    """A screenshot once the animations that end have ended or stopped."""
+    await settled(page)
     await page.screenshot(path=path)
 
 
@@ -224,3 +229,48 @@ async def test_a_ref_in_the_chat_shows_the_part(page: Page, agent: Agent, tmp_pa
     await agent.monitor.close()
     await expect(page.get_by_role("status", name="Agent")).to_contain_text("No agent connected")
     await snap(page, tmp_path / "1-ref.png")
+
+
+async def boxes(page: Page, *ids: str) -> dict[str, tuple[int, int, int, int]]:
+    """The screen rect of each card, by id, in whole pixels, once the cards have settled."""
+    await settled(page)
+    rects = {}
+    for card_id in ids:
+        box = await page.locator(f'article[data-ref="{card_id}"]').bounding_box()
+        assert box is not None
+        rects[card_id] = (round(box["x"]), round(box["y"]), round(box["width"]), round(box["height"]))
+    return rects
+
+
+async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them(
+    page: Page, agent: Agent, browser: Browser, address: tuple[str, int]
+) -> None:
+    """Assemble: the agent puts four cards with no place, where the first is the shortest.
+    Act: open the board in a second tab; the agent puts a taller version of the first card.
+    Assert: read has a place for each card, on three columns, with the fourth below the first; the second tab shows
+    each card where the first tab does; the fourth card moved down below the taller first card in the agent's read."""
+    async with open_page(address) as user:
+        await agent.write(
+            put("a", "short"), put("b", "1. a\n2. b\n3. c"), put("c", "1. a\n2. b\n3. c"), put("d", "last")
+        )
+        await user.notes(lambda snapshot: len(snapshot.board.positions) == 4)
+        board = await read_board(agent.tools)
+        assert {card_id: at.x for card_id, at in board.positions.items()} == {"a": 0, "b": 688, "c": 1376, "d": 0}
+        first = await boxes(page, "a", "b", "c", "d")
+        assert board.positions["d"].y == first["a"][3] + 48
+
+        host, port = address
+        other = await browser.new_page(viewport={"width": 1440, "height": 900})
+        await other.goto(f"http://{host}:{port}/?token={TOKEN}")
+        for card_id in "abcd":
+            await expect(other.locator(f'article[data-ref="{card_id}"]')).to_be_visible()
+        assert await boxes(other, "a", "b", "c", "d") == first
+        await other.close()
+
+        await agent.write(put("a", "\n".join(f"{n}. step {n}" for n in range(1, 13))))
+        await user.notes(lambda snapshot: snapshot.board.positions["d"].y != first["a"][3] + 48)
+        board = await read_board(agent.tools)
+        tall = await boxes(page, "a", "d")
+        assert tall["a"][3] > first["a"][3]
+        assert board.positions["d"].y == tall["a"][3] + 48
+        assert tall["d"][1] == tall["a"][1] + tall["a"][3] + 48

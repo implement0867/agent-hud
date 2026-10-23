@@ -9,6 +9,7 @@ from agent_hud.models.actions import (
     Fill,
     Link,
     Move,
+    Place,
     Put,
     React,
     Reaction,
@@ -62,6 +63,10 @@ def unlink(arrow_id: str) -> Unlink:
 
 def move(card_id: str, x: float, y: float) -> Move:
     return Move(kind=ActionKind.move, id=card_id, x=x, y=y)
+
+
+def place(card_id: str, x: float, y: float) -> Place:
+    return Place(kind=ActionKind.place, id=card_id, x=x, y=y)
 
 
 def clear() -> Clear:

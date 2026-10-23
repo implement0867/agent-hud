@@ -155,11 +155,12 @@ async def test_read_and_listen_are_read_only(client: Client[Any]) -> None:
 async def test_write_lists_one_object_for_all_kinds_of_action(client: Client[Any]) -> None:
     """Assemble: a client connected to a new server.
     Act: list the tools.
-    Assert: the actions of write are one object with a kind of each action kind but send, which is the page's, and the description gives the fields of each kind."""
+    Assert: the actions of write are one object with a kind of each action kind but place and send, which are the page's, and the description gives the fields of each kind."""
     write = await listed_write(client)
     item = write.input_schema["properties"]["actions"]["items"]
     assert "oneOf" not in item, "a oneOf with an object for each kind costs the agent more tokens"
-    assert item["properties"]["kind"]["enum"] == [kind for kind in ActionKind if kind is not ActionKind.send]
+    pages = (ActionKind.place, ActionKind.send)
+    assert item["properties"]["kind"]["enum"] == [kind for kind in ActionKind if kind not in pages]
     assert "put {id, md}" in (write.description or "")
     assert "link {id, src, dst, text?}" in (write.description or "")
 

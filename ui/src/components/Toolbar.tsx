@@ -123,6 +123,8 @@ const describe = ({ body, parts }: THeard): string => {
       return `remove arrow ${body.id}`;
     case ActionKind.enum.move:
       return `move ${body.id}`;
+    case ActionKind.enum.place:
+      return `place ${body.id}`;
     case ActionKind.enum.clear:
       return "clear the board";
     case ActionKind.enum.send:
