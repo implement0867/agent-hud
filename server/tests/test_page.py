@@ -8,7 +8,7 @@ from playwright.async_api import Browser, Page, async_playwright, expect
 from agent_hud.models.actions import ActionKind, Author, Link, Reaction
 from agent_hud.models.board import Arrow
 from agent_hud.settings import find_static_dir
-from tests.conversation import Agent, open_agent
+from tests.conversation import TOKEN, Agent, open_agent
 from tests.factories import comment, fill, link, move, put, react, read_board, say
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -40,7 +40,7 @@ async def page(browser: Browser, address: tuple[str, int], agent: Agent) -> Asyn
     """The board page in the browser, live on the agent's board."""
     host, port = address
     page = await browser.new_page(viewport={"width": 1440, "height": 900})
-    await page.goto(f"http://{host}:{port}/")
+    await page.goto(f"http://{host}:{port}/?token={TOKEN}")
     await expect(page.get_by_label("Message the agent")).to_be_visible()
     yield page
     await page.close()
