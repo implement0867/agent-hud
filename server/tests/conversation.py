@@ -1,16 +1,23 @@
 import asyncio
+import socket
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import pytest
+import uvicorn
 from fastmcp import Client
 from websockets.asyncio.client import ClientConnection, connect
 
+from agent_hud.hud import Hud
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, THeardBody, Turn
+from agent_hud.settings import get_settings
+from agent_hud.web import create_app
 from tests.factories import as_json, send
 
 
@@ -98,3 +105,24 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
         tools = await stack.enter_async_context(Client(f"http://{host}:{port}/mcp/"))
         url = (await tools.call_tool("listen", {})).data
         yield Agent(tools, await stack.enter_async_context(connect(url, proxy=None)))
+
+
+@asynccontextmanager
+async def serve(hud: Hud, static_dir: Path) -> AsyncGenerator[tuple[str, int]]:
+    """Host and port of the app on the hud, with the UI in static_dir, on a free port, until the context ends."""
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
+        get_settings.cache_clear()
+        app = create_app(hud)
+    get_settings.cache_clear()
+    # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen()
+    server = uvicorn.Server(uvicorn.Config(app, log_config=None))
+    task = asyncio.create_task(server.serve(sockets=[sock]))
+    try:
+        yield sock.getsockname()
+    finally:
+        server.should_exit = True
+        await task

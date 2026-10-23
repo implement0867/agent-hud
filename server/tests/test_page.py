@@ -5,7 +5,6 @@ import pytest
 import pytest_asyncio
 from playwright.async_api import Browser, Page, async_playwright, expect
 
-from agent_hud.deps import get_hud
 from agent_hud.models.actions import ActionKind, Author, Link, Reaction
 from agent_hud.models.board import Arrow
 from agent_hud.settings import find_static_dir
@@ -31,8 +30,7 @@ async def browser() -> AsyncIterator[Browser]:
 
 @pytest_asyncio.fixture(loop_scope="module")
 async def agent(address: tuple[str, int]) -> AsyncIterator[Agent]:
-    """An agent on a new board."""
-    get_hud.cache_clear()
+    """An agent on the test's board."""
     async with open_agent(address) as agent:
         yield agent
 

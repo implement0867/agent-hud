@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,12 +14,11 @@ from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
-from agent_hud.deps import get_hud
 from agent_hud.hud import Hud
 from agent_hud.models.actions import ActionKind, TBody
 from agent_hud.models.events import Accepted, Rejected, Snapshot, Turn
 from agent_hud.server import build
-from tests.conversation import User, open_page
+from tests.conversation import User, open_page, serve
 from tests.factories import as_json, put, say
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
@@ -40,9 +40,15 @@ def host_names() -> st.SearchStrategy[str]:
 
 @pytest.fixture(scope="module")
 def hud() -> Hud:
-    """A new hud for the module. The app and the agent get the same one from get_hud."""
-    get_hud.cache_clear()
-    return get_hud()
+    """A new hud for the module, for the app and the agent."""
+    return Hud()
+
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def address(static_dir: Path, hud: Hud) -> AsyncIterator[tuple[str, int]]:
+    """Host and port of the app on the module's hud."""
+    async with serve(hud, static_dir) as address:
+        yield address
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -63,9 +69,9 @@ async def listeners(address: tuple[str, int], hud: Hud) -> AsyncIterator[list[Cl
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def agent() -> AsyncIterator[Client[Any]]:
+async def agent(hud: Hud) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same hud as the app. MCP over HTTP is slower per call."""
-    async with Client(build()) as client:
+    async with Client(build(hud)) as client:
         yield client
 
 

@@ -1,37 +1,30 @@
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from agent_hud.deps import get_hud
 from agent_hud.hud import Hud
 from agent_hud.models.actions import ActionKind, Author, Reaction, TBody
 from agent_hud.models.board import Arrow, Board, Point, Thread, Version
 from agent_hud.models.events import Accepted, AgentState, Edit, EventKind, Rejected
-from tests.conversation import Agent, User, open_agent, open_page
+from tests.conversation import Agent, User, open_agent, open_page, serve
 from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, say
 from tests.strategies import bodies, card_ids
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
-@pytest.fixture
-def hud() -> Hud:
-    """A new hud for each conversation. The app and the agent get the same one from get_hud."""
-    get_hud.cache_clear()
-    return get_hud()
-
-
 @pytest_asyncio.fixture(loop_scope="module")
-async def agent(address: tuple[str, int], hud: Hud) -> AsyncIterator[Agent]:
+async def agent(address: tuple[str, int]) -> AsyncIterator[Agent]:
     async with open_agent(address) as agent:
         yield agent
 
 
 @pytest_asyncio.fixture(loop_scope="module")
-async def user(address: tuple[str, int], hud: Hud) -> AsyncIterator[User]:
+async def user(address: tuple[str, int]) -> AsyncIterator[User]:
     async with open_page(address) as user:
         yield user
 
@@ -246,14 +239,13 @@ def turns(draw: st.DrawFn) -> list[tuple[Author, list[TBody]]]:
 @given(turns())
 @settings(deadline=None, max_examples=50)
 async def test_the_page_and_the_agent_agree_after_each_turn(
-    address: tuple[str, int], turns: list[tuple[Author, list[TBody]]]
+    static_dir: Path, turns: list[tuple[Author, list[TBody]]]
 ) -> None:
     """Assemble: a new board, a page and an agent with a monitor.
     Act: the user and the agent take turns; the page sends each of the user's actions alone, and the agent writes each turn in one call.
     Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each action that the board took from the user, in order."""
-    get_hud.cache_clear()
     taken: list[str] = []
-    async with open_agent(address) as agent, open_page(address) as user:
+    async with serve(Hud(), static_dir) as address, open_agent(address) as agent, open_page(address) as user:
         for author, batch in turns:
             match author:
                 case Author.user:
