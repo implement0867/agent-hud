@@ -25,7 +25,7 @@ from agent_hud.models.events import Accepted, Rejected, Snapshot, Turn
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.web import create_app
-from tests.conversation import TOKEN, User, open_page, serve
+from tests.conversation import TOKEN, User, open_agent, open_page, serve
 from tests.factories import as_json, put, react, say, send
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
@@ -120,7 +120,7 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
 
 
 async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
-    """Assemble: a hud on a state file, with a card and a reaction the user has not sent.
+    """Assemble: a hud on a state file, with a card, a send that an agent took, and a reaction the user has not sent.
     Act: serve the app on it, and stop it.
     Assert: the snapshot file holds the board at the start of the user's turn, and the state file only the turn."""
     state_file = tmp_path / "board.jsonl"
@@ -128,7 +128,7 @@ async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp
     hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
     hud.act([Action(id="u", author=Author.user, body=send())])
     hud.act([Action(id="r", author=Author.user, body=react("plan/1", Reaction.approve))])
-    async with serve(hud, static_dir, tmp_path):
+    async with serve(hud, static_dir, tmp_path) as address, open_agent(address):
         pass
     snapshot = Board.model_validate_json((tmp_path / "board.json").read_text())
     assert snapshot.cards == hud.board.cards
@@ -211,16 +211,19 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
 ) -> None:
     """Assemble: a card that the agent put, a page, and two agents' listeners.
     Act: the page asks for any action on the card or its parts, then sends if the action did not end the turn.
-    Assert: accepted, the page shows the board and each listener gets a turn of the action; or rejected, and the board is as it was."""
+    Assert: accepted, the page shows the board and each listener gets a turn of what the page listed as pending; or rejected, and the board is as it was."""
     body = data.draw(bodies(st.just(card_id)))
     await agent.call_tool("write", {"actions": as_json(put(card_id, md))})
     before = hud.board
+    pending = [heard.id for heard in hud.snapshot().pending]
     match await user.act(body):
         case Accepted(id=action_id):
             assert await user.sees(hud.board) == hud.board
             if not hud.log.actions[-1].ends_turn:
+                heard = [heard.id for heard in hud.snapshot().pending]
                 await user.send()
-            heard = [] if body.kind is ActionKind.send else [action_id]
+            else:
+                heard = [*pending, action_id] if body.kind is ActionKind.say else pending
             for listener in listeners:
                 turn = Turn.model_validate_json(await asyncio.wait_for(listener.recv(), 5))
                 assert [action.id for action in turn.actions] == heard

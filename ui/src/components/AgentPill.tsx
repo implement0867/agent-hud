@@ -9,9 +9,19 @@ const looks: Record<TAgentState, { dot: string; label: string }> = {
   waiting: { dot: "bg-emerald-500", label: "Agent connected · your turn" },
 };
 
-/** The state of the agent's socket: whether an agent's monitor is open, and whether it has the user's last turn. */
-export const AgentPill = ({ agent }: { agent: TAgentState }) => {
-  const { dot, label } = looks[agent];
+/** The state of the agent's socket: whether an agent's monitor is open, and whether it has the user's last turn; and the turns sent that no agent has taken. */
+export const AgentPill = ({
+  agent,
+  waiting,
+}: {
+  agent: TAgentState;
+  waiting: number;
+}) => {
+  const { dot, label: state } = looks[agent];
+  const label =
+    waiting > 0
+      ? `${state} · ${String(waiting)} ${waiting === 1 ? "turn" : "turns"} waiting for an agent`
+      : state;
   return (
     <div
       role="status"

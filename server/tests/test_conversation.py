@@ -99,7 +99,7 @@ async def test_the_agent_revises_a_plan_from_the_users_feedback(agent: Agent, us
 async def test_the_agent_hears_only_the_values_that_fit_their_columns(agent: Agent, user: User) -> None:
     """Assemble: the agent puts a table of tasks with a size, hours and done column.
     Act: the user fills cells with values that fit and values that do not, and clears one; then the agent adds a row, and changes the Hours column to a check column.
-    Assert: the board rejects each value that does not fit, the agent hears and reads only the others, the card with the new row keeps them, and the card with the changed column keeps the values that fit their columns."""
+    Assert: the board rejects each value that does not fit, the agent hears only the others, without the cell filled and then cleared, and reads them; the card with the new row keeps them, and the card with the changed column keeps the values that fit their columns."""
     table = "| Task | Size {S, M, L} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n| render | | | |"
     await agent.write(put("tasks", table))
 
@@ -115,7 +115,7 @@ async def test_the_agent_hears_only_the_values_that_fit_their_columns(agent: Age
         "no input 'tasks/1/1': the input columns of row 'tasks/1' are 2 (Size), 3 (Hours), 4 (Done)",
     ]
     await user.send()
-    assert await agent.hear() == fits
+    assert await agent.hear() == [fits[0], fits[2]]
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
     assert board.values == {"tasks/1/2": "M", "tasks/1/3": None, "tasks/2/4": True}
@@ -165,10 +165,10 @@ async def test_the_user_and_the_agent_discuss_code_with_arrows(agent: Agent, use
 async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, user: User) -> None:
     """Assemble: a board with an agent's plan card and an arrow from it to the user's note.
     Act: the user writes a note, places it, edits the agent's card and then removes the note.
-    Assert: the agent hears each action, with the edit as a diff, and reads the user as the author of the note and of the edited card, whose arrow is gone."""
+    Assert: the agent hears each action but the move, with the edit as a diff, and reads the user as the author of the note and of the edited card, whose arrow is gone."""
     note = [put("note", "Also check the docs"), move("note", 40, 300), say("see my note")]
     assert kinds([await user.act(body) for body in note]) == [EventKind.accepted] * len(note)
-    assert await agent.hear() == note
+    assert await agent.hear() == [note[0], note[2]]
     board = await read_board(agent.tools, history=True)
     assert (board.cards["note"].author, board.positions) == (Author.user, {"note": Point(x=40, y=300)})
 
@@ -253,26 +253,32 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
 ) -> None:
     """Assemble: a new board, a page and an agent with a monitor.
     Act: the user and the agent take turns; the page sends each of the user's actions alone, and the agent writes each turn in one call.
-    Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each action that the board took from the user, in order."""
+    Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each turn as the page listed it as pending, with the message that ended it, in order."""
     taken: list[str] = []
+    hud = Hud()
     async with (
-        serve(Hud(), static_dir, state_dir) as address,
+        serve(hud, static_dir, state_dir) as address,
         open_agent(address) as agent,
         open_page(address) as user,
     ):
         for author, batch in turns:
             match author:
                 case Author.user:
-                    answers = [(await user.act(body), body) for body in batch]
-                    taken += [
-                        answer.id
-                        for answer, body in answers
-                        if isinstance(answer, Accepted) and body.kind is not ActionKind.send
-                    ]
+                    for body in batch:
+                        pending = [heard.id for heard in hud.snapshot().pending]
+                        answer = await user.act(body)
+                        match answer, body.kind:
+                            case Accepted(id=action_id), ActionKind.say:
+                                taken += [*pending, action_id]
+                            case Accepted(), ActionKind.send:
+                                taken += pending
+                            case _:
+                                pass
                 case Author.agent:
                     await agent.tools.call_tool("write", {"actions": as_json(*batch)}, raise_on_error=False)
             board = await read_board(agent.tools, history=True)
             assert await user.sees(board) == board
+        taken += [heard.id for heard in hud.snapshot().pending]
         await user.send()
         heard: list[str] = []
         while len(heard) < len(taken):

@@ -1,4 +1,5 @@
 import {
+  ChevronUp,
   Eraser,
   History,
   Maximize2,
@@ -11,9 +12,11 @@ import {
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { assertNever } from "~/lib/assertNever";
 import { reactionIcons, reactionTones, reactionsOf } from "~/lib/reactions";
 import { useTools } from "~/lib/whiteboard";
-import { Reaction } from "~/schemas/actions";
+import { ActionKind, Reaction } from "~/schemas/actions";
+import type { THeard } from "~/schemas/events";
 
 const ToolButton = ({
   label,
@@ -91,28 +94,109 @@ const Tally = ({ show }: { show: (ref: string) => void }) => {
   );
 };
 
-/** Sends the user's actions since the last send to the agent, as one turn. */
-const SendButton = ({ unsent, send }: { unsent: number; send: () => void }) => (
-  <button
-    type="button"
-    aria-label="Send to the agent"
-    title="Send your changes to the agent (⌘↵)"
-    disabled={unsent === 0}
-    className="flex h-9 items-center gap-1.5 rounded-xl bg-sky-600 px-3 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:bg-transparent disabled:text-stone-400"
-    onClick={send}
-  >
-    <SendHorizontal className="size-4" />
-    Send
-    {unsent > 0 && (
-      <span
-        aria-label={`${String(unsent)} unsent`}
-        className="rounded-full bg-white/25 px-1.5 text-xs tabular-nums"
+/** One line for a pending action, as the agent will hear it. */
+const describe = ({ body, parts }: THeard): string => {
+  const text = (ref: string) => {
+    const part = parts[ref];
+    return part === undefined ? ref : `${ref} "${part}"`;
+  };
+  switch (body.kind) {
+    case ActionKind.enum.put:
+      return `new note ${body.id}`;
+    case "edit":
+      return `edit ${body.id}`;
+    case ActionKind.enum.remove:
+      return `remove ${body.id}`;
+    case ActionKind.enum.react:
+      return `${body.reaction} ${text(body.ref)}`;
+    case ActionKind.enum.unreact:
+      return `no reaction on ${text(body.ref)}`;
+    case ActionKind.enum.comment:
+      return `comment on ${text(body.ref)}: ${body.text}`;
+    case ActionKind.enum.say:
+      return body.text;
+    case ActionKind.enum.fill:
+      return `${body.ref} = ${JSON.stringify(body.value)}`;
+    case ActionKind.enum.link:
+      return `arrow ${body.src} → ${body.dst}${body.text === "" ? "" : ` "${body.text}"`}`;
+    case ActionKind.enum.unlink:
+      return `remove arrow ${body.id}`;
+    case ActionKind.enum.move:
+      return `move ${body.id}`;
+    case ActionKind.enum.clear:
+      return "clear the board";
+    case ActionKind.enum.send:
+      return "send";
+    default:
+      return assertNever(body);
+  }
+};
+
+/** Sends the user's actions since the last send to the agent, as one turn; the chevron lists them. */
+const SendButton = ({
+  pending,
+  send,
+}: {
+  pending: THeard[];
+  send: () => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const unsent = pending.length;
+  return (
+    <div className="relative flex items-center">
+      <button
+        type="button"
+        aria-label="Send to the agent"
+        title="Send your changes to the agent (⌘↵)"
+        disabled={unsent === 0}
+        className="flex h-9 items-center gap-1.5 rounded-l-xl bg-sky-600 px-3 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:bg-transparent disabled:text-stone-400"
+        onClick={send}
       >
-        {unsent}
-      </span>
-    )}
-  </button>
-);
+        <SendHorizontal className="size-4" />
+        Send
+        {unsent > 0 && (
+          <span
+            aria-label={`${String(unsent)} unsent`}
+            className="rounded-full bg-white/25 px-1.5 text-xs tabular-nums"
+          >
+            {unsent}
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        aria-label="What goes to the agent"
+        aria-expanded={open}
+        title="What goes to the agent on Send"
+        disabled={unsent === 0}
+        className="flex h-9 items-center rounded-r-xl bg-sky-600 px-1 text-white transition-colors hover:bg-sky-700 disabled:bg-transparent disabled:text-stone-400"
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        <ChevronUp
+          className={`size-4 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && unsent > 0 ? (
+        <ul
+          aria-label="Pending actions"
+          className="absolute bottom-11 left-0 max-h-64 w-80 overflow-y-auto rounded-xl bg-white p-2 text-xs text-stone-700 shadow-xl ring-1 ring-stone-900/10"
+        >
+          {pending.map((heard) => (
+            <li
+              key={heard.id}
+              className="truncate px-2 py-1"
+              title={describe(heard)}
+            >
+              {describe(heard)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+};
 
 export const Toolbar = ({
   scale,
@@ -121,7 +205,7 @@ export const Toolbar = ({
   fit,
   note,
   clear,
-  unsent,
+  pending,
   send,
   history,
   toggleHistory,
@@ -132,7 +216,7 @@ export const Toolbar = ({
   fit: () => void;
   note: () => void;
   clear: () => void;
-  unsent: number;
+  pending: THeard[];
   send: () => void;
   history: boolean;
   toggleHistory: () => void;
@@ -143,7 +227,7 @@ export const Toolbar = ({
       aria-label="Tools"
       className="pointer-events-auto absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-2xl bg-white p-1 shadow-xl ring-1 ring-stone-900/10"
     >
-      <SendButton unsent={unsent} send={send} />
+      <SendButton pending={pending} send={send} />
       <Divider />
       <Tally show={show} />
       <ToolButton label="New note" shortcut="N" onClick={note}>

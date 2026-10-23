@@ -12,8 +12,8 @@ from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reaction, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, Heard, Turn
-from tests.factories import clear, comment, move, put, react, say, send
-from tests.strategies import actions, item_texts, list_md, messages
+from tests.factories import clear, comment, fill, move, put, react, say, send, unreact
+from tests.strategies import actions, item_texts, list_md, messages, table_md
 
 
 @given(st.builds(Hud), st.lists(actions(st.sampled_from(["a", "b"])), min_size=1))
@@ -58,11 +58,15 @@ def turns(actions: list[Action]) -> list[Turn]:
 async def take(hud: Hud, count: int, seconds: float = 1) -> list[Turn]:
     """The first turns an agent gets from the hud. TimeoutError if fewer come in the seconds."""
     taken: list[Turn] = []
-    async with asyncio.timeout(seconds), aclosing(hud.user_turns()) as user_turns:
-        async for turn in user_turns:
-            taken.append(turn)
-            if len(taken) == count:
-                break
+    async with aclosing(hud.user_turns()) as user_turns:
+        async with asyncio.timeout(seconds):
+            while len(taken) < count:
+                taken.append(await anext(user_turns))
+        # A turn counts as had once the agent asks for the next, so ask for the turns that are there now.
+        with suppress(TimeoutError):
+            async with asyncio.timeout(0):
+                while True:
+                    taken.append(await anext(user_turns))
     return taken
 
 
@@ -81,18 +85,30 @@ async def test_an_agent_gets_the_user_actions_that_no_agent_had(
     assert await take(hud, len(rest)) == turns(said(rest, Author.user))
 
 
-def appended(action: Action) -> bool:
-    """Whether the hud appends the action to the state file, rather than compacting the file, as it does on a clear."""
-    return action.body.kind is not ActionKind.clear
+def plain(action: Action) -> bool:
+    """Whether a turn carries the action as it is: not a clear, which compacts the state file, nor a kind a turn nets."""
+    nets = (ActionKind.clear, ActionKind.move, ActionKind.react, ActionKind.unreact, ActionKind.fill)
+    return action.body.kind not in nets
+
+
+def turn_ids(actions: list[Action]) -> list[list[str]]:
+    """The ids of the user's actions in each turn of the actions, without the sends; the last turn only if it is sent."""
+    turns: list[list[str]] = [[]]
+    for action in actions:
+        if action.author is Author.user and action.body.kind is not ActionKind.send:
+            turns[-1].append(action.id)
+        if action.ends_turn:
+            turns.append([])
+    return turns[:-1]
 
 
 # Each example writes and reads a state file, so its time varies more than the default deadline allows.
-@given(st.lists(actions(st.sampled_from(["a", "b"])).filter(appended)), messages())
+@given(st.lists(actions(st.sampled_from(["a", "b"])).filter(plain)), messages())
 @settings(deadline=None)
 async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: list[Action], text: str) -> None:
-    """Assemble: a hud on a state file that took each action that fits, none of them a clear.
+    """Assemble: a hud on a state file that took each action that fits, with no agent to take the turns.
     Act: start a new hud on the same file, and the user says a message.
-    Assert: the new hud has the same board and log, and an agent gets one turn of the user's actions since their last send, and the message."""
+    Assert: the new hud has the same board and log, and an agent gets each turn that no agent had, then the message's."""
     with TemporaryDirectory() as directory:
         state_file = Path(directory) / "state.jsonl"
         hud = Hud(state_file)
@@ -102,14 +118,85 @@ async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: l
         again = Hud(state_file)
         assert (again.board, again.log.actions) == (hud.board, hud.log.actions)
         again.act(said([text], Author.user))
-        start = max((n + 1 for n, action in enumerate(hud.log.actions) if action.ends_turn), default=0)
-        unsent = [
-            action
-            for action in [*hud.log.actions[start:], *said([text], Author.user)]
-            if action.author is Author.user and action.body.kind is not ActionKind.send
+        expected = turn_ids([*hud.log.actions, *said([text], Author.user)])
+        taken = await take(again, len(expected))
+        assert [[heard.id for heard in turn.actions] for turn in taken] == expected
+
+
+async def test_the_read_position_survives_a_restart() -> None:
+    """Assemble: a hud on a state file where the user sent two turns with no agent, then acted on.
+    Act: start a new hud on the files, and an agent takes the turns; then start another, and compact.
+    Assert: the first new hud's agent gets both turns, the second's gets none, and the compacted files hold the user's turn alone."""
+    with TemporaryDirectory() as directory:
+        state_file = Path(directory) / "board.jsonl"
+        hud = Hud(state_file)
+        hud.act(by(Author.agent, put("plan", "1. a")))
+        hud.act([Action(id="one", author=Author.user, body=say("one"))])
+        hud.act(
+            [
+                Action(id="r", author=Author.user, body=react("plan/1", Reaction.approve)),
+                Action(id="two", author=Author.user, body=say("two")),
+            ]
+        )
+        hud.act([Action(id="late", author=Author.user, body=comment("plan/1", "and"))])
+        again = Hud(state_file)
+        assert again.snapshot().waiting == 2
+        assert [[heard.id for heard in turn.actions] for turn in await take(again, 2)] == [["one"], ["r", "two"]]
+        assert again.snapshot().waiting == 0
+        third = Hud(state_file)
+        assert third.snapshot().waiting == 0
+        with pytest.raises(TimeoutError):
+            await take(third, 1, seconds=0.01)
+        third.compact()
+        assert [action.id for action in Hud(state_file).log.actions] == ["late"]
+        assert Hud(state_file).board == hud.board
+
+
+async def test_a_turn_counts_as_had_once_the_agent_asks_for_the_next() -> None:
+    """Assemble: a hud where the user sent a turn.
+    Act: an agent gets the turn and its monitor ends before it asks for the next; then another agent follows.
+    Assert: the second agent gets the same turn."""
+    hud = Hud()
+    hud.act(said(["one"], Author.user))
+    async with aclosing(hud.user_turns()) as user_turns:
+        first = await anext(user_turns)
+    assert await take(hud, 1) == [first]
+
+
+@given(st.from_type(Reaction), st.from_type(Reaction))
+async def test_a_turn_carries_the_net_of_the_users_actions(before: Reaction, after: Reaction) -> None:
+    """Assemble: a hud with a card of a list and a table, where the user reacted to a part and filled a cell before their turn.
+    Act: in the turn, the user reacts and unreacts, reacts twice, fills a cell twice, fills a cell back as it was, moves the card, and sends.
+    Assert: the pending list and the turn carry the last reaction on a part when it differs from the start, the last fill of a cell when it differs, and no move."""
+    hud = Hud()
+    table = table_md([["x", "y"]], [" {number}", " {number}"])
+    hud.act(by(Author.agent, put("plan", f"1. a\n2. b\n3. c\n\n{table}")))
+    hud.act(
+        [
+            *by(Author.user, react("plan/1", before), fill("plan/4/1", 1)),
+            Action(id="s", author=Author.user, body=send()),
         ]
-        [turn] = await take(again, 1)
-        assert [heard.id for heard in turn.actions] == [action.id for action in unsent]
+    )
+    await take(hud, 1)
+    turn = [
+        Action(id="n1", author=Author.user, body=react("plan/2", after)),
+        Action(id="n2", author=Author.user, body=unreact("plan/2")),
+        Action(id="n3", author=Author.user, body=react("plan/1", after)),
+        Action(id="n4", author=Author.user, body=react("plan/3", before)),
+        Action(id="n5", author=Author.user, body=react("plan/3", after)),
+        Action(id="n6", author=Author.user, body=fill("plan/4/2", 2)),
+        Action(id="n7", author=Author.user, body=fill("plan/4/2", 3)),
+        Action(id="n8", author=Author.user, body=fill("plan/4/1", 2)),
+        Action(id="n9", author=Author.user, body=fill("plan/4/1", 1)),
+        Action(id="n10", author=Author.user, body=move("plan", 5, 5)),
+    ]
+    hud.act(turn)
+    expected = ([] if before == after else ["n3"]) + ["n5", "n7"]
+    assert [heard.id for heard in hud.snapshot().pending] == expected
+    assert hud.snapshot().unsent == len(expected)
+    hud.act([Action(id="e", author=Author.user, body=send())])
+    [heard] = await take(hud, 1)
+    assert [action.id for action in heard.actions] == expected
 
 
 @given(batch=st.lists(actions(st.sampled_from(["a", "b"]))), on_clear=st.booleans())
@@ -117,7 +204,7 @@ async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: l
 async def test_a_hud_on_a_compacted_state_file_takes_up_where_the_last_left_off(
     *, batch: list[Action], on_clear: bool
 ) -> None:
-    """Assemble: a hud on a state file that took each action that fits, compacted by the user's clear or by compact.
+    """Assemble: a hud on a state file that took each action that fits, whose turns an agent took, compacted by the user's clear or by compact.
     Act: start a new hud on the same files.
     Assert: the snapshot holds the board at the start of the user's turn, the state file holds the turn alone, and the
     new hud has the same board and the same unsent actions."""
@@ -127,13 +214,18 @@ async def test_a_hud_on_a_compacted_state_file_takes_up_where_the_last_left_off(
         for action in batch:
             with suppress(ValueError):
                 hud.act([action])
+        if sent := sum(action.ends_turn for action in hud.log.actions):
+            await take(hud, sent)
         if on_clear:
             hud.act([Action(id="c", author=Author.user, body=clear())])
         else:
             hud.compact()
         start = max((n + 1 for n, action in enumerate(hud.log.actions) if action.ends_turn), default=0)
+        at_start = Board()
+        for action in hud.log.actions[:start]:
+            at_start = at_start.apply(action)
         turn = Hud(state_file)
-        assert Board.model_validate_json((Path(directory) / "board.json").read_text()) == turn._turn_board
+        assert Board.model_validate_json((Path(directory) / "board.json").read_text()) == at_start
         assert turn.log.actions == hud.log.actions[start:]
         assert turn.board == hud.board
         assert turn.snapshot().unsent == hud.snapshot().unsent
@@ -149,7 +241,7 @@ async def test_the_agent_gets_the_users_actions_when_the_user_sends(
 ) -> None:
     """Assemble: a hud with the agent's list.
     Act: the user reacts, comments and moves the card, the agent puts a new list, then the user sends.
-    Assert: the agent gets nothing before the send, then one turn of the user's actions with the text of each part as the user saw it."""
+    Assert: the agent gets nothing before the send, then one turn of the user's actions but the move, with the text of each part as the user saw it."""
     hud = Hud()
     hud.act(by(Author.agent, put("plan", list_md("1. ", texts))))
     feedback = by(Author.user, react("plan/2", reaction), comment("plan/1", text), move("plan", 0, 0))
@@ -158,9 +250,9 @@ async def test_the_agent_gets_the_users_actions_when_the_user_sends(
     with pytest.raises(TimeoutError):
         await take(hud, 1, seconds=0.01)
     hud.act([Action(id="end", author=Author.user, body=send())])
-    parts = [{"plan/2": texts[1]}, {"plan/1": texts[0]}, {}]
+    parts = [{"plan/2": texts[1]}, {"plan/1": texts[0]}]
     assert await take(hud, 1) == [
-        Turn(actions=tuple(Heard(**a.model_dump(), parts=p) for a, p in zip(feedback, parts, strict=True)))
+        Turn(actions=tuple(Heard(**a.model_dump(), parts=p) for a, p in zip(feedback[:2], parts, strict=True)))
     ]
 
 
@@ -177,8 +269,9 @@ async def test_the_snapshot_tells_the_page_the_agents_state_and_the_unsent_actio
         assert hud.snapshot().unsent == 1
         hud.act([Action(id="end", author=Author.user, body=send())])
         assert (hud.snapshot().agent, hud.snapshot().unsent) == (AgentState.waiting, 0)
+        assert hud.snapshot().waiting == 1
         await take(hud, 1)
-        assert hud.snapshot().agent is AgentState.working
+        assert (hud.snapshot().agent, hud.snapshot().waiting) == (AgentState.working, 0)
         hud.act(by(Author.agent, say("done")))
         assert hud.snapshot().agent is AgentState.waiting
     assert hud.snapshot().agent is AgentState.away
