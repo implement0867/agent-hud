@@ -92,6 +92,22 @@ export const Whiteboard = ({
   const [linking, setLinking] = useState<TLinking | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, TPoint>>({});
+  /** A half-written comment on each part, with the card's version count when it was last typed. */
+  const [comments, setComments] = useState<
+    Record<string, { text: string; version: number }>
+  >({});
+  /** The last removed card, to restore it where it was. */
+  const [undo, setUndo] = useState<{
+    id: string;
+    at: TPoint | undefined;
+  } | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (undoTimer.current !== null) clearTimeout(undoTimer.current);
+    },
+    [],
+  );
   const [dragging, setDragging] = useState<{ id: string; at: TPoint } | null>(
     null,
   );
@@ -138,6 +154,34 @@ export const Whiteboard = ({
       ),
     [board.cards, board.positions, dragging, settling, placed],
   );
+  const shownNow = useRef(shown);
+  useEffect(() => {
+    shownNow.current = shown;
+  });
+
+  /** Removes the card and offers, for a while, to put it back where it was. */
+  const remove = useCallback(
+    (id: string) => {
+      const at = shownNow.current[id];
+      void act({ kind: ActionKind.enum.remove, id }).then((taken) => {
+        if (!taken) return;
+        setUndo({ id, at });
+        if (undoTimer.current !== null) clearTimeout(undoTimer.current);
+        undoTimer.current = setTimeout(() => {
+          setUndo(null);
+        }, 8000);
+      });
+    },
+    [act],
+  );
+
+  const restore = ({ id, at }: { id: string; at: TPoint | undefined }) => {
+    setUndo(null);
+    void act({ kind: ActionKind.enum.restore, id }).then((taken) => {
+      if (taken && at !== undefined)
+        void act({ kind: ActionKind.enum.move, id, ...at });
+    });
+  };
 
   /**
    * A card that has no place yet gets the free place below the others, once its size is known, and the page tells the
@@ -383,7 +427,7 @@ export const Whiteboard = ({
         !selectedRef.includes("/") &&
         (key === "delete" || key === "backspace")
       )
-        void act({ kind: ActionKind.enum.remove, id: selectedRef });
+        remove(selectedRef);
     }
   };
   const keys = useRef(onKey);
@@ -410,9 +454,20 @@ export const Whiteboard = ({
       linking,
       beginLink,
       openHistory,
+      remove,
       readOnly: false,
     }),
-    [board, act, selection, select, show, linking, beginLink, openHistory],
+    [
+      board,
+      act,
+      selection,
+      select,
+      show,
+      linking,
+      beginLink,
+      openHistory,
+      remove,
+    ],
   );
 
   const empty =
@@ -458,6 +513,23 @@ export const Whiteboard = ({
               Double-click: note · drag a dot: arrow · Space+drag: pan ·
               ⌘+scroll: zoom
             </p>
+            {undo !== null && (
+              <div
+                role="status"
+                className="pointer-events-auto absolute bottom-20 left-1/2 flex -translate-x-1/2 animate-pop items-center gap-3 rounded-full bg-stone-900 px-4 py-2 text-sm text-white shadow-lg"
+              >
+                Removed <span className="font-mono">{undo.id}</span>
+                <button
+                  type="button"
+                  className="font-semibold text-sky-300 hover:underline"
+                  onClick={() => {
+                    restore(undo);
+                  }}
+                >
+                  Undo
+                </button>
+              </div>
+            )}
             <Toolbar
               scale={view.scale}
               zoom={zoom}
@@ -530,7 +602,21 @@ export const Whiteboard = ({
         ))}
         {selectedRef !== null && panelAt !== null && linking === null && (
           <div className="absolute" style={{ left: panelAt.x, top: panelAt.y }}>
-            <FeedbackPanel key={selectedRef} target={selectedRef} />
+            <FeedbackPanel
+              key={selectedRef}
+              target={selectedRef}
+              draft={{
+                text: comments[selectedRef]?.text ?? "",
+                changed: comments[selectedRef]?.version !== version,
+                set: (text) => {
+                  setComments(({ [selectedRef]: _old, ...rest }) =>
+                    text === ""
+                      ? rest
+                      : { ...rest, [selectedRef]: { text, version } },
+                  );
+                },
+              }}
+            />
           </div>
         )}
       </Canvas>

@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { Author, Reaction, valueSchema } from "~/schemas/actions";
 
-const cardSchema = z.strictObject({ md: z.string().min(1), author: Author });
+const cardSchema = z.strictObject({
+  md: z.string().min(1),
+  author: Author,
+  edited: z.boolean(),
+});
 
 const saidSchema = z.strictObject({
   id: z.string(),

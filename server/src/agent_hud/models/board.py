@@ -15,6 +15,7 @@ from agent_hud.models.actions import (
     React,
     Reaction,
     Remove,
+    Restore,
     Say,
     Send,
     TActionId,
@@ -49,7 +50,11 @@ def describe(label: str, column: Column) -> str:
 
 class Card(Model):
     md: str = Field(min_length=1)
-    author: Author
+    author: Author = Field(description="Who put the card first")
+    edited: bool = Field(
+        default=False,
+        description="Whether the latest version is by the other author: the user edited the agent's card, or the agent the user's note",
+    )
 
     @field_validator("md")
     @classmethod
@@ -96,7 +101,9 @@ class Thread(Model):
             case Comment(ref=ref, text=text):
                 said = Said(id=action.id, author=action.author, text=text, ref=ref)
                 return self.model_copy(update={"comments": (*self.comments, said)})
-            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Place() | Clear() | Send():
+            case (
+                Put() | Remove() | Restore() | Say() | Fill() | Link() | Unlink() | Move() | Place() | Clear() | Send()
+            ):
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
@@ -159,12 +166,20 @@ class Board(Model):
     def apply(self, action: Action) -> "Board":
         """The board after the action. ValueError, which names the valid choices, if the action does not fit the board."""
         match action.body:
-            case Put(id=card_id, md=md):
+            case Put(id=card_id, md=md, version=version):
+                if version is not None:
+                    self._check_version(card_id, version)
                 try:
                     card = Card(md=md, author=action.author)
                 except ValidationError as error:
                     raise ValueError(f"card '{card_id}': {one_line(error)}") from error
                 return self._revise(card_id, card)
+            case Restore(id=card_id):
+                if card_id in self.cards:
+                    raise ValueError(f"card '{card_id}' is on the board")
+                if not (versions := self.history.get(card_id)):
+                    raise ValueError(f"no card '{card_id}' in the history")
+                return self._revise(card_id, versions[-1].card)
             case Remove(id=card_id):
                 self._check_card(card_id)
                 cards = {k: v for k, v in self.cards.items() if k != card_id}
@@ -221,6 +236,14 @@ class Board(Model):
             raise ValueError(f"no card '{card_id}': {cards}")
         return Outline(self.cards[card_id].md)
 
+    def _check_version(self, card_id: TCardId, version: int) -> None:
+        """ValueError unless the card is on the board with that number of earlier versions."""
+        earlier = len(self.history.get(card_id, ()))
+        if card_id not in self.cards:
+            raise ValueError(f"card '{card_id}' is gone: it was removed after version {earlier}")
+        if earlier != version:
+            raise ValueError(f"card '{card_id}' changed: it has {earlier} earlier versions, not {version}")
+
     def _check_part(self, ref: TRef) -> None:
         """ValueError, which gives the range of parts, unless the ref names a card of the board or a part of it."""
         card_id, _, path = ref.partition("/")
@@ -251,15 +274,17 @@ class Board(Model):
 
     def _revise(self, card_id: TCardId, card: Card) -> "Board":
         """
-        The board with the card in place of the one with its id, if there was one.
+        The board with the card in place of the one with its id, if there was one; the card keeps that one's author,
+        and counts as edited when the other author put it.
         The feedback on the parts whose text is unchanged follows them, matched by text in order, as do the values
         whose column still takes them; the arrows at those parts and at the card itself stay. The rest of the feedback
         goes to the card's history with the card as it was.
         """
-        cards = {**self.cards, card_id: card}
         if card_id not in self.cards:
-            return self.model_copy(update={"cards": cards})
+            return self.model_copy(update={"cards": {**self.cards, card_id: card}})
         old = self.cards[card_id]
+        card = card.model_copy(update={"author": old.author, "edited": card.author != old.author})
+        cards = {**self.cards, card_id: card}
         after = Outline(card.md)
         moved = {"": ""} if old.md == card.md else {}
         moved |= matched(Outline(old.md), after)

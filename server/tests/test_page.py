@@ -6,10 +6,10 @@ import pytest_asyncio
 from playwright.async_api import Browser, Page, async_playwright, expect
 
 from agent_hud.models.actions import ActionKind, Author, Link, Reaction
-from agent_hud.models.board import Arrow
+from agent_hud.models.board import Arrow, Card
 from agent_hud.settings import find_static_dir
 from tests.conversation import TOKEN, Agent, open_agent, open_page
-from tests.factories import comment, fill, link, move, put, react, read_board, say
+from tests.factories import comment, fill, link, move, put, react, read_board, remove, restore, say
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -274,3 +274,67 @@ async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them
         assert tall["a"][3] > first["a"][3]
         assert board.positions["d"].y == tall["a"][3] + 48
         assert tall["d"][1] == tall["a"][1] + tall["a"][3] + 48
+
+
+async def test_an_edit_does_not_replace_a_newer_version_unless_the_user_says_so(page: Page, agent: Agent) -> None:
+    """Assemble: the agent's plan on the board.
+    Act: the user opens the editor and types; the agent puts a new version; the user saves with Ctrl+Enter, then clicks Save over it.
+    Assert: the editor says the card changed and stays open with the agent's version on the board; after Save over it the card
+    has the user's text, keeps the agent's author with edited true, and says edited by you."""
+    await agent.write(put("plan", "1. parse\n2. render"))
+    card = page.locator('article[data-ref="plan"]')
+    await card.hover()
+    await page.get_by_label("Edit plan").click()
+    box = page.get_by_label("Markdown of plan")
+    await box.fill("1. parse\n2. render\n3. ship")
+    await agent.write(put("plan", "1. parse\n2. cache\n3. render"))
+    await expect(page.get_by_role("alert")).to_contain_text("new version of this card")
+    await box.press("Control+Enter")
+    await expect(box).to_be_visible()
+    assert (await read_board(agent.tools)).cards["plan"].md == "1. parse\n2. cache\n3. render"
+    await page.get_by_role("button", name="Save over it").click()
+    await expect(page.locator('[data-ref="plan/3"]')).to_have_text("ship")
+    await expect(card).to_contain_text("edited by you")
+    board = await read_board(agent.tools)
+    assert board.cards["plan"] == Card(md="1. parse\n2. render\n3. ship", author=Author.agent, edited=True)
+
+
+async def test_a_removed_card_comes_back_with_undo_or_from_the_history(page: Page, agent: Agent) -> None:
+    """Assemble: two cards of the agent, placed.
+    Act: the user selects the first and presses Delete, then clicks Undo in the toast; then removes the second with its
+    button and clicks Restore in the history; then sends.
+    Assert: the first card is back where it was, the second is back, and the agent hears the removes and restores."""
+    await agent.write(put("a", "first"), put("b", "second"))
+    await expect(page.locator('article[data-ref="b"]')).to_be_visible()
+    before = await boxes(page, "a")
+    await page.locator('article[data-ref="a"] header').click()
+    await page.keyboard.press("Delete")
+    toast = page.locator('[role="status"]', has_text="Removed a")
+    await expect(toast).to_be_visible()
+    await toast.get_by_role("button", name="Undo").click()
+    await expect(page.locator('article[data-ref="a"]')).to_be_visible()
+    assert await boxes(page, "a") == before
+    await page.locator('article[data-ref="b"]').hover()
+    await page.get_by_label("Remove b").click()
+    await expect(page.locator('article[data-ref="b"]')).to_have_count(0)
+    await page.keyboard.press("h")
+    await page.get_by_label("Restore b").click()
+    await expect(page.locator('article[data-ref="b"]')).to_be_visible()
+    await send(page)
+    assert await agent.hear() == [remove("a"), restore("a"), remove("b"), restore("b")]
+
+
+async def test_a_half_written_comment_survives_the_agents_new_version(page: Page, agent: Agent) -> None:
+    """Assemble: the agent's plan.
+    Act: the user selects plan/2 and types a comment without sending; the agent puts a new version; the user selects plan/2 again.
+    Assert: the panel closed with the new version, and when it opens again the box has the text and says the card changed."""
+    await agent.write(put("plan", "1. parse\n2. render"))
+    await page.locator('[data-ref="plan/2"]').click()
+    await page.get_by_label("Comment").fill("what about the cache")
+    await agent.write(put("plan", "1. parse\n2. render\n3. ship"))
+    await expect(page.get_by_label("Feedback on plan/2")).to_have_count(0)
+    await page.locator('[data-ref="plan/2"]').click()
+    await expect(page.get_by_label("Comment")).to_have_value("what about the cache")
+    await expect(page.get_by_label("Feedback on plan/2")).to_contain_text(
+        "The card changed since you started this comment"
+    )

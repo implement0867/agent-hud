@@ -35,6 +35,8 @@ export type TTools = {
   beginLink: (from: string, event: PointerEvent) => void;
   /** Opens the history of the card, or of all cards. */
   openHistory: (card: string | null) => void;
+  /** Removes the card, with a toast that undoes it for a while. */
+  remove: (id: string) => void;
   /** An earlier version of a card shows its feedback, and takes no actions. */
   readOnly: boolean;
 };
@@ -72,6 +74,7 @@ export const readOnlyTools = (tools: TTools, version: TVersion): TTools => ({
   select: () => undefined,
   linking: null,
   beginLink: () => undefined,
+  remove: () => undefined,
   readOnly: true,
 });
 
