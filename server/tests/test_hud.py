@@ -12,6 +12,7 @@ from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reaction, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, Heard, Turn
+from agent_hud.store import Store
 from tests.factories import clear, comment, fill, move, place, put, react, say, send, unreact
 from tests.strategies import actions, item_texts, list_md, messages, table_md
 
@@ -110,25 +111,27 @@ async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: l
     Act: start a new hud on the same file, and the user says a message.
     Assert: the new hud has the same board and log, and an agent gets each turn that no agent had, then the message's."""
     with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "state.jsonl"
+        state_file = Path(directory) / "board.db"
         hud = Hud(state_file)
         for action in batch:
             with suppress(ValueError):
                 hud.act([action])
+        hud.close()
         again = Hud(state_file)
         assert (again.board, again.log.actions) == (hud.board, hud.log.actions)
         again.act(said([text], Author.user))
         expected = turn_ids([*hud.log.actions, *said([text], Author.user)])
         taken = await take(again, len(expected))
         assert [[heard.id for heard in turn.actions] for turn in taken] == expected
+        again.close()
 
 
 async def test_the_read_position_survives_a_restart() -> None:
     """Assemble: a hud on a state file where the user sent two turns with no agent, then acted on.
-    Act: start a new hud on the files, and an agent takes the turns; then start another, and compact.
-    Assert: the first new hud's agent gets both turns, the second's gets none, and the compacted files hold the user's turn alone."""
+    Act: start a new hud on the file, and an agent takes the turns; then start another, and compact.
+    Assert: the first new hud's agent gets both turns, the second's gets none, and the compacted file holds the user's turn alone."""
     with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "board.jsonl"
+        state_file = Path(directory) / "board.db"
         hud = Hud(state_file)
         hud.act(by(Author.agent, put("plan", "1. a")))
         hud.act([Action(id="one", author=Author.user, body=say("one"))])
@@ -139,17 +142,35 @@ async def test_the_read_position_survives_a_restart() -> None:
             ]
         )
         hud.act([Action(id="late", author=Author.user, body=comment("plan/1", "and"))])
+        hud.close()
         again = Hud(state_file)
         assert again.snapshot().waiting == 2
         assert [[heard.id for heard in turn.actions] for turn in await take(again, 2)] == [["one"], ["r", "two"]]
         assert again.snapshot().waiting == 0
+        again.close()
         third = Hud(state_file)
         assert third.snapshot().waiting == 0
         with pytest.raises(TimeoutError):
             await take(third, 1, seconds=0.01)
         third.compact()
-        assert [action.id for action in Hud(state_file).log.actions] == ["late"]
-        assert Hud(state_file).board == hud.board
+        third.close()
+        fourth = Hud(state_file)
+        assert [action.id for action in fourth.log.actions] == ["late"]
+        assert fourth.board == hud.board
+        fourth.close()
+
+
+def test_one_process_holds_the_state_file() -> None:
+    """Assemble: a hud on a state file.
+    Act: start another hud on the same file, as a second uvicorn worker would; then close the first and start another.
+    Assert: the second raises RuntimeError that names the file and says one process, and the third starts."""
+    with TemporaryDirectory() as directory:
+        state_file = Path(directory) / "board.db"
+        hud = Hud(state_file)
+        with pytest.raises(RuntimeError, match=f"{re.escape(str(state_file))}.*one process"):
+            Hud(state_file)
+        hud.close()
+        Hud(state_file).close()
 
 
 async def test_a_turn_counts_as_had_once_the_agent_asks_for_the_next() -> None:
@@ -206,11 +227,11 @@ async def test_a_hud_on_a_compacted_state_file_takes_up_where_the_last_left_off(
     *, batch: list[Action], on_clear: bool
 ) -> None:
     """Assemble: a hud on a state file that took each action that fits, whose turns an agent took, compacted by the user's clear or by compact.
-    Act: start a new hud on the same files.
-    Assert: the snapshot holds the board at the start of the user's turn, the state file holds the turn alone, and the
+    Act: start a new hud on the same file.
+    Assert: the checkpoint holds the board at the start of the user's turn, the file holds the turn alone, and the
     new hud has the same board and the same unsent actions."""
     with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "board.jsonl"
+        state_file = Path(directory) / "board.db"
         hud = Hud(state_file)
         for action in batch:
             with suppress(ValueError):
@@ -225,11 +246,16 @@ async def test_a_hud_on_a_compacted_state_file_takes_up_where_the_last_left_off(
         at_start = Board()
         for action in hud.log.actions[:start]:
             at_start = at_start.apply(action)
+        hud.close()
+        store = Store(state_file)
+        _, checkpoint, kept, _ = store.load()
+        store.close()
+        assert (checkpoint, kept) == (at_start, hud.log.actions[start:])
         turn = Hud(state_file)
-        assert Board.model_validate_json((Path(directory) / "board.json").read_text()) == at_start
         assert turn.log.actions == hud.log.actions[start:]
         assert turn.board == hud.board
         assert turn.snapshot().unsent == hud.snapshot().unsent
+        turn.close()
 
 
 def by(author: Author, *bodies: TBody) -> list[Action]:

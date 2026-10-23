@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from importlib.metadata import version
@@ -20,10 +21,10 @@ from websockets.exceptions import InvalidStatus
 
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
-from agent_hud.models.board import Board
 from agent_hud.models.events import Accepted, Rejected, Snapshot, Turn
 from agent_hud.server import build
 from agent_hud.settings import get_settings
+from agent_hud.store import Store
 from agent_hud.web import create_app
 from tests.conversation import TOKEN, User, open_agent, open_page, serve
 from tests.factories import as_json, put, react, say, send
@@ -122,19 +123,43 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
 async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
     """Assemble: a hud on a state file, with a card, a send that an agent took, and a reaction the user has not sent.
     Act: serve the app on it, and stop it.
-    Assert: the snapshot file holds the board at the start of the user's turn, and the state file only the turn."""
-    state_file = tmp_path / "board.jsonl"
+    Assert: the checkpoint holds the board at the start of the user's turn, the state file only the turn, and a new hud starts on it."""
+    state_file = tmp_path / "board.db"
     hud = Hud(state_file)
     hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
     hud.act([Action(id="u", author=Author.user, body=send())])
     hud.act([Action(id="r", author=Author.user, body=react("plan/1", Reaction.approve))])
     async with serve(hud, static_dir, tmp_path) as address, open_agent(address):
         pass
-    snapshot = Board.model_validate_json((tmp_path / "board.json").read_text())
-    assert snapshot.cards == hud.board.cards
-    assert snapshot.threads == {}
-    assert [Action.model_validate_json(line).id for line in state_file.read_text().splitlines()] == ["r"]
-    assert Hud(state_file).board == hud.board
+    store = Store(state_file)
+    _, checkpoint, kept, _ = store.load()
+    store.close()
+    assert checkpoint.cards == hud.board.cards
+    assert checkpoint.threads == {}
+    assert [action.id for action in kept] == ["r"]
+    again = Hud(state_file)
+    assert again.board == hud.board
+    again.close()
+
+
+async def test_a_second_app_on_the_state_dir_does_not_start(static_dir: Path, tmp_path: Path) -> None:
+    """Assemble: an app served on a state dir.
+    Act: create an app from the settings on the same state dir, as a second uvicorn worker would.
+    Assert: RuntimeError that names the board file; and once the first app has stopped, the app starts."""
+    async with serve(Hud(tmp_path / "board.db"), static_dir, tmp_path):
+        with pytest.MonkeyPatch.context() as env:
+            env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
+            env.setenv("AGENT_HUD_STATE_DIR", str(tmp_path))
+            get_settings.cache_clear()
+            try:
+                with pytest.raises(RuntimeError, match=re.escape(str(tmp_path / "board.db"))):
+                    create_app()
+            finally:
+                get_settings.cache_clear()
+    async with serve(Hud(tmp_path / "board.db"), static_dir, tmp_path) as address:
+        host, port = address
+        with await asyncio.to_thread(urlopen, f"http://{host}:{port}/health") as answer:
+            assert answer.status == 200
 
 
 async def test_health_names_the_app_and_its_version(address: tuple[str, int]) -> None:
