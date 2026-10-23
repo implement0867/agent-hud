@@ -201,7 +201,7 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
 
     async def listen() -> str:
         """
-        The websocket URL of the user's turns. Open it with the Monitor tool, and again when the monitor ends.
+        The websocket URL of the user's turns. Open it with the Monitor tool, with the description board, and again when the monitor ends.
         Each line is one turn: the changes that the user made up to their send or chat message, with the text of each part that a change names.
         An edit of a card on the board is a diff of its markdown.
         """
