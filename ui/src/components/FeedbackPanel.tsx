@@ -72,17 +72,24 @@ export const Bubble = ({
   );
 };
 
-/** Enter sends and Shift+Enter starts a new line. The text stays until the server takes it. */
+/**
+ * Enter sends and Shift+Enter starts a new line. The text stays until the server takes it, in the draft when the
+ * parent keeps one, so that it survives the composer closing.
+ */
 export const Composer = ({
   label,
   id,
   send,
+  draft,
 }: {
   label: string;
   id: string;
   send: (text: string) => Promise<boolean>;
+  draft?: { text: string; set: (text: string) => void };
 }) => {
-  const [text, setText] = useState("");
+  const [own, setOwn] = useState("");
+  const text = draft?.text ?? own;
+  const setText = draft?.set ?? setOwn;
   const [sending, setSending] = useState(false);
   const ready = !sending && messageSchema.safeParse(text).success;
   const submit = async () => {
@@ -127,8 +134,14 @@ export const Composer = ({
   );
 };
 
-/** The reactions and comments of the selected part, beside its card. */
-export const FeedbackPanel = ({ target }: { target: string }) => {
+/** The reactions and comments of the selected part, beside its card; a half-written comment stays in its draft. */
+export const FeedbackPanel = ({
+  target,
+  draft,
+}: {
+  target: string;
+  draft: { text: string; changed: boolean; set: (text: string) => void };
+}) => {
   const { board, act, select } = useTools();
   const thread = board.threads[target];
   const reaction = userReaction(thread);
@@ -210,12 +223,18 @@ export const FeedbackPanel = ({ target }: { target: string }) => {
           ))}
         </ul>
       )}
+      {draft.changed && draft.text !== "" ? (
+        <p className="mb-1.5 text-[11px] text-amber-800">
+          The card changed since you started this comment.
+        </p>
+      ) : null}
       <Composer
         label="Comment"
         id="comment-box"
         send={(text) =>
           act({ kind: ActionKind.enum.comment, ref: target, text })
         }
+        draft={draft}
       />
       <p className="mt-2 flex items-center gap-1 text-[11px] text-stone-400">
         <Spline className="size-3" />

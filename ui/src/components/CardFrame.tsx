@@ -8,24 +8,50 @@ import { SelectionKind, isSelected, useTools } from "~/lib/whiteboard";
 import { ActionKind, Author } from "~/schemas/actions";
 import type { TCard, TPoint } from "~/schemas/board";
 
-/** Cmd or Ctrl with Enter, or a click outside, saves; Esc cancels. Saving the same text cancels. */
+const SmallButton = ({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: ReactNode;
+}) => (
+  <button
+    type="button"
+    className="font-semibold text-sky-700 hover:underline"
+    onClick={onClick}
+  >
+    {children}
+  </button>
+);
+
+/**
+ * Cmd or Ctrl with Enter saves. Esc and a click outside close the editor while the text is as it was; with changes,
+ * a click outside keeps the editor open and asks to save or discard, and Esc asks for a second Esc.
+ * When the card got a new version since the editor opened, the editor says so and offers to save over it.
+ */
 export const Editor = ({
   md,
   label,
   warning,
+  changed = false,
   save,
   cancel,
 }: {
   md: string;
   label: string;
   warning: string | null;
-  save: (md: string) => void;
+  /** Whether the card got a new version since the editor opened. */
+  changed?: boolean;
+  /** Saves the text; over is true to replace a newer version of the card. */
+  save: (md: string, over: boolean) => void;
   cancel: () => void;
 }) => {
   const [text, setText] = useState(md);
+  const [asking, setAsking] = useState<"save" | "discard" | null>(null);
+  const dirty = text.trim() !== "" && text !== md;
   const done = () => {
-    if (text.trim() === "" || text === md) cancel();
-    else save(text);
+    if (!dirty) cancel();
+    else if (!changed) save(text, false);
   };
   return (
     <div
@@ -43,16 +69,57 @@ export const Editor = ({
         onChange={(event) => {
           setText(event.target.value);
         }}
-        onBlur={done}
+        onBlur={() => {
+          if (dirty) setAsking("save");
+          else cancel();
+        }}
         onKeyDown={(event) => {
           event.stopPropagation();
-          if (event.key === "Escape") cancel();
+          if (event.key === "Escape") {
+            if (!dirty || asking === "discard") cancel();
+            else setAsking("discard");
+          }
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) done();
         }}
       />
-      <p className="mt-1 text-[11px] text-stone-400">
-        {warning === null ? "" : `${warning} · `}⌘↵ save · esc cancel
-      </p>
+      {changed ? (
+        <div
+          role="alert"
+          className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900"
+        >
+          The agent put a new version of this card while you edited; a save
+          would replace it.
+          <span className="mt-1 flex gap-3">
+            <SmallButton
+              onClick={() => {
+                save(text, true);
+              }}
+            >
+              Save over it
+            </SmallButton>
+            <SmallButton onClick={cancel}>Discard mine</SmallButton>
+          </span>
+        </div>
+      ) : asking === "save" ? (
+        <p className="mt-1 flex gap-3 text-[11px] text-stone-500">
+          Unsaved changes
+          <SmallButton
+            onClick={() => {
+              save(text, false);
+            }}
+          >
+            Save
+          </SmallButton>
+          <SmallButton onClick={cancel}>Discard</SmallButton>
+        </p>
+      ) : (
+        <p className="mt-1 text-[11px] text-stone-400">
+          {warning === null ? "" : `${warning} · `}
+          {asking === "discard"
+            ? "esc again discards your changes"
+            : "⌘↵ save · esc cancel"}
+        </p>
+      )}
     </div>
   );
 };
@@ -132,8 +199,13 @@ export const CardFrame = ({
   drop: (to: TPoint) => void;
   measure: (element: HTMLElement | null) => void;
 }) => {
-  const { board, act, selection, select, openHistory } = useTools();
+  const { board, act, selection, select, openHistory, remove } = useTools();
   const versions = board.history[id]?.length ?? 0;
+  /** The number of earlier versions when the editor opened, so that a save does not replace a newer version. */
+  const [opened, setOpened] = useState<number | null>(null);
+  if (editing && opened === null) setOpened(versions);
+  if (!editing && opened !== null) setOpened(null);
+  const changed = editing && opened !== null && opened !== versions;
   const selected = isSelected(selection, id);
   const note = card.author === Author.enum.user;
   const width = /^ {0,3}(```|~~~)/m.test(card.md)
@@ -153,8 +225,10 @@ export const CardFrame = ({
   const feedback = Object.keys(board.threads).filter(
     (ref) => ref === id || ref.startsWith(`${id}/`),
   ).length;
-  const save = async (md: string) => {
-    if (await act({ kind: ActionKind.enum.put, id, md })) edit(false);
+  const save = async (md: string, over: boolean) => {
+    const version = over ? {} : { version: opened ?? versions };
+    if (await act({ kind: ActionKind.enum.put, id, md, ...version }))
+      edit(false);
   };
   return (
     <article
@@ -186,6 +260,11 @@ export const CardFrame = ({
         >
           {id}
         </span>
+        {card.edited ? (
+          <span className="rounded-full bg-sky-50 px-1.5 py-px font-mono text-[10px] text-sky-700">
+            {note ? "edited by the agent" : "edited by you"}
+          </span>
+        ) : null}
         {versions > 0 && (
           <button
             type="button"
@@ -215,7 +294,7 @@ export const CardFrame = ({
           <IconButton
             label={`Remove ${id}`}
             onClick={() => {
-              void act({ kind: ActionKind.enum.remove, id });
+              remove(id);
             }}
           >
             <Trash2 className="size-3.5" />
@@ -242,8 +321,9 @@ export const CardFrame = ({
                 ? null
                 : "saving moves the feedback on the parts you change to the history"
             }
-            save={(md) => {
-              void save(md);
+            changed={changed}
+            save={(md, over) => {
+              void save(md, over);
             }}
             cancel={() => {
               edit(false);

@@ -107,6 +107,8 @@ const describe = ({ body, parts }: THeard): string => {
       return `edit ${body.id}`;
     case ActionKind.enum.remove:
       return `remove ${body.id}`;
+    case ActionKind.enum.restore:
+      return `restore ${body.id}`;
     case ActionKind.enum.react:
       return `${body.reaction} ${text(body.ref)}`;
     case ActionKind.enum.unreact:
