@@ -51,18 +51,50 @@ export const fitAll = (rects: TRect[], size: TSize): TView => {
   };
 };
 
-/** The top of the lowest free space in three columns of the width, below the rects that cross each column. */
-export const freePlace = (rects: TRect[], width: number): TPoint => {
-  const gap = 48;
+/** The space between cards that the page places. */
+export const gap = 48;
+
+/** The width of a column of the grid that the page places cards on: the widest card, which has code. */
+export const columnWidth = 640;
+
+/** The top of the lowest free space in three columns of the grid, below the rects that cross each column. */
+export const freePlace = (rects: TRect[]): TPoint => {
   return [0, 1, 2]
     .map((column) => {
-      const x = column * (width + gap);
+      const x = column * (columnWidth + gap);
       const below = rects
-        .filter((rect) => rect.x < x + width && rect.x + rect.width > x)
+        .filter((rect) => rect.x < x + columnWidth && rect.x + rect.width > x)
         .map((rect) => rect.y + rect.height + gap);
       return { x, y: Math.max(0, ...below) };
     })
     .reduce((best, place) => (place.y < best.y ? place : best));
+};
+
+/**
+ * The places that the rects below the grown rect move to, so that none of them crosses it or another moved rect:
+ * each rect that crosses the grown rect's columns and starts below its top goes to the next free space, in order of
+ * its top, when it would cross the rect above it. Nothing moves when nothing crosses.
+ */
+export const pushedBelow = (
+  grown: TRect,
+  rects: Record<string, TRect>,
+): Record<string, TPoint> => {
+  const below = Object.entries(rects)
+    .filter(
+      ([, rect]) =>
+        rect.y > grown.y &&
+        rect.x < grown.x + grown.width &&
+        rect.x + rect.width > grown.x,
+    )
+    .sort(([, a], [, b]) => a.y - b.y);
+  const moved: Record<string, TPoint> = {};
+  let floor = grown.y + grown.height + gap;
+  for (const [id, rect] of below) {
+    if (rect.y >= floor) continue;
+    moved[id] = { x: rect.x, y: floor };
+    floor += rect.height + gap;
+  }
+  return moved;
 };
 
 /** The rect of the element in board coordinates, from its rect in the viewport. */

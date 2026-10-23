@@ -15,6 +15,7 @@ import {
   endOnBoard,
   fitAll,
   freePlace,
+  pushedBelow,
   rectOnBoard,
   toBoard,
   zoomAt,
@@ -80,6 +81,7 @@ export const Whiteboard = ({
   const world = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
   const placing = useRef(new Map<string, TPoint>());
+  const heights = useRef(new Map<string, number>());
   const [view, setView] = useState(home);
   const viewNow = useRef(view);
   useEffect(() => {
@@ -96,6 +98,20 @@ export const Whiteboard = ({
   const [settling, setSettling] = useState<Record<string, TPoint>>({});
   const [placed, setPlaced] = useState<Record<string, TPoint>>({});
   const [history, setHistory] = useState<{ card: string | null } | null>(null);
+
+  /** A card that left the board gets a new place when it comes back. */
+  const gone = useCallback((id: string) => !(id in board.cards), [board.cards]);
+  const [cardsSeen, setCardsSeen] = useState(board.cards);
+  if (cardsSeen !== board.cards) {
+    setCardsSeen(board.cards);
+    setPlaced((current) =>
+      Object.keys(current).some(gone)
+        ? Object.fromEntries(
+            Object.entries(current).filter(([id]) => !gone(id)),
+          )
+        : current,
+    );
+  }
 
   const [positionsSeen, setPositionsSeen] = useState(board.positions);
   if (positionsSeen !== board.positions) {
@@ -123,7 +139,10 @@ export const Whiteboard = ({
     [board.cards, board.positions, dragging, settling, placed],
   );
 
-  /** A card that has no place yet gets the free place below the others, once its size is known. */
+  /**
+   * A card that has no place yet gets the free place below the others, once its size is known, and the page tells the
+   * server, so that every tab and reload shows it there and the agent reads it; the first tab to do so wins.
+   */
   const measure = (id: string) => (element: HTMLElement | null) => {
     if (element === null) {
       elements.current.delete(id);
@@ -137,10 +156,44 @@ export const Whiteboard = ({
         ? []
         : [{ ...at, width: card.offsetWidth, height: card.offsetHeight }];
     });
-    const place = freePlace(rects, element.offsetWidth);
+    const place = freePlace(rects);
     placing.current.set(id, place);
     setPlaced((current) => ({ ...current, [id]: place }));
+    void act({ kind: ActionKind.enum.place, id, ...place });
   };
+
+  /** A card that grew with a new version pushes the cards below it down, so that it does not cover them. */
+  useEffect(() => {
+    for (const id of [...placing.current.keys()].filter(gone)) {
+      placing.current.delete(id);
+      heights.current.delete(id);
+    }
+    const rects = Object.fromEntries(
+      [...elements.current].flatMap(([id, card]) => {
+        const at = board.positions[id];
+        return at === undefined
+          ? []
+          : [
+              [
+                id,
+                { ...at, width: card.offsetWidth, height: card.offsetHeight },
+              ],
+            ];
+      }),
+    );
+    const grown = Object.entries(rects).filter(([id, rect]) => {
+      const was = heights.current.get(id);
+      heights.current.set(id, rect.height);
+      return was !== undefined && rect.height > was;
+    });
+    for (const [, rect] of grown) {
+      for (const [id, to] of Object.entries(pushedBelow(rect, rects))) {
+        const pushed = rects[id];
+        if (pushed !== undefined) rects[id] = { ...pushed, ...to };
+        void act({ kind: ActionKind.enum.move, id, ...to });
+      }
+    }
+  }, [act, board.cards, board.positions, gone]);
 
   /** Selecting a part also measures where its feedback panel goes, beside its card. */
   const select = useCallback((next: TSelection) => {

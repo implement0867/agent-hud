@@ -12,6 +12,7 @@ from agent_hud.models.actions import (
     Fill,
     Misfit,
     Move,
+    Place,
     Put,
     React,
     Send,
@@ -51,13 +52,13 @@ def last_on(actions: list[Action], ref: TRef, kinds: tuple[type[React | Unreact 
 
 def net(actions: list[Action], board: Board) -> list[Action]:
     """
-    The actions as a turn carries them, on the board at its start: without the moves, with the last of the reactions
+    The actions as a turn carries them, on the board at its start: without the moves and places, with the last of the reactions
     on a part and the last of the fills of a cell, and without those where the turn ends as it began.
     """
     kept: list[Action] = []
     for n, action in enumerate(actions):
         match action.body:
-            case Move() | Send():
+            case Move() | Place() | Send():
                 continue
             case React(ref=ref) | Unreact(ref=ref):
                 if n != last_on(actions, ref, (React, Unreact)):

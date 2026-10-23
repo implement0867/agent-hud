@@ -10,6 +10,7 @@ from agent_hud.models.actions import (
     Fill,
     Link,
     Move,
+    Place,
     Put,
     React,
     Reaction,
@@ -95,7 +96,7 @@ class Thread(Model):
             case Comment(ref=ref, text=text):
                 said = Said(id=action.id, author=action.author, text=text, ref=ref)
                 return self.model_copy(update={"comments": (*self.comments, said)})
-            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Clear() | Send():
+            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Place() | Clear() | Send():
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
@@ -194,6 +195,11 @@ class Board(Model):
                 return self.model_copy(update={"arrows": {k: v for k, v in self.arrows.items() if k != arrow_id}})
             case Move(id=card_id, x=x, y=y):
                 self._check_card(card_id)
+                return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
+            case Place(id=card_id, x=x, y=y):
+                self._check_card(card_id)
+                if card_id in self.positions:
+                    return self
                 return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
             case Say(text=text):
                 said = Said(id=action.id, author=action.author, text=text)

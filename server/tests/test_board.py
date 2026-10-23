@@ -10,7 +10,7 @@ from agent_hud.models.base import Model
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread, Version
 from agent_hud.models.columns import Column, ColumnKind
 from agent_hud.outline import Outline
-from tests.factories import clear, comment, fill, link, move, put, react, remove, say, unlink, unreact
+from tests.factories import clear, comment, fill, link, move, place, put, react, remove, say, unlink, unreact
 from tests.strategies import (
     action_ids,
     actions,
@@ -138,6 +138,20 @@ def test_move_places_the_card_or_raises(board: Board, card_id: str, x: float, y:
     else:
         with pytest.raises(ValueError):
             act(board, move(card_id, x, y))
+
+
+@given(boards(), card_ids(), coordinates(), coordinates())
+def test_place_gives_the_card_a_position_once_or_raises(board: Board, card_id: str, x: float, y: float) -> None:
+    """Assemble: any board.
+    Act: place a card, as the page does once it has the card's size.
+    Assert: the card has the position when it had none, the board is unchanged when it had one, or ValueError when there was no card."""
+    if card_id in board.cards:
+        after = act(board, place(card_id, x, y))
+        expected = board.positions.get(card_id, Point(x=x, y=y))
+        assert after == board.model_copy(update={"positions": {**board.positions, card_id: expected}})
+    else:
+        with pytest.raises(ValueError):
+            act(board, place(card_id, x, y))
 
 
 @given(card_ids(), mds(), mds(), coordinates(), coordinates())

@@ -34,6 +34,7 @@ class ActionKind(StrEnum):
     link = "link"
     unlink = "unlink"
     move = "move"
+    place = "place"
     clear = "clear"
     send = "send"
 
@@ -101,6 +102,18 @@ class Move(Model):
     y: float = Field(strict=True, allow_inf_nan=False, description="Top edge of the card on the board, in pixels")
 
 
+class Place(Model):
+    """
+    The place that the page gives a card that has none, once the page has the card's size: the first place of a card
+    wins, so that every tab and reload shows the card there, and a later place changes nothing.
+    """
+
+    kind: Literal[ActionKind.place]
+    id: TCardId
+    x: float = Field(strict=True, allow_inf_nan=False)
+    y: float = Field(strict=True, allow_inf_nan=False)
+
+
 class Clear(Model):
     """A new start: every card goes to its history with its feedback, and the board, its arrows and its chat empty."""
 
@@ -116,9 +129,10 @@ class Send(Model):
 type TAgentBody = Annotated[
     Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Clear, Discriminator("kind")
 ]
-"""An action of the agent: each kind but send, which only the user's page sends."""
+"""An action of the agent: each kind but place and send, which only the user's page sends."""
 type TBody = Annotated[
-    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Clear | Send, Discriminator("kind")
+    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Place | Clear | Send,
+    Discriminator("kind"),
 ]
 
 
