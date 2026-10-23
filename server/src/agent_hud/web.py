@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from importlib.metadata import version
 from pathlib import Path
 from secrets import token_urlsafe
@@ -59,12 +61,21 @@ def create_app(hud: Hud | None = None) -> FastAPI:
     """
     settings = get_settings()
     if hud is None:
-        hud = Hud(settings.state_file)
+        hud = Hud(settings.board_file)
     token = settings.token or token_urlsafe(32)
-    if settings.state_dir is not None:
-        keep_token(token, settings.state_dir)
+    keep_token(token, settings.state_dir)
     mcp_app = build(hud, token).http_app(path="/")
-    app = FastAPI(lifespan=mcp_app.lifespan)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+        """The MCP session manager while the app runs, and the state file compacted on shutdown."""
+        try:
+            async with mcp_app.lifespan(app):
+                yield
+        finally:
+            hud.compact()
+
+    app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     with_token = token_dep(token)

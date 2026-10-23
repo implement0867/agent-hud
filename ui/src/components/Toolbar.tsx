@@ -1,4 +1,5 @@
 import {
+  Eraser,
   History,
   Maximize2,
   MessageCircle,
@@ -119,6 +120,7 @@ export const Toolbar = ({
   reset,
   fit,
   note,
+  clear,
   unsent,
   send,
   history,
@@ -129,12 +131,13 @@ export const Toolbar = ({
   reset: () => void;
   fit: () => void;
   note: () => void;
+  clear: () => void;
   unsent: number;
   send: () => void;
   history: boolean;
   toggleHistory: () => void;
 }) => {
-  const { show } = useTools();
+  const { board, show } = useTools();
   return (
     <nav
       aria-label="Tools"
@@ -155,6 +158,19 @@ export const Toolbar = ({
       >
         <History className="size-4" />
       </ToolButton>
+      <button
+        type="button"
+        aria-label="Clear the board"
+        title="Clear the board: the cards go to the history"
+        disabled={Object.keys(board.cards).length === 0}
+        className="flex h-9 min-w-9 items-center justify-center rounded-xl px-2 text-stone-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:text-stone-300 disabled:hover:bg-transparent"
+        onClick={() => {
+          if (window.confirm("Clear the board? The cards go to the history."))
+            clear();
+        }}
+      >
+        <Eraser className="size-4" />
+      </button>
       <Divider />
       <ToolButton
         label="Zoom out"

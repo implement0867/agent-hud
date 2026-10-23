@@ -34,6 +34,7 @@ class ActionKind(StrEnum):
     link = "link"
     unlink = "unlink"
     move = "move"
+    clear = "clear"
     send = "send"
 
 
@@ -100,6 +101,12 @@ class Move(Model):
     y: float = Field(strict=True, allow_inf_nan=False, description="Top edge of the card on the board, in pixels")
 
 
+class Clear(Model):
+    """A new start: every card goes to its history with its feedback, and the board, its arrows and its chat empty."""
+
+    kind: Literal[ActionKind.clear]
+
+
 class Send(Model):
     """The end of the user's turn: the agent's monitor gets the user's actions since the last send."""
 
@@ -107,11 +114,11 @@ class Send(Model):
 
 
 type TAgentBody = Annotated[
-    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move, Discriminator("kind")
+    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Clear, Discriminator("kind")
 ]
 """An action of the agent: each kind but send, which only the user's page sends."""
 type TBody = Annotated[
-    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Send, Discriminator("kind")
+    Put | Remove | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Clear | Send, Discriminator("kind")
 ]
 
 

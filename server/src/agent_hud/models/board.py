@@ -5,6 +5,7 @@ from pydantic import Field, ValidationError, field_validator
 from agent_hud.models.actions import (
     Action,
     Author,
+    Clear,
     Comment,
     Fill,
     Link,
@@ -94,7 +95,7 @@ class Thread(Model):
             case Comment(ref=ref, text=text):
                 said = Said(id=action.id, author=action.author, text=text, ref=ref)
                 return self.model_copy(update={"comments": (*self.comments, said)})
-            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Send():
+            case Put() | Remove() | Say() | Fill() | Link() | Unlink() | Move() | Clear() | Send():
                 raise ValueError(f"a thread does not take {action.body.kind}")
             case _:
                 assert_never(action.body)
@@ -197,6 +198,11 @@ class Board(Model):
             case Say(text=text):
                 said = Said(id=action.id, author=action.author, text=text)
                 return self.model_copy(update={"messages": (*self.messages, said)})
+            case Clear():
+                retired = self
+                for card_id in self.cards:
+                    retired = retired._retire(card_id)
+                return retired.model_copy(update={"cards": {}, "positions": {}, "messages": ()})
             case Send():
                 return self
             case _:

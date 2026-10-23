@@ -12,7 +12,7 @@ from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reaction, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, Heard, Turn
-from tests.factories import comment, move, put, react, say, send
+from tests.factories import clear, comment, move, put, react, say, send
 from tests.strategies import actions, item_texts, list_md, messages
 
 
@@ -81,11 +81,16 @@ async def test_an_agent_gets_the_user_actions_that_no_agent_had(
     assert await take(hud, len(rest)) == turns(said(rest, Author.user))
 
 
+def appended(action: Action) -> bool:
+    """Whether the hud appends the action to the state file, rather than compacting the file, as it does on a clear."""
+    return action.body.kind is not ActionKind.clear
+
+
 # Each example writes and reads a state file, so its time varies more than the default deadline allows.
-@given(st.lists(actions(st.sampled_from(["a", "b"]))), messages())
+@given(st.lists(actions(st.sampled_from(["a", "b"])).filter(appended)), messages())
 @settings(deadline=None)
 async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: list[Action], text: str) -> None:
-    """Assemble: a hud on a state file that took each action that fits.
+    """Assemble: a hud on a state file that took each action that fits, none of them a clear.
     Act: start a new hud on the same file, and the user says a message.
     Assert: the new hud has the same board and log, and an agent gets one turn of the user's actions since their last send, and the message."""
     with TemporaryDirectory() as directory:
@@ -105,6 +110,33 @@ async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: l
         ]
         [turn] = await take(again, 1)
         assert [heard.id for heard in turn.actions] == [action.id for action in unsent]
+
+
+@given(batch=st.lists(actions(st.sampled_from(["a", "b"]))), on_clear=st.booleans())
+@settings(deadline=None)
+async def test_a_hud_on_a_compacted_state_file_takes_up_where_the_last_left_off(
+    *, batch: list[Action], on_clear: bool
+) -> None:
+    """Assemble: a hud on a state file that took each action that fits, compacted by the user's clear or by compact.
+    Act: start a new hud on the same files.
+    Assert: the snapshot holds the board at the start of the user's turn, the state file holds the turn alone, and the
+    new hud has the same board and the same unsent actions."""
+    with TemporaryDirectory() as directory:
+        state_file = Path(directory) / "board.jsonl"
+        hud = Hud(state_file)
+        for action in batch:
+            with suppress(ValueError):
+                hud.act([action])
+        if on_clear:
+            hud.act([Action(id="c", author=Author.user, body=clear())])
+        else:
+            hud.compact()
+        start = max((n + 1 for n, action in enumerate(hud.log.actions) if action.ends_turn), default=0)
+        turn = Hud(state_file)
+        assert Board.model_validate_json((Path(directory) / "board.json").read_text()) == turn._turn_board
+        assert turn.log.actions == hud.log.actions[start:]
+        assert turn.board == hud.board
+        assert turn.snapshot().unsent == hud.snapshot().unsent
 
 
 def by(author: Author, *bodies: TBody) -> list[Action]:

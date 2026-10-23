@@ -4,6 +4,7 @@ from fastmcp import Client
 
 from agent_hud.models.actions import (
     ActionKind,
+    Clear,
     Comment,
     Fill,
     Link,
@@ -63,6 +64,10 @@ def move(card_id: str, x: float, y: float) -> Move:
     return Move(kind=ActionKind.move, id=card_id, x=x, y=y)
 
 
+def clear() -> Clear:
+    return Clear(kind=ActionKind.clear)
+
+
 def send() -> Send:
     return Send(kind=ActionKind.send)
 
@@ -76,6 +81,9 @@ async def read(client: Client[Any], *, history: bool = False) -> Reading:
     return Reading.model_validate((await client.call_tool("read", {"history": history})).structured_content)
 
 
-async def read_board(client: Client[Any], *, history: bool = False) -> Board:
+async def read_board(client: Client[Any], *, history: bool = False, **params: Any) -> Board:
     """The board that read returns, without the parts, to compare with the hud's board."""
-    return Board.model_validate((await read(client, history=history)).model_dump(exclude={"parts"}))
+    reading = Reading.model_validate(
+        (await client.call_tool("read", {"history": history, **params})).structured_content
+    )
+    return Board.model_validate(reading.model_dump(exclude={"parts"}))

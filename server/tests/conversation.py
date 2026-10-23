@@ -111,10 +111,11 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
 
 
 @asynccontextmanager
-async def serve(hud: Hud, static_dir: Path) -> AsyncGenerator[tuple[str, int]]:
-    """Host and port of the app on the hud, with the UI in static_dir, on a free port, until the context ends."""
+async def serve(hud: Hud, static_dir: Path, state_dir: Path) -> AsyncGenerator[tuple[str, int]]:
+    """Host and port of the app on the hud, with the UI in static_dir and its token in state_dir, on a free port, until the context ends."""
     with pytest.MonkeyPatch.context() as env:
         env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
+        env.setenv("AGENT_HUD_STATE_DIR", str(state_dir))
         env.setenv("AGENT_HUD_TOKEN", TOKEN)
         get_settings.cache_clear()
         app = create_app(hud)

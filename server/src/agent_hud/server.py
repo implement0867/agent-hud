@@ -10,7 +10,18 @@ from pydantic import Field, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Put, TAgentBody, TCardId, TRef, Unlink
+from agent_hud.models.actions import (
+    Action,
+    ActionKind,
+    Author,
+    Misfit,
+    Put,
+    TActionId,
+    TAgentBody,
+    TCardId,
+    TRef,
+    Unlink,
+)
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
 from agent_hud.schema import compact
@@ -44,6 +55,34 @@ class Reading(Board):
     """The board as read returns it, with the parts of each card."""
 
     parts: TParts = Field(description="The text of each part of each card, by card id and part number")
+
+
+def on_cards(ref: TRef, cards: set[TCardId]) -> bool:
+    return ref.partition("/")[0] in cards
+
+
+def selected(board: Board, cards: list[TCardId] | None, since: TActionId | None) -> Board:
+    """
+    The board with the given cards only, if given, with everything keyed by card or by a ref on it kept for those cards;
+    and with the messages after the one with the id since, if it is there.
+    """
+    chat = board.messages
+    if since is not None and (found := [n for n, said in enumerate(chat) if said.id == since]):
+        chat = chat[found[-1] + 1 :]
+    if cards is None:
+        return board.model_copy(update={"messages": chat})
+    kept = set(cards)
+    return board.model_copy(
+        update={
+            "cards": {k: v for k, v in board.cards.items() if k in kept},
+            "threads": {k: v for k, v in board.threads.items() if on_cards(k, kept)},
+            "values": {k: v for k, v in board.values.items() if on_cards(k, kept)},
+            "arrows": {k: v for k, v in board.arrows.items() if on_cards(v.src, kept) or on_cards(v.dst, kept)},
+            "messages": chat,
+            "positions": {k: v for k, v in board.positions.items() if k in kept},
+            "history": {k: v for k, v in board.history.items() if k in kept},
+        }
+    )
 
 
 def put_ids(bodies: list[TAgentBody]) -> Iterator[TCardId]:
@@ -144,9 +183,20 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
     async def read(
         *,
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
+        cards: Annotated[
+            list[TCardId] | None,
+            Field(description="Only these cards, with the feedback, values, arrows, positions and history on them"),
+        ] = None,
+        since: Annotated[
+            TActionId | None, Field(description="Only the messages after the message or comment with this id")
+        ] = None,
     ) -> Reading:
-        """The whole board: the cards and the parts of each by number, the threads of feedback on them by ref, the values, the arrows and the chat. Read it once, then follow the turns; read it again when unsure."""
+        """
+        The board: the cards and the parts of each by number, the threads of feedback on them by ref, the values, the arrows and the chat.
+        Read it once, then follow the turns; read it again when unsure, with cards or since to read less.
+        """
         board = hud.board if history else hud.board.model_copy(update={"history": {}})
+        board = selected(board, cards, since)
         return Reading(**dict(board), parts={card_id: board.texts_of(card_id) for card_id in board.cards})
 
     async def listen() -> str:

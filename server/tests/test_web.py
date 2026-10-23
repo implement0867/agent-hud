@@ -19,13 +19,14 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
 from agent_hud.hud import Hud
-from agent_hud.models.actions import ActionKind, TBody
+from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
+from agent_hud.models.board import Board
 from agent_hud.models.events import Accepted, Rejected, Snapshot, Turn
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.web import create_app
 from tests.conversation import TOKEN, User, open_page, serve
-from tests.factories import as_json, put, say
+from tests.factories import as_json, put, react, say, send
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
@@ -51,9 +52,9 @@ def hud() -> Hud:
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def address(static_dir: Path, hud: Hud) -> AsyncIterator[tuple[str, int]]:
+async def address(static_dir: Path, state_dir: Path, hud: Hud) -> AsyncIterator[tuple[str, int]]:
     """Host and port of the app on the module's hud."""
-    async with serve(hud, static_dir) as address:
+    async with serve(hud, static_dir, state_dir) as address:
         yield address
 
 
@@ -116,6 +117,24 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
     path = tmp_path / "state" / "token"
     assert path.stat().st_mode & 0o777 == 0o600
     assert len(path.read_text()) >= 32
+
+
+async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
+    """Assemble: a hud on a state file, with a card and a reaction the user has not sent.
+    Act: serve the app on it, and stop it.
+    Assert: the snapshot file holds the board at the start of the user's turn, and the state file only the turn."""
+    state_file = tmp_path / "board.jsonl"
+    hud = Hud(state_file)
+    hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
+    hud.act([Action(id="u", author=Author.user, body=send())])
+    hud.act([Action(id="r", author=Author.user, body=react("plan/1", Reaction.approve))])
+    async with serve(hud, static_dir, tmp_path):
+        pass
+    snapshot = Board.model_validate_json((tmp_path / "board.json").read_text())
+    assert snapshot.cards == hud.board.cards
+    assert snapshot.threads == {}
+    assert [Action.model_validate_json(line).id for line in state_file.read_text().splitlines()] == ["r"]
+    assert Hud(state_file).board == hud.board
 
 
 async def test_health_names_the_app_and_its_version(address: tuple[str, int]) -> None:
