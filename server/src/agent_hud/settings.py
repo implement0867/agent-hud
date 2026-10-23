@@ -22,11 +22,11 @@ class Settings(BaseSettings):
 
     static_dir: Path = Field(default_factory=find_static_dir, description="Directory of the built UI")
     state_dir: Path = Field(
-        default_factory=find_state_dir, description="Directory of the token file and of the board files by default"
+        default_factory=find_state_dir, description="Directory of the token file and of the board file by default"
     )
     state_file: Path | None = Field(
         default=None,
-        description="JSONL file of the actions, replayed on start; board.jsonl in the state dir by default",
+        description="SQLite file of the board's state, replayed on start; board.db in the state dir by default",
     )
     token: str | None = Field(
         default=None,
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     @property
     def board_file(self) -> Path:
-        return self.state_file or self.state_dir / "board.jsonl"
+        return self.state_file or self.state_dir / "board.db"
 
 
 @lru_cache(maxsize=1)

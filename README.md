@@ -30,8 +30,8 @@ that pid.
 |---|---|
 | `AGENT_HUD_PORT` | the port, 7676 by default; the hook, the MCP server URL and `make serve` read it |
 | `AGENT_HUD_TOKEN` | the token that `/mcp/` needs as a bearer token, which the plugin sends from this variable; unset, `/mcp/` is open to local processes and the app makes a token for the sockets alone |
-| `AGENT_HUD_STATE_DIR` | the directory of the token file and, by default, of the board files; `$XDG_STATE_HOME/agent-hud` by default, with `~/.local/state` for the XDG state home |
-| `AGENT_HUD_STATE_FILE` | the JSONL file that the app appends each action to and replays on start; `board.jsonl` in the state dir by default. On a clear and on shutdown the app compacts it: `board.json` next to it takes the board at the start of the user's turn, and the file keeps the turn alone |
+| `AGENT_HUD_STATE_DIR` | the directory of the token file and, by default, of the board file; `$XDG_STATE_HOME/agent-hud` by default, with `~/.local/state` for the XDG state home |
+| `AGENT_HUD_STATE_FILE` | the SQLite file that the app appends each action to and replays on start; `board.db` in the state dir by default. On a clear and on shutdown the app compacts it: its checkpoint takes the board at the start of the user's turn, and the actions from there alone stay. One process holds the file, so a second one on the same state dir, such as a second uvicorn worker, does not start |
 | `AGENT_HUD_STATIC_DIR` | the directory of the built UI; the one in the package by default |
 
 The hook of the first session of the day starts the app, so these must be set in the environment that

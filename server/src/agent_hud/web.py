@@ -58,6 +58,7 @@ def create_app(hud: Hud | None = None) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, and the built UI at /, on the hud, or on a new one from the settings.
     The sockets need the token as a query parameter; /mcp/ needs it as a bearer token when the settings give one.
+    RuntimeError when another process holds the state file, as a second uvicorn worker would.
     """
     settings = get_settings()
     if hud is None:
@@ -68,12 +69,13 @@ def create_app(hud: Hud | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """The MCP session manager while the app runs, and the state file compacted on shutdown."""
+        """The MCP session manager while the app runs, and the state file compacted and let go on shutdown."""
         try:
             async with mcp_app.lifespan(app):
                 yield
         finally:
             hud.compact()
+            hud.close()
 
     app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
