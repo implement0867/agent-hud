@@ -1,3 +1,4 @@
+import { BoardMenu } from "~/components/BoardMenu";
 import type { TAgentState } from "~/schemas/events";
 
 const looks: Record<TAgentState, { dot: string; label: string }> = {
@@ -9,7 +10,7 @@ const looks: Record<TAgentState, { dot: string; label: string }> = {
   waiting: { dot: "bg-emerald-500", label: "Agent connected · your turn" },
 };
 
-/** The state of the agent's socket: whether an agent's monitor is open, and whether it has the user's last turn; and the turns sent that no agent has taken. */
+/** The board the page shows, with the menu of boards; and the state of the agent's socket: whether an agent's monitor is open, and whether it has the user's last turn; and the turns sent that no agent has taken. */
 export const AgentPill = ({
   agent,
   waiting,
@@ -29,12 +30,13 @@ export const AgentPill = ({
     <div
       role="status"
       aria-label="Agent"
-      className="absolute top-4 left-4 flex max-w-md items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-sm shadow-sm ring-1 ring-stone-900/5"
+      className="pointer-events-auto absolute top-4 left-4 flex max-w-xl items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-sm shadow-sm ring-1 ring-stone-900/5"
     >
       <span className={`size-2 shrink-0 rounded-full ${dot}`} />
       <span className="font-semibold tracking-tight text-stone-800">
         agent-hud
       </span>
+      <BoardMenu />
       <span className="truncate text-stone-500">{label}</span>
     </div>
   );

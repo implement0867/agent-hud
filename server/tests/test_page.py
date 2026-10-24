@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from playwright.async_api import Browser, Page, async_playwright, expect
 
 from agent_hud.hud import Hud
@@ -11,7 +13,7 @@ from agent_hud.models.actions import Action, ActionKind, Author, Link, Reaction
 from agent_hud.models.board import Arrow, Card
 from agent_hud.settings import find_static_dir
 from tests.conversation import TOKEN, Agent, open_agent, open_page, serve
-from tests.factories import comment, fill, link, move, put, react, read_board, remove, restore, say
+from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, restore, say
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -585,3 +587,29 @@ async def test_the_user_drags_the_chat_to_a_width_that_the_browser_keeps(page: P
     await settled(page)
     again = await chat.bounding_box()
     assert again is not None and round(again["width"]) == round(after["width"])
+
+
+async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Agent, address: tuple[str, int]) -> None:
+    """Assemble: an agent in a project puts a card on the project's board, while the page shows the shared board.
+    Act: the user opens the menu of boards and clicks the project's board.
+    Assert: the menu names the shared board as the page's, and the project's board with one card; the page then shows
+    the project's board with the card, and names it."""
+    host, port = address
+    project = StreamableHttpTransport(
+        f"http://{host}:{port}/mcp/", headers={"X-Agent-Hud-Board": "/home/me/demo"}, auth=TOKEN
+    )
+    async with Client(project) as tools:
+        await tools.call_tool("write", {"actions": as_json(put("plan", "1. a"))})
+        board = str((await tools.call_tool("listen", {})).structured_content["board"])  # type: ignore[index]
+    await agent.write(put("shared-note", "1. b"))
+    await expect(page.locator('article[data-ref="shared-note"]')).to_be_visible()
+    await page.get_by_label("Boards").click()
+    menu = page.get_by_role("menu", name="Other boards")
+    await expect(menu.get_by_role("menuitem", name=re.compile("^shared"))).to_have_attribute("aria-current", "page")
+    item = menu.get_by_role("menuitem", name=re.compile(f"^{board} 1 card$"))
+    await expect(item).to_be_visible()
+    await item.click()
+    await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
+    await expect(page.locator('article[data-ref="shared-note"]')).to_have_count(0)
+    assert f"board={board}" in page.url
+    await expect(page.get_by_label("Boards")).to_have_text(board)
