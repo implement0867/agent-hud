@@ -28,6 +28,10 @@ class Settings(BaseSettings):
         default=None,
         description="SQLite file of the board's state, replayed on start; board.db in the state dir by default",
     )
+    build: str = Field(
+        default="",
+        description="A fingerprint of the sources the app runs from, which the hook sets and /health returns, so that the hook restarts an app from older sources",
+    )
     token: str | None = Field(
         default=None,
         description="The token that /mcp/ needs as a bearer token and the sockets as a query parameter; none makes one for the sockets only",

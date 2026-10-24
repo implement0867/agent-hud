@@ -24,6 +24,13 @@ from tests.factories import as_json, send
 TOKEN = "test-token"
 
 
+async def listen_url(tools: Client[Any]) -> str:
+    """The websocket URL of the user's turns that listen returns."""
+    listening = (await tools.call_tool("listen", {})).structured_content
+    assert listening is not None
+    return str(listening["url"])
+
+
 @dataclass
 class Agent:
     """The agent's side of the board: the MCP tools over HTTP, and a monitor on the URL that listen returns."""
@@ -46,7 +53,7 @@ class Agent:
     @asynccontextmanager
     async def listen(self) -> AsyncGenerator[None]:
         """Open a new monitor, as the agent does when its last monitor ended, until the context ends."""
-        async with connect((await self.tools.call_tool("listen", {})).data, proxy=None) as self.monitor:
+        async with connect(await listen_url(self.tools), proxy=None) as self.monitor:
             yield
 
 
@@ -106,17 +113,17 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
     host, port = address
     async with AsyncExitStack() as stack:
         tools = await stack.enter_async_context(Client(f"http://{host}:{port}/mcp/", auth=TOKEN))
-        url = (await tools.call_tool("listen", {})).data
-        yield Agent(tools, await stack.enter_async_context(connect(url, proxy=None)))
+        yield Agent(tools, await stack.enter_async_context(connect(await listen_url(tools), proxy=None)))
 
 
 @asynccontextmanager
-async def serve(hud: Hud, static_dir: Path, state_dir: Path) -> AsyncGenerator[tuple[str, int]]:
-    """Host and port of the app on the hud, with the UI in static_dir and its token in state_dir, on a free port, until the context ends."""
+async def serve(hud: Hud, static_dir: Path, state_dir: Path, build: str = "") -> AsyncGenerator[tuple[str, int]]:
+    """Host and port of the app on the hud, with the UI in static_dir, its token in state_dir and the build fingerprint, on a free port, until the context ends."""
     with pytest.MonkeyPatch.context() as env:
         env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
         env.setenv("AGENT_HUD_STATE_DIR", str(state_dir))
         env.setenv("AGENT_HUD_TOKEN", TOKEN)
+        env.setenv("AGENT_HUD_BUILD", build)
         get_settings.cache_clear()
         app = create_app(hud)
     get_settings.cache_clear()
