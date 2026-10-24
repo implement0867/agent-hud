@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from agent_hud.hud import Hud
+from tests.conversation import serve
+
 # The app fixture serves in the module's loop, so the tests run there too.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -15,8 +18,10 @@ ROOT = Path(__file__).parents[2]
 TOOLS = ("sh", "curl", "sed", "grep", "mkdir", "cat", "sleep", "kill", "nohup")
 
 
-async def run_hook(port: int, state_home: Path, path: str | None = None) -> subprocess.CompletedProcess[str]:
-    """The hook run for the port, in a thread so that the servers in the test's loop can answer it."""
+async def run_hook(
+    port: int, state_home: Path, path: str | None = None, *, build: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """The hook run for the port, or with --build, in a thread so that the servers in the test's loop can answer it."""
     env = os.environ | {
         "CLAUDE_PLUGIN_ROOT": str(ROOT),
         "AGENT_HUD_PORT": str(port),
@@ -26,7 +31,7 @@ async def run_hook(port: int, state_home: Path, path: str | None = None) -> subp
         env["PATH"] = path
     return await asyncio.to_thread(
         subprocess.run,
-        ["sh", str(ROOT / "hooks" / "serve.sh")],
+        ["sh", str(ROOT / "hooks" / "serve.sh"), *(["--build"] if build else [])],
         env=env,
         capture_output=True,
         text=True,
@@ -61,14 +66,32 @@ async def other_program() -> AsyncIterator[int]:
         yield server.sockets[0].getsockname()[1]
 
 
-async def test_hook_exits_at_once_when_this_version_answers(address: tuple[str, int], tmp_path: Path) -> None:
-    """Assemble: the app on a port.
+async def fingerprint() -> str:
+    """The fingerprint of the server's sources, as the hook computes it."""
+    result = await run_hook(0, Path("/nonexistent"), build=True)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+async def test_hook_exits_at_once_when_this_build_answers(static_dir: Path, tmp_path: Path) -> None:
+    """Assemble: the app on a port, started with the fingerprint of these sources.
     Act: run the hook for that port.
     Assert: exit 0, no message, and no server of its own started."""
-    _, port = address
-    result = await run_hook(port, tmp_path)
+    async with serve(Hud(), static_dir, tmp_path, build=await fingerprint()) as (_, port):
+        result = await run_hook(port, tmp_path)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert not (tmp_path / "agent-hud" / "server.pid").exists()
+
+
+async def test_hook_stops_an_app_from_other_sources(address: tuple[str, int], tmp_path: Path) -> None:
+    """Assemble: the app on a port, started with another build fingerprint, and no pid file to stop it with.
+    Act: run the hook for that port.
+    Assert: exit 1, and the message says an older agent-hud answers and names the pid file."""
+    _, port = address
+    result = await run_hook(port, tmp_path)
+    assert result.returncode == 1
+    assert "an older agent-hud answers" in result.stderr
+    assert "server.pid" in result.stderr
 
 
 async def test_hook_fails_when_another_program_answers(other_program: int, tmp_path: Path) -> None:

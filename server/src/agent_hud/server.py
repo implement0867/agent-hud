@@ -1,4 +1,6 @@
 from collections.abc import Iterator
+from pathlib import Path
+from shlex import quote
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -35,6 +37,24 @@ BodyAdapter = TypeAdapter[TAgentBody](TAgentBody)
 def agent_kinds() -> list[ActionKind]:
     """The kinds of action the agent writes: each kind but send, which is the page's."""
     return [kind for kind in ActionKind if kind is not ActionKind.send]
+
+
+class Listening(Model):
+    """Where the user's turns come from: a websocket URL, and a shell command that prints each turn as a line."""
+
+    url: str = Field(description="The websocket URL of the user's turns, for a monitor that takes a websocket")
+    command: str = Field(
+        description="A shell command that prints each turn as a line, for a monitor that takes a command"
+    )
+
+
+def turns_command(url: str) -> str:
+    """The agent-hud-turns command on the URL, through uv in the server's project when the app runs from its source."""
+    project = Path(__file__).resolve().parents[2]
+    runner = (
+        f"uv run --no-dev --frozen --project {quote(str(project))} " if (project / "pyproject.toml").exists() else ""
+    )
+    return f"{runner}agent-hud-turns {quote(url)}"
 
 
 class Written(Model):
@@ -199,14 +219,16 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
         board = selected(board, cards, since)
         return Reading(**dict(board), parts={card_id: board.texts_of(card_id) for card_id in board.cards})
 
-    async def listen() -> str:
+    async def listen() -> Listening:
         """
-        The websocket URL of the user's turns. Open it with the Monitor tool, with the description board, and again when the monitor ends.
+        Where the user's turns come from: a websocket URL, and a shell command that prints each turn as a line.
+        Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
         Each line is one turn: the changes that the user made up to their send or chat message, with the text of each part that a change names.
         An edit of a card on the board is a diff of its markdown.
         """
         url = get_http_request().url.replace(scheme="ws", path="/agent")
-        return str(url if token is None else url.include_query_params(token=token))
+        url = str(url if token is None else url.include_query_params(token=token))
+        return Listening(url=url, command=turns_command(url))
 
     tool = FunctionTool.from_function(write)
     parameters, kinds = compact(FunctionTool.from_function(listed).parameters)

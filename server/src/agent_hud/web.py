@@ -84,8 +84,8 @@ def create_app(hud: Hud | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        """The app and its version, for the hook that starts it: any other answer on the port is another program."""
-        return {"app": "agent-hud", "version": version("agent-hud")}
+        """The app, its version and the build fingerprint it was started with, for the hook that starts it: any other answer on the port is another program."""
+        return {"app": "agent-hud", "version": version("agent-hud"), "build": settings.build}
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
     async def page(websocket: WebSocket) -> None:
