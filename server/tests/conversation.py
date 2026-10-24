@@ -117,8 +117,10 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
 
 
 @asynccontextmanager
-async def serve(hud: Hud, static_dir: Path, state_dir: Path, build: str = "") -> AsyncGenerator[tuple[str, int]]:
-    """Host and port of the app on the hud, with the UI in static_dir, its token in state_dir and the build fingerprint, on a free port, until the context ends."""
+async def serve(
+    hud: Hud, static_dir: Path, state_dir: Path, build: str = "", port: int = 0
+) -> AsyncGenerator[tuple[str, int]]:
+    """Host and port of the app on the hud, with the UI in static_dir, its token in state_dir and the build fingerprint, on the port or a free one, until the context ends."""
     with pytest.MonkeyPatch.context() as env:
         env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
         env.setenv("AGENT_HUD_STATE_DIR", str(state_dir))
@@ -129,7 +131,8 @@ async def serve(hud: Hud, static_dir: Path, state_dir: Path, build: str = "") ->
     get_settings.cache_clear()
     # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-    sock.bind(("127.0.0.1", 0))
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", port))
     sock.listen()
     server = uvicorn.Server(uvicorn.Config(app, log_config=None))
     task = asyncio.create_task(server.serve(sockets=[sock]))
@@ -138,3 +141,4 @@ async def serve(hud: Hud, static_dir: Path, state_dir: Path, build: str = "") ->
     finally:
         server.should_exit = True
         await task
+        sock.close()

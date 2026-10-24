@@ -2,6 +2,7 @@ import {
   ChevronUp,
   Eraser,
   History,
+  Keyboard,
   Maximize2,
   MessageCircle,
   Minus,
@@ -9,10 +10,11 @@ import {
   SendHorizontal,
   StickyNote,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { assertNever } from "~/lib/assertNever";
+import { mod } from "~/lib/keys";
 import { reactionIcons, reactionTones, reactionsOf } from "~/lib/reactions";
 import { useTools } from "~/lib/whiteboard";
 import { ActionKind, Reaction } from "~/schemas/actions";
@@ -151,7 +153,7 @@ const SendButton = ({
       <button
         type="button"
         aria-label="Send to the agent"
-        title="Send your changes to the agent (⌘↵)"
+        title={`Send your changes to the agent (${mod}↵)`}
         disabled={unsent === 0}
         className="flex h-9 items-center gap-1.5 rounded-l-xl bg-sky-600 px-3 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:bg-transparent disabled:text-stone-400"
         onClick={send}
@@ -213,6 +215,9 @@ export const Toolbar = ({
   send,
   history,
   toggleHistory,
+  shortcuts,
+  toggleShortcuts,
+  onHeight,
 }: {
   scale: number;
   zoom: (factor: number) => void;
@@ -224,12 +229,29 @@ export const Toolbar = ({
   send: () => void;
   history: boolean;
   toggleHistory: () => void;
+  shortcuts: boolean;
+  toggleShortcuts: () => void;
+  /** Gets the toolbar's height when it changes, so that the chat sits above it on a narrow screen. */
+  onHeight: (height: number) => void;
 }) => {
   const { board, show } = useTools();
+  const nav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = nav.current;
+    if (element === null) return;
+    const observer = new ResizeObserver(() => {
+      onHeight(element.offsetHeight);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [onHeight]);
   return (
     <nav
+      ref={nav}
       aria-label="Tools"
-      className="pointer-events-auto absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-2xl bg-white p-1 shadow-xl ring-1 ring-stone-900/10"
+      className="pointer-events-auto absolute bottom-4 left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-0.5 rounded-2xl bg-white p-1 shadow-xl ring-1 ring-stone-900/10"
     >
       <SendButton pending={pending} send={send} />
       <Divider />
@@ -245,6 +267,14 @@ export const Toolbar = ({
         onClick={toggleHistory}
       >
         <History className="size-4" />
+      </ToolButton>
+      <ToolButton
+        label="Shortcuts"
+        shortcut="?"
+        pressed={shortcuts}
+        onClick={toggleShortcuts}
+      >
+        <Keyboard className="size-4" />
       </ToolButton>
       <button
         type="button"

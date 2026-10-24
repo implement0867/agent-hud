@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import type { PointerEvent, ReactNode } from "react";
 
 import { CardBody } from "~/components/CardBody";
+import { mod } from "~/lib/keys";
 import { Connector, Marks } from "~/components/Marks";
 import { SelectionKind, isSelected, useTools } from "~/lib/whiteboard";
 import { ActionKind, Author } from "~/schemas/actions";
@@ -117,7 +118,7 @@ export const Editor = ({
           {warning === null ? "" : `${warning} · `}
           {asking === "discard"
             ? "esc again discards your changes"
-            : "⌘↵ save · esc cancel"}
+            : `${mod}↵ save · esc cancel`}
         </p>
       )}
     </div>

@@ -13,6 +13,7 @@ const saidSchema = z.strictObject({
   author: Author,
   text: z.string(),
   ref: z.string().nullable(),
+  at: z.string().nullable(),
 });
 
 const threadSchema = z.strictObject({

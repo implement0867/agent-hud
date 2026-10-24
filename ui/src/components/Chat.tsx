@@ -1,5 +1,6 @@
 import { MessagesSquare, PanelRightClose } from "lucide-react";
 import { useState } from "react";
+import type { CSSProperties } from "react";
 
 import { Bubble, Composer } from "~/components/FeedbackPanel";
 import { useTools } from "~/lib/whiteboard";
@@ -9,8 +10,16 @@ import { ActionKind, Author } from "~/schemas/actions";
  * The messages between the user and the agent, and the comments on parts, newest at the bottom.
  * A closed chat counts the agent's new messages and comments. A message also sends the user's unsent actions.
  */
-export const Chat = ({ unsent }: { unsent: number }) => {
+export const Chat = ({
+  unsent,
+  above,
+}: {
+  unsent: number;
+  /** The height of the toolbar, which the chat sits above on a screen narrower than 1280 px. */
+  above: number;
+}) => {
   const { board, act } = useTools();
+  const lift = { "--toolbar": `${String(above)}px` } as CSSProperties;
   const [open, setOpen] = useState(true);
   const fromAgent = board.messages.filter(
     (said) => said.author === Author.enum.agent,
@@ -22,7 +31,8 @@ export const Chat = ({ unsent }: { unsent: number }) => {
       <button
         type="button"
         aria-label="Open the chat"
-        className="pointer-events-auto absolute right-4 bottom-4 grid size-11 place-items-center rounded-full bg-white text-stone-600 shadow-lg ring-1 ring-stone-900/10 hover:text-stone-900"
+        style={lift}
+        className="pointer-events-auto absolute right-4 bottom-[calc(var(--toolbar)+2rem)] grid size-11 place-items-center rounded-full bg-white text-stone-600 shadow-lg ring-1 ring-stone-900/10 hover:text-stone-900 xl:bottom-4"
         onClick={() => {
           setOpen(true);
         }}
@@ -38,7 +48,8 @@ export const Chat = ({ unsent }: { unsent: number }) => {
   return (
     <aside
       aria-label="Chat with the agent"
-      className="pointer-events-auto absolute right-4 bottom-4 flex max-h-[70%] select-text w-80 animate-pop flex-col rounded-2xl bg-white shadow-xl ring-1 ring-stone-900/10"
+      style={lift}
+      className="pointer-events-auto absolute right-4 bottom-[calc(var(--toolbar)+2rem)] flex max-h-[70%] w-80 max-w-[calc(100%-2rem)] animate-pop flex-col rounded-2xl bg-white shadow-xl ring-1 ring-stone-900/10 select-text xl:bottom-4"
     >
       <header className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
         <h2 className="text-sm font-semibold text-stone-800">Chat</h2>
