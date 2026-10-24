@@ -86,7 +86,10 @@ export const Marks = ({
   );
 };
 
-/** A dot on the right edge of a part or card; a drag from it draws an arrow. */
+/**
+ * A dot beside the right edge of a part or card; a drag from it draws an arrow. The dot sits in a strip that joins the
+ * part's edge, so that the pointer stays on the part on its way to the dot.
+ */
 export const Connector = ({ target }: { target: string }) => {
   const { beginLink, readOnly } = useTools();
   if (readOnly) return null;
@@ -95,13 +98,14 @@ export const Connector = ({ target }: { target: string }) => {
       role="button"
       tabIndex={-1}
       aria-label={`Draw an arrow from ${target}`}
-      title="Drag to draw an arrow"
-      className="absolute top-1/2 -right-[1.4rem] hidden size-3 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-violet-500 bg-white shadow group-hover/part:block hover:scale-125 hover:bg-violet-500"
+      className="group/dot absolute inset-y-0 left-full hidden w-[1.4rem] cursor-crosshair items-center justify-end group-hover/part:flex"
       onPointerDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
         beginLink(target, event);
       }}
-    />
+    >
+      <span className="size-3 rounded-full border-2 border-violet-500 bg-white shadow transition-transform group-hover/dot:scale-125 group-hover/dot:bg-violet-500" />
+    </span>
   );
 };

@@ -148,7 +148,8 @@ async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser
     page: Page, agent: Agent, tmp_path: Path
 ) -> None:
     """Assemble: the agent puts a code card in colour, a card of options and a card of questions side by side.
-    Act: the user drags the dot of option 2 to the question and sends; then the agent labels the arrow.
+    Act: the user moves the pointer from option 2 to its dot, as a hand does, drags the dot to the question and sends;
+    then the agent labels the arrow.
     Assert: the agent hears a link from option 2 to the question and reads it with the label, and the page shows the label; a screenshot of each turn goes in tmp_path."""
     await agent.write(
         put("code", "```python\ndef render(md: str) -> str:\n    return md\n```"),
@@ -164,7 +165,8 @@ async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser
     dot = await page.get_by_label("Draw an arrow from options/2").bounding_box()
     goal = await page.locator('[data-ref="questions/1"]').bounding_box()
     assert dot is not None and goal is not None
-    await page.mouse.move(dot["x"] + dot["width"] / 2, dot["y"] + dot["height"] / 2)
+    # The dot is at the right end of its strip; the steps pass each point between the part and the dot.
+    await page.mouse.move(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2, steps=20)
     await page.mouse.down()
     await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=10)
     await page.mouse.up()
@@ -231,6 +233,45 @@ async def test_a_ref_in_the_chat_shows_the_part(page: Page, agent: Agent, tmp_pa
     await agent.monitor.close()
     await expect(page.get_by_role("status", name="Agent")).to_contain_text("No agent connected")
     await snap(page, tmp_path / "1-ref.png")
+
+
+async def test_each_card_shows_its_author_and_id_and_the_user_sets_its_width(
+    page: Page, agent: Agent, tmp_path: Path
+) -> None:
+    """Assemble: the agent puts a plan, and the user writes a note.
+    Act: the user drags the bottom right corner of the plan 200 pixels to the right, and reloads the page.
+    Assert: each card shows its id and the icon of its author on the same background; the plan is 200 pixels wider after
+    the reload, the agent reads its width, and the user's turn does not carry the resize; a screenshot goes in tmp_path."""
+    await agent.write(put("plan", "1. parse\n2. render"), move("plan", 0, 0))
+    await page.mouse.dblclick(300, 600)
+    await page.get_by_role("textbox", name="New note").fill("check the docs")
+    await page.get_by_role("textbox", name="New note").press("Control+Enter")
+    note = page.locator("article").filter(has_text="check the docs")
+    await expect(note.get_by_role("img", name="By you")).to_be_visible()
+    note_id = await note.get_attribute("data-ref")
+    assert note_id is not None
+    await expect(note.locator("header")).to_contain_text(note_id)
+    plan = page.locator('article[data-ref="plan"]')
+    await expect(plan.get_by_role("img", name="By the agent")).to_be_visible()
+    await expect(plan.locator("header")).to_contain_text("plan")
+    background = "article => getComputedStyle(article).backgroundColor"
+    assert await note.evaluate(background) == await plan.evaluate(background)
+    await expect(page.get_by_label("1 unsent")).to_be_visible()
+
+    before = await plan.bounding_box()
+    corner = await page.get_by_role("separator", name="Width of plan").bounding_box()
+    assert before is not None and corner is not None
+    await page.mouse.move(corner["x"] + corner["width"] / 2, corner["y"] + corner["height"] / 2)
+    await page.mouse.down()
+    await page.mouse.move(corner["x"] + corner["width"] / 2 + 200, corner["y"] + corner["height"] / 2, steps=10)
+    await page.mouse.up()
+    assert (await read_board(agent.tools)).widths == {"plan": before["width"] + 200}
+    await page.reload()
+    await expect(plan).to_be_visible()
+    after = await plan.bounding_box()
+    assert after is not None and after["width"] == before["width"] + 200
+    await expect(page.get_by_label("1 unsent")).to_be_visible()
+    await snap(page, tmp_path / "1-width.png")
 
 
 async def boxes(page: Page, *ids: str) -> dict[str, tuple[int, int, int, int]]:

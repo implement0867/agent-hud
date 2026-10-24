@@ -4,6 +4,7 @@ from contextlib import suppress
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from agent_hud.models.actions import Action, Author, Reaction, TBody, TValue
 from agent_hud.models.base import Model
@@ -20,6 +21,7 @@ from tests.factories import (
     put,
     react,
     remove,
+    resize,
     restore,
     say,
     unlink,
@@ -36,6 +38,7 @@ from tests.strategies import (
     messages,
     table_md,
     tables,
+    widths,
 )
 
 
@@ -138,17 +141,18 @@ def test_restore_puts_the_last_version_of_a_removed_card_back_or_raises(board: B
 def test_clear_moves_each_card_to_its_history_and_empties_the_rest(board: Board) -> None:
     """Assemble: any board.
     Act: clear.
-    Assert: no cards, threads, values, arrows, positions or messages; each card is the last version in its history, with
-    the feedback it had; and the history of the other cards is as it was."""
+    Assert: no cards, threads, values, arrows, positions, widths or messages; each card is the last version in its
+    history, with the feedback it had; and the history of the other cards is as it was."""
     cleared = board.apply(Action(id="c", author=Author.user, body=clear()))
-    assert (cleared.cards, cleared.threads, cleared.values, cleared.arrows, cleared.positions, cleared.messages) == (
-        {},
-        {},
-        {},
-        {},
-        {},
-        (),
-    )
+    assert (
+        cleared.cards,
+        cleared.threads,
+        cleared.values,
+        cleared.arrows,
+        cleared.positions,
+        cleared.widths,
+        cleared.messages,
+    ) == ({}, {}, {}, {}, {}, {}, ())
     assert set(cleared.history) == {*board.history, *board.cards}
     for card_id, card in board.cards.items():
         version = cleared.history[card_id][-1]
@@ -164,11 +168,13 @@ def test_clear_moves_each_card_to_its_history_and_empties_the_rest(board: Board)
 def test_remove_drops_the_card_and_its_threads_or_raises(board: Board, card_id: str) -> None:
     """Assemble: any board.
     Act: remove a card.
-    Assert: the rest of the board is unchanged and the card and its position are gone, or ValueError when there was no card."""
+    Assert: the rest of the board is unchanged and the card, its position and its width are gone, or ValueError when there
+    was no card."""
     if card_id in board.cards:
         after = act(board, remove(card_id))
         assert (after.cards, after.threads) == outside(board, card_id)
         assert after.positions == {k: v for k, v in board.positions.items() if k != card_id}
+        assert after.widths == {k: v for k, v in board.widths.items() if k != card_id}
         assert after.history[card_id] == retired(board, card_id)
     else:
         with pytest.raises(ValueError):
@@ -186,6 +192,37 @@ def test_move_places_the_card_or_raises(board: Board, card_id: str, x: float, y:
     else:
         with pytest.raises(ValueError):
             act(board, move(card_id, x, y))
+
+
+@given(boards(), card_ids(), widths())
+def test_resize_sets_the_width_of_the_card_or_raises(board: Board, card_id: str, width: float) -> None:
+    """Assemble: any board.
+    Act: resize a card.
+    Assert: the card has the new width and the rest of the board is unchanged, or ValueError when there was no card."""
+    if card_id in board.cards:
+        after = act(board, resize(card_id, width))
+        assert after == board.model_copy(update={"widths": {**board.widths, card_id: width}})
+    else:
+        with pytest.raises(ValueError):
+            act(board, resize(card_id, width))
+
+
+@given(card_ids(), mds(), mds(), widths())
+def test_put_keeps_the_width_of_the_card(card_id: str, md: str, again: str, width: float) -> None:
+    """Assemble: a board with a card that the user resized.
+    Act: put the card again.
+    Assert: the card keeps its width."""
+    board = act(act(Board(), put(card_id, md)), resize(card_id, width))
+    assert act(board, put(card_id, again)).widths == {card_id: width}
+
+
+@pytest.mark.parametrize("width", [0, -1, float("inf"), float("nan")])
+def test_resize_takes_a_positive_width_only(width: float) -> None:
+    """Assemble: nothing.
+    Act: make a resize with a width that is not a positive number.
+    Assert: ValidationError."""
+    with pytest.raises(ValidationError):
+        resize("a", width)
 
 
 @given(boards(), card_ids(), coordinates(), coordinates())

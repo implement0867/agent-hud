@@ -101,6 +101,7 @@ def selected(board: Board, cards: list[TCardId] | None, since: TActionId | None)
             "arrows": {k: v for k, v in board.arrows.items() if on_cards(v.src, kept) or on_cards(v.dst, kept)},
             "messages": chat,
             "positions": {k: v for k, v in board.positions.items() if k in kept},
+            "widths": {k: v for k, v in board.widths.items() if k in kept},
             "history": {k: v for k, v in board.history.items() if k in kept},
         }
     )
@@ -207,7 +208,9 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
         cards: Annotated[
             list[TCardId] | None,
-            Field(description="Only these cards, with the feedback, values, arrows, positions and history on them"),
+            Field(
+                description="Only these cards, with the feedback, values, arrows, positions, widths and history on them"
+            ),
         ] = None,
         since: Annotated[
             TActionId | None, Field(description="Only the messages after the message or comment with this id")

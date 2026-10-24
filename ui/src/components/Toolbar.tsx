@@ -127,6 +127,8 @@ const describe = ({ body, parts }: THeard): string => {
       return `remove arrow ${body.id}`;
     case ActionKind.enum.move:
       return `move ${body.id}`;
+    case ActionKind.enum.resize:
+      return `resize ${body.id}`;
     case ActionKind.enum.place:
       return `place ${body.id}`;
     case ActionKind.enum.clear:

@@ -81,11 +81,6 @@ export const HistoryDrawer = ({
         </button>
       </header>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
-        {ids.every((id) => (board.history[id]?.length ?? 0) === 0) && (
-          <p className="m-auto max-w-52 text-center text-sm text-stone-400">
-            The earlier versions of the cards show here.
-          </p>
-        )}
         {ids.flatMap((id) =>
           (board.history[id] ?? [])
             .map((version, index) => ({ version, number: index + 1 }))

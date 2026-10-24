@@ -136,11 +136,6 @@ export const Chat = ({
         {board.messages.toReversed().map((said) => (
           <Bubble key={said.id} said={said} withRef />
         ))}
-        {board.messages.length === 0 && (
-          <li className="m-auto max-w-52 text-center text-sm text-stone-400">
-            Messages to and from the agent show here.
-          </li>
-        )}
       </ul>
       <div className="p-3 pt-0">
         <Composer
