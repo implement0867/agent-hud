@@ -13,6 +13,9 @@ dependencies = [
     "websockets>=17.3",
 ]
 
+[project.scripts]
+agent-hud-turns = "agent_hud.turns:main"
+
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
 build-backend = "uv_build"

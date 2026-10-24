@@ -18,10 +18,13 @@ export const AgentPill = ({
   waiting: number;
 }) => {
   const { dot, label: state } = looks[agent];
+  const turns = `${String(waiting)} ${waiting === 1 ? "turn" : "turns"} waiting for an agent`;
   const label =
-    waiting > 0
-      ? `${state} · ${String(waiting)} ${waiting === 1 ? "turn" : "turns"} waiting for an agent`
-      : state;
+    waiting === 0
+      ? state
+      : agent === "away"
+        ? `${state} · ${turns}; run /agent-hud:board in Claude Code to deliver ${waiting === 1 ? "it" : "them"}`
+        : `${state} · ${turns}`;
   return (
     <div
       role="status"
