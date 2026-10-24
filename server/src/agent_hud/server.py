@@ -222,7 +222,7 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
     async def listen() -> Listening:
         """
         Where the user's turns come from: a websocket URL, and a shell command that prints each turn as a line.
-        Open the URL with the Monitor tool's websocket source, or run the command with its command source, and again when the monitor ends.
+        Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
         Each line is one turn: the changes that the user made up to their send or chat message, with the text of each part that a change names.
         An edit of a card on the board is a diff of its markdown.
         """
