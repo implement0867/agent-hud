@@ -278,6 +278,14 @@ async def test_each_card_shows_its_author_and_id_and_the_user_sets_its_width(
     await snap(page, tmp_path / "1-width.png")
 
 
+async def on_top(page: Page, x: float, y: float) -> str | None:
+    """The id of the card that shows at the point of the screen, or None when no card does."""
+    found = await page.evaluate(
+        "([x, y]) => document.elementFromPoint(x, y)?.closest('article[data-ref]')?.dataset.ref ?? null", [x, y]
+    )
+    return None if found is None else str(found)
+
+
 async def boxes(page: Page, *ids: str) -> dict[str, tuple[int, int, int, int]]:
     """The screen rect of each card, by id, in whole pixels, once the cards have settled."""
     await settled(page)
@@ -293,9 +301,10 @@ async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them
     page: Page, agent: Agent, browser: Browser, address: tuple[str, int]
 ) -> None:
     """Assemble: the agent puts four cards with no place, where the first is the shortest.
-    Act: open the board in a second tab; the agent puts a taller version of the first card.
+    Act: open the board in a second tab; the agent puts a taller version of the first card, which reaches the fourth.
     Assert: read has a place for each card, on three columns, with the fourth below the first; the second tab shows
-    each card where the first tab does; the fourth card moved down below the taller first card in the agent's read."""
+    each card where the first tab does; the fourth card keeps its place, since a place is set once, and the taller first
+    card shows over it."""
     async with open_page(address) as user:
         await agent.write(
             put("a", "short"), put("b", "1. a\n2. b\n3. c"), put("c", "1. a\n2. b\n3. c"), put("d", "last")
@@ -315,12 +324,12 @@ async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them
         await other.close()
 
         await agent.write(put("a", "\n".join(f"{n}. step {n}" for n in range(1, 13))))
-        await user.notes(lambda snapshot: snapshot.board.positions["d"].y != first["a"][3] + 48)
-        board = await read_board(agent.tools)
+        await expect(page.locator('[data-ref="a/12"]')).to_have_text("step 12")
         tall = await boxes(page, "a", "d")
-        assert tall["a"][3] > first["a"][3]
-        assert board.positions["d"].y == tall["a"][3] + 48
-        assert tall["d"][1] == tall["a"][1] + tall["a"][3] + 48
+        assert tall["a"][3] > first["a"][3] + 48, "the taller first card reaches the fourth"
+        assert (await read_board(agent.tools)).positions["d"] == board.positions["d"]
+        assert tall["d"] == first["d"]
+        assert await on_top(page, tall["d"][0] + 40, tall["d"][1] + 10) == "a"
 
 
 async def test_an_edit_does_not_replace_a_newer_version_unless_the_user_says_so(page: Page, agent: Agent) -> None:
@@ -627,32 +636,30 @@ async def positions_once(agent: Agent, check: Callable[[dict[str, Point]], bool]
     return (await read_board(agent.tools)).positions
 
 
-async def test_a_card_moved_onto_another_pushes_it_below(page: Page, agent: Agent) -> None:
+async def test_cards_may_cross_after_their_first_place_and_the_one_last_touched_shows_on_top(
+    page: Page, agent: Agent
+) -> None:
     """Assemble: a tall code card at the top left, and a plan that the agent moves 200 pixels below the code's top, onto it.
-    Act: wait for the page to settle the cards; then the user drags the code card down onto the plan.
-    Assert: the plan sits below the code card with the gap, in the agent's read and on the page; after the drag, the
-    dropped code card stays where the user dropped it and the plan sits below it again."""
+    Act: the user clicks the code card's header; then the agent puts a new version of the plan.
+    Assert: the plan stays where the agent put it, in the agent's read and on the page, and shows over the code card
+    where they cross; after the click the code card shows on top there; after the new version the plan does again."""
     code = "```python\n" + "\n".join(f"line_{n} = {n}" for n in range(1, 12)) + "\n```"
     await agent.write(put("code", code), put("plan", "1. parse\n2. render"), move("code", 0, 0), move("plan", 0, 200))
     await expect(page.locator('[data-ref="plan/2"]')).to_have_text("render")
-    height = (await boxes(page, "code"))["code"][3]
-    assert height > 200, "the plan at 200 is on the code card"
-    positions = await positions_once(agent, lambda found: found["plan"].y == height + 48)
-    assert positions["plan"] == Point(x=0, y=height + 48)
     shown = await boxes(page, "code", "plan")
-    assert shown["plan"][1] == shown["code"][1] + height + 48
+    assert shown["code"][3] > 200, "the plan at 200 is on the code card"
+    assert (await read_board(agent.tools)).positions["plan"] == Point(x=0, y=200)
+    assert shown["plan"][1] == shown["code"][1] + 200
+    x, y = shown["plan"][0] + 40, shown["plan"][1] + 10
+    assert await on_top(page, x, y) == "plan"
 
-    header = page.locator('article[data-ref="code"] header')
-    box = await header.bounding_box()
-    assert box is not None
-    await page.mouse.move(box["x"] + 150, box["y"] + box["height"] / 2)
-    await page.mouse.down()
-    await page.mouse.move(box["x"] + 150, box["y"] + box["height"] / 2 + height + 100, steps=5)
-    await page.mouse.up()
-    positions = await positions_once(agent, lambda found: found["code"].y == height + 100)
-    assert positions["code"] == Point(x=0, y=height + 100)
-    positions = await positions_once(agent, lambda found: found["plan"].y == 2 * height + 148)
-    assert positions["plan"] == Point(x=0, y=2 * height + 148), "the dropped card stays and the plan goes below it"
+    await page.locator('article[data-ref="code"] header').click(position={"x": 150, "y": 10})
+    assert await on_top(page, x, y) == "code"
+    assert (await read_board(agent.tools)).positions["plan"] == Point(x=0, y=200), "a touch moves nothing"
+
+    await agent.write(put("plan", "1. parse\n2. render\n3. ship"))
+    await expect(page.locator('[data-ref="plan/3"]')).to_have_text("ship")
+    assert await on_top(page, x, y) == "plan"
 
 
 async def test_the_quick_question_opens_the_comment_box(page: Page, agent: Agent) -> None:

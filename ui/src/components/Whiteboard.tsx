@@ -28,7 +28,6 @@ import {
   onScreen,
   overlap,
   placePanel,
-  settleCards,
   rectOnBoard,
   toBoard,
   zoomAt,
@@ -191,8 +190,15 @@ export const Whiteboard = ({
   const trackChat = useMemo(() => track("chat"), [track]);
   const trackPanel = useMemo(() => track("panel"), [track]);
   const placing = useRef(new Map<string, TPoint>());
-  /** The card the user dropped last, which stays where it is when the cards settle. */
-  const dropped = useRef<string | null>(null);
+  /** The cards in the order the user or the agent last touched them; the last sits on top where cards cross. */
+  const [touched, setTouched] = useState<string[]>([]);
+  const raise = useCallback((...ids: string[]) => {
+    if (ids.length === 0) return;
+    setTouched((current) => [
+      ...current.filter((id) => !ids.includes(id)),
+      ...ids,
+    ]);
+  }, []);
   const [view, setView] = useState(home);
   const viewNow = useRef(view);
   useEffect(() => {
@@ -251,6 +257,22 @@ export const Whiteboard = ({
         (id) => !(id in cardsSeen) && !current.includes(id),
       ),
     ]);
+    setTouched((current) =>
+      current.some(gone) ? current.filter((id) => !gone(id)) : current,
+    );
+    raise(...Object.keys(board.cards).filter((id) => !(id in cardsSeen)));
+  }
+
+  /** A new version from the agent, or a move by anyone, puts the card on top, as a touch by the user does. */
+  const [historySeen, setHistorySeen] = useState(board.history);
+  if (historySeen !== board.history) {
+    setHistorySeen(board.history);
+    raise(
+      ...Object.keys(board.cards).filter(
+        (id) =>
+          (board.history[id]?.length ?? 0) > (historySeen[id]?.length ?? 0),
+      ),
+    );
   }
 
   const [positionsSeen, setPositionsSeen] = useState(board.positions);
@@ -263,7 +285,22 @@ export const Whiteboard = ({
         ),
       ),
     );
+    raise(
+      ...Object.entries(board.positions)
+        .filter(([id, at]) => !samePoint(positionsSeen[id], at))
+        .map(([id]) => id),
+    );
   }
+
+  /** The layer of each card: its place in the order of touches, above the cards no one touched, in their order. */
+  const stack = useMemo(() => {
+    const ids = Object.keys(board.cards);
+    const order = [
+      ...ids.filter((id) => !touched.includes(id)),
+      ...touched.filter((id) => id in board.cards),
+    ];
+    return Object.fromEntries(order.map((id, index) => [id, index + 1]));
+  }, [board.cards, touched]);
 
   const shown = useMemo(
     () =>
@@ -339,25 +376,6 @@ export const Whiteboard = ({
     for (const id of [...placing.current.keys()].filter(gone))
       placing.current.delete(id);
   }, [board.cards, gone]);
-
-  /**
-   * No card covers another: a card that grew with a new version, its code in colour or a new width, or that a move put
-   * onto others, pushes the cards it crosses down, with their sizes as the observer last saw them. The card the user
-   * dropped stays; the rest settle in order of their tops.
-   */
-  useEffect(() => {
-    if (dragging !== null) return;
-    const cards = Object.fromEntries(
-      Object.entries(board.positions).flatMap(([id, at]) => {
-        const rect = rects[id];
-        return rect === undefined || !(id in board.cards)
-          ? []
-          : [[id, { ...at, width: rect.width, height: rect.height }]];
-      }),
-    );
-    for (const [id, to] of Object.entries(settleCards(cards, dropped.current)))
-      void act({ kind: ActionKind.enum.move, id, ...to });
-  }, [act, board.cards, board.positions, dragging, rects]);
 
   /** Selecting a part also measures where it is in its card, for its feedback panel to go beside. */
   const select = useCallback((next: TSelection) => {
@@ -759,41 +777,47 @@ export const Whiteboard = ({
         }
       >
         <ArrowLayer world={world} scale={view.scale} layout={shown} />
-        {Object.entries(board.cards).map(([id, card]) => (
-          <CardFrame
-            key={id}
-            id={id}
-            card={card}
-            at={shown[id] ?? { x: 0, y: 0 }}
-            placed={shown[id] !== undefined}
-            scale={view.scale}
-            editing={editing === id}
-            edit={(on) => {
-              setEditing(on ? id : null);
-            }}
-            move={(at) => {
-              setDragging({ id, at });
-            }}
-            drop={(at) => {
-              dropped.current = id;
-              setDragging(null);
-              setSettling((current) => ({ ...current, [id]: at }));
-              void act({ kind: ActionKind.enum.move, id, ...at }).then(
-                (taken) => {
-                  if (!taken)
-                    setSettling((current) =>
-                      Object.fromEntries(
-                        Object.entries(current).filter(
-                          ([other]) => other !== id,
+        {/* One stacking context for the cards, so that their layers stay under the arrow labels and the panel. */}
+        <div className="pointer-events-none absolute inset-0 isolate">
+          {Object.entries(board.cards).map(([id, card]) => (
+            <CardFrame
+              key={id}
+              id={id}
+              card={card}
+              at={shown[id] ?? { x: 0, y: 0 }}
+              placed={shown[id] !== undefined}
+              z={stack[id] ?? 0}
+              raise={() => {
+                raise(id);
+              }}
+              scale={view.scale}
+              editing={editing === id}
+              edit={(on) => {
+                setEditing(on ? id : null);
+              }}
+              move={(at) => {
+                setDragging({ id, at });
+              }}
+              drop={(at) => {
+                setDragging(null);
+                setSettling((current) => ({ ...current, [id]: at }));
+                void act({ kind: ActionKind.enum.move, id, ...at }).then(
+                  (taken) => {
+                    if (!taken)
+                      setSettling((current) =>
+                        Object.fromEntries(
+                          Object.entries(current).filter(
+                            ([other]) => other !== id,
+                          ),
                         ),
-                      ),
-                    );
-                },
-              );
-            }}
-            measure={measure}
-          />
-        ))}
+                      );
+                  },
+                );
+              }}
+              measure={measure}
+            />
+          ))}
+        </div>
         {Object.entries(drafts).map(([id, at]) => (
           <DraftNote
             key={id}

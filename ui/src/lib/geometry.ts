@@ -169,37 +169,6 @@ export const freePlace = (rects: TRect[]): TPoint => {
     .reduce((best, place) => (place.y < best.y ? place : best));
 };
 
-/**
- * The places that the cards move to so that no card covers another: in order of their tops, each card that crosses
- * a card settled before it goes below that card, with the gap, until it crosses none. The fixed card, which the user
- * just dropped, settles first and so stays where it is. Nothing moves when nothing crosses.
- */
-export const settleCards = (
-  rects: Record<string, TRect>,
-  fixed: string | null = null,
-): Record<string, TPoint> => {
-  const order = Object.entries(rects).sort(([idA, a], [idB, b]) =>
-    idA === fixed ? -1 : idB === fixed ? 1 : a.y - b.y || a.x - b.x,
-  );
-  const settled: TRect[] = [];
-  const moved: Record<string, TPoint> = {};
-  for (const [id, rect] of order) {
-    let y = rect.y;
-    // A move below one card can put the card onto one checked before it, so the pass repeats until it crosses none.
-    for (let crossed = true; crossed;) {
-      crossed = false;
-      for (const other of settled) {
-        if (!overlap({ ...rect, y }, other)) continue;
-        y = other.y + other.height + gap;
-        crossed = true;
-      }
-    }
-    if (y !== rect.y) moved[id] = { x: rect.x, y };
-    settled.push({ ...rect, y });
-  }
-  return moved;
-};
-
 /** The rect of the element in board coordinates, from its rect in the viewport. */
 export const rectOnBoard = (
   element: Element,
