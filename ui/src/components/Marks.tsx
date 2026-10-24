@@ -1,6 +1,6 @@
 import { MessageCircle } from "lucide-react";
 
-import { useTools } from "~/lib/whiteboard";
+import { SelectionKind, useTools } from "~/lib/whiteboard";
 import { ActionKind, Reaction } from "~/schemas/actions";
 import {
   reactionIcons,
@@ -12,6 +12,7 @@ import {
 /**
  * The reaction of each author and the comment count of the ref, and, while the pointer is on the part, a button for each reaction.
  * The agent's reaction has a ring. The place puts the marks in the part, at the top right unless it says otherwise.
+ * A question wants words, so the question button also opens the part's feedback with the comment box focused.
  */
 export const Marks = ({
   target,
@@ -20,7 +21,7 @@ export const Marks = ({
   target: string;
   place?: string;
 }) => {
-  const { board, act, readOnly } = useTools();
+  const { board, act, select, readOnly } = useTools();
   const thread = board.threads[target];
   const reaction = userReaction(thread);
   const comments = thread?.comments.length ?? 0;
@@ -75,6 +76,11 @@ export const Marks = ({
                         reaction: option,
                       },
                 );
+                if (on || option !== Reaction.enum.question) return;
+                select({ kind: SelectionKind.enum.ref, ref: target });
+                requestAnimationFrame(() => {
+                  document.getElementById("comment-box")?.focus();
+                });
               }}
             >
               <Icon className="size-3.5" strokeWidth={2.5} />

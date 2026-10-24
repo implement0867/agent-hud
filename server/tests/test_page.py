@@ -1,5 +1,6 @@
+import asyncio
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from playwright.async_api import Browser, Page, async_playwright, expect
 
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Link, Reaction
-from agent_hud.models.board import Arrow, Card
+from agent_hud.models.board import Arrow, Card, Point
 from agent_hud.settings import find_static_dir
 from tests.conversation import TOKEN, Agent, open_agent, open_page, serve
 from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, restore, say
@@ -613,3 +614,77 @@ async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Ag
     await expect(page.locator('article[data-ref="shared-note"]')).to_have_count(0)
     assert f"board={board}" in page.url
     await expect(page.get_by_label("Boards")).to_have_text(board)
+
+
+async def positions_once(agent: Agent, check: Callable[[dict[str, Point]], bool]) -> dict[str, Point]:
+    """The card positions in the agent's read once they pass the check, or after three seconds without it."""
+    for _ in range(30):
+        positions = (await read_board(agent.tools)).positions
+        if check(positions):
+            return positions
+        await asyncio.sleep(0.1)
+    return (await read_board(agent.tools)).positions
+
+
+async def test_a_card_moved_onto_another_pushes_it_below(page: Page, agent: Agent) -> None:
+    """Assemble: a tall code card at the top left, and a plan that the agent moves 200 pixels below the code's top, onto it.
+    Act: wait for the page to settle the cards; then the user drags the code card down onto the plan.
+    Assert: the plan sits below the code card with the gap, in the agent's read and on the page; after the drag, the
+    dropped code card stays where the user dropped it and the plan sits below it again."""
+    code = "```python\n" + "\n".join(f"line_{n} = {n}" for n in range(1, 12)) + "\n```"
+    await agent.write(put("code", code), put("plan", "1. parse\n2. render"), move("code", 0, 0), move("plan", 0, 200))
+    await expect(page.locator('[data-ref="plan/2"]')).to_have_text("render")
+    height = (await boxes(page, "code"))["code"][3]
+    assert height > 200, "the plan at 200 is on the code card"
+    positions = await positions_once(agent, lambda found: found["plan"].y == height + 48)
+    assert positions["plan"] == Point(x=0, y=height + 48)
+    shown = await boxes(page, "code", "plan")
+    assert shown["plan"][1] == shown["code"][1] + height + 48
+
+    header = page.locator('article[data-ref="code"] header')
+    box = await header.bounding_box()
+    assert box is not None
+    await page.mouse.move(box["x"] + 150, box["y"] + box["height"] / 2)
+    await page.mouse.down()
+    await page.mouse.move(box["x"] + 150, box["y"] + box["height"] / 2 + height + 100, steps=5)
+    await page.mouse.up()
+    positions = await positions_once(agent, lambda found: found["code"].y == height + 100)
+    assert positions["code"] == Point(x=0, y=height + 100)
+    positions = await positions_once(agent, lambda found: found["plan"].y == 2 * height + 148)
+    assert positions["plan"] == Point(x=0, y=2 * height + 148), "the dropped card stays and the plan goes below it"
+
+
+async def test_the_quick_question_opens_the_comment_box(page: Page, agent: Agent) -> None:
+    """Assemble: a plan on the board.
+    Act: the user hovers a step and clicks its quick question button, types the question and presses Enter, then sends.
+    Assert: the feedback panel opened with the comment box focused, and the agent hears the question and the comment."""
+    await agent.write(put("plan", "1. parse\n2. render"))
+    await page.locator('[data-ref="plan/2"]').hover()
+    await page.get_by_label("question plan/2").click()
+    await expect(page.get_by_label("Feedback on plan/2")).to_be_visible()
+    box = page.get_by_label("Comment")
+    await expect(box).to_be_focused()
+    await box.fill("which renderer?")
+    await box.press("Enter")
+    await send(page)
+    assert await agent.hear() == [react("plan/2", Reaction.question), comment("plan/2", "which renderer?")]
+
+
+async def test_the_quick_reactions_of_a_card_sit_in_line_with_its_header(page: Page, agent: Agent) -> None:
+    """Assemble: a card with a heading.
+    Act: the user hovers the card's header.
+    Assert: the strip of quick reactions is inside the header, to the right of the Remove button and above the heading."""
+    await agent.write(put("plan", "# Plan\n\n1. parse"))
+    header = page.locator('article[data-ref="plan"] header')
+    await header.hover()
+    question = page.get_by_label("question plan", exact=True)
+    await expect(question).to_be_visible()
+    await settled(page)
+    strip = await question.locator("..").bounding_box()
+    head = await header.bounding_box()
+    remove_button = await page.get_by_label("Remove plan").bounding_box()
+    heading = await page.locator('[data-ref="plan/1"]').bounding_box()
+    assert strip is not None and head is not None and remove_button is not None and heading is not None
+    assert inside(strip, head)
+    assert strip["x"] >= remove_button["x"] + remove_button["width"]
+    assert strip["y"] + strip["height"] <= heading["y"]

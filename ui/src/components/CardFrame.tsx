@@ -331,8 +331,8 @@ export const CardFrame = ({
             <Trash2 className="size-3.5" />
           </IconButton>
         </span>
-        <span className="relative w-14">
-          <Marks target={id} />
+        <span className="relative h-5 w-18 shrink-0">
+          <Marks target={id} place="top-1/2 right-0 -translate-y-1/2" />
         </span>
         <Connector target={id} />
       </header>

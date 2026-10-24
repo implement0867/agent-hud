@@ -28,7 +28,7 @@ import {
   onScreen,
   overlap,
   placePanel,
-  pushedBelow,
+  settleCards,
   rectOnBoard,
   toBoard,
   zoomAt,
@@ -191,7 +191,8 @@ export const Whiteboard = ({
   const trackChat = useMemo(() => track("chat"), [track]);
   const trackPanel = useMemo(() => track("panel"), [track]);
   const placing = useRef(new Map<string, TPoint>());
-  const heights = useRef(new Map<string, number>());
+  /** The card the user dropped last, which stays where it is when the cards settle. */
+  const dropped = useRef<string | null>(null);
   const [view, setView] = useState(home);
   const viewNow = useRef(view);
   useEffect(() => {
@@ -334,40 +335,29 @@ export const Whiteboard = ({
     [act, track],
   );
 
+  useEffect(() => {
+    for (const id of [...placing.current.keys()].filter(gone))
+      placing.current.delete(id);
+  }, [board.cards, gone]);
+
   /**
-   * A card that grew with a new version or a new width pushes the cards below it down, so that it does not cover them.
+   * No card covers another: a card that grew with a new version, its code in colour or a new width, or that a move put
+   * onto others, pushes the cards it crosses down, with their sizes as the observer last saw them. The card the user
+   * dropped stays; the rest settle in order of their tops.
    */
   useEffect(() => {
-    for (const id of [...placing.current.keys()].filter(gone)) {
-      placing.current.delete(id);
-      heights.current.delete(id);
-    }
-    const rects = Object.fromEntries(
-      [...elements.current].flatMap(([id, card]) => {
-        const at = board.positions[id];
-        return at === undefined
+    if (dragging !== null) return;
+    const cards = Object.fromEntries(
+      Object.entries(board.positions).flatMap(([id, at]) => {
+        const rect = rects[id];
+        return rect === undefined || !(id in board.cards)
           ? []
-          : [
-              [
-                id,
-                { ...at, width: card.offsetWidth, height: card.offsetHeight },
-              ],
-            ];
+          : [[id, { ...at, width: rect.width, height: rect.height }]];
       }),
     );
-    const grown = Object.entries(rects).filter(([id, rect]) => {
-      const was = heights.current.get(id);
-      heights.current.set(id, rect.height);
-      return was !== undefined && rect.height > was;
-    });
-    for (const [, rect] of grown) {
-      for (const [id, to] of Object.entries(pushedBelow(rect, rects))) {
-        const pushed = rects[id];
-        if (pushed !== undefined) rects[id] = { ...pushed, ...to };
-        void act({ kind: ActionKind.enum.move, id, ...to });
-      }
-    }
-  }, [act, board.cards, board.positions, board.widths, gone]);
+    for (const [id, to] of Object.entries(settleCards(cards, dropped.current)))
+      void act({ kind: ActionKind.enum.move, id, ...to });
+  }, [act, board.cards, board.positions, dragging, rects]);
 
   /** Selecting a part also measures where it is in its card, for its feedback panel to go beside. */
   const select = useCallback((next: TSelection) => {
@@ -785,6 +775,7 @@ export const Whiteboard = ({
               setDragging({ id, at });
             }}
             drop={(at) => {
+              dropped.current = id;
               setDragging(null);
               setSettling((current) => ({ ...current, [id]: at }));
               void act({ kind: ActionKind.enum.move, id, ...at }).then(

@@ -56,13 +56,13 @@ The app serves the board page at `/`, a whiteboard that updates when the agent w
 
 | On the page | Does |
 |---|---|
-| A new card | goes to the free space below the others, on a grid of three columns; the board keeps its place for every tab and reload, and the agent reads it. A card that grows with a new version pushes the cards below it down. A card that arrives out of view gets a chip at the nearest edge, "new: risks", which shows the card on a click |
+| A new card | goes to the free space below the others, on a grid of three columns; the board keeps its place for every tab and reload, and the agent reads it. No card covers another: a card that grows with a new version, or that a move puts onto others, pushes the cards it crosses down; a card the user drops stays, and the others move A card that arrives out of view gets a chip at the nearest edge, "new: risks", which shows the card on a click |
 | Drag a card's header | moves the card; the board keeps its place for everyone |
 | Drag a card's bottom right corner | sets its width; the board keeps it for everyone |
 | Double-click empty space | writes a note there |
 | Double-click a card's text, or `E` | edits its markdown; ⌘↵ saves. A click outside or Esc closes an unchanged editor; with changes, a click outside keeps it open and asks to save or discard, and Esc asks for a second Esc. When the agent puts a new version while the editor is open, the save is refused and the editor says so, with a button to save over the new version. An agent's card that the user edits keeps its look and says "edited by you" |
 | Click a heading, paragraph, list item, table row, code line or card header | selects it and opens its feedback: reactions and comments. The panel sits in the viewport beside the card, at full size at every zoom, to the left or below when the right has no room, and its comments scroll under the wheel. A focus on an input cell selects its row |
-| Hover a part | shows quick reactions; `A`, `R` and `Q` react to the selection |
+| Hover a part | shows quick reactions; the question button also opens the feedback with the comment box focused, since a question wants words. `A`, `R` and `Q` react to the selection |
 | Drag the dot on a part's right edge | draws an arrow to the part or card under the pointer; click an arrow to label or remove it |
 | Delete | removes the selected card or arrow; a toast offers to undo a card's removal for a few seconds, and the History drawer has Restore on each removed card |
 | `?`, or the keyboard button | opens the sheet of shortcuts, which names ⌘ or Ctrl for the platform |
