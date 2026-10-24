@@ -25,11 +25,11 @@ Call `write` with a list of actions. They run in order, all or nothing.
 
 When an action does not fit the board or its kind, `write` applies none of the actions, and its error names the action by number and kind, and the valid choices: the cards on the board, the parts of the card, the input columns of the row, or the values the column takes. Fix that action and send the list again.
 
-Put one subject on each card, with a short id such as `plan` or `risks`. Write each step or option as a list item or a table body row, so that the user can give feedback on it.
+Put one subject on each card, with a short id such as `plan` or `risks`. Write each step or option as a list item or a table body row, so that the user can give feedback on it; a paragraph of prose takes feedback as a whole.
 
 ## Refs
 
-A ref is a card id (`plan`), a part of a card (`plan/2`), or an input cell (`plan/2/3`). Parts are the list items, table body rows and code lines of the card, counted together from 1 in document order. Nested list items and the code lines inside a list item count too, so in `1. a` with sub-items `a1` and `a2`, then `2. b`, the item `b` is part 4. The cell ref counts the row as a part and the column by its place in the table, with the plain columns, so the input column `size` of a table after three list items and a row is `plan/4/2`. `write` and `read` return the text of each part by its number, so take the numbers from there. A ref such as `plan/2` in a message or comment shows as a link to that part.
+A ref is a card id (`plan`), a part of a card (`plan/2`), or an input cell (`plan/2/3`). Parts are the headings, paragraphs, list items, table body rows and code lines of the card, counted together from 1 in document order. Nested list items and the code lines inside a list item count too, and a paragraph inside a list item is text of the item, so in `# Plan`, then `1. a` with sub-items `a1` and `a2`, then `2. b`, the item `b` is part 5. The cell ref counts the row as a part and the column by its place in the table, with the plain columns, so the input column `size` of a table after three list items and a row is `plan/4/2`. `write` and `read` return the text of each part by its number, so take the numbers from there. A ref such as `plan/2` in a message or comment shows as a link to that part.
 
 ## Ask for values
 

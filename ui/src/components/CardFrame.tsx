@@ -1,5 +1,5 @@
 import { Bot, GripHorizontal, Pencil, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { PointerEvent, ReactNode } from "react";
 
 import { CardBody } from "~/components/CardBody";
@@ -198,9 +198,16 @@ export const CardFrame = ({
   edit: (editing: boolean) => void;
   move: (to: TPoint) => void;
   drop: (to: TPoint) => void;
-  measure: (element: HTMLElement | null) => void;
+  /** Gets the card's element by id when it mounts, and null when it goes. */
+  measure: (id: string, element: HTMLElement | null) => void;
 }) => {
   const { board, act, selection, select, openHistory, remove } = useTools();
+  const measured = useCallback(
+    (element: HTMLElement | null) => {
+      measure(id, element);
+    },
+    [id, measure],
+  );
   const versions = board.history[id]?.length ?? 0;
   /** The number of earlier versions when the editor opened, so that a save does not replace a newer version. */
   const [opened, setOpened] = useState<number | null>(null);
@@ -233,7 +240,7 @@ export const CardFrame = ({
   };
   return (
     <article
-      ref={measure}
+      ref={measured}
       data-ref={id}
       style={{
         left: at.x,

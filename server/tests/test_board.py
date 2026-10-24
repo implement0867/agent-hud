@@ -322,11 +322,20 @@ def test_outline_numbers_nested_items_in_document_order(outer: list[str], inner:
 
 
 @given(st.lists(item_texts(), min_size=1))
-def test_outline_of_lines_has_no_paths(texts: list[str]) -> None:
+def test_outline_of_lines_is_one_paragraph(texts: list[str]) -> None:
     """Assemble: lines of texts, which markdown reads as one paragraph.
     Act: outline it.
-    Assert: no paths."""
-    assert Outline(list_md("", texts)).paths == frozenset()
+    Assert: one path, whose text is the lines."""
+    assert Outline(list_md("", texts)).texts == {"1": "\n".join(texts)}
+
+
+@given(st.lists(item_texts(), min_size=1), item_texts(), item_texts())
+def test_outline_numbers_headings_paragraphs_and_list_items_together(texts: list[str], title: str, prose: str) -> None:
+    """Assemble: a heading, a paragraph, a list whose items are loose, so that each holds a paragraph, and a quoted paragraph.
+    Act: outline it.
+    Assert: the heading, the paragraph, each item and the quote are parts in document order; the items' own paragraphs are not."""
+    md = f"# {title}\n\n{prose}\n\n" + "\n\n".join(f"- {text}" for text in texts) + f"\n\n> {prose}"
+    assert list(Outline(md).texts.values()) == [title, prose, *texts, prose]
 
 
 @given(tables())
@@ -592,9 +601,9 @@ def test_an_action_that_does_not_fit_raises_with_the_valid_choices(body: TBody, 
 
 def test_a_part_on_a_card_with_no_parts_raises_so() -> None:
     """Assemble: an empty board.
-    Act: react to a part of a card of plain text, and remove a card.
+    Act: react to a part of a card of a rule alone, and remove a card.
     Assert: ValueError says that the card has no parts, and that the board has no cards."""
     with pytest.raises(ValueError, match=r"^no part 'a/1': card 'a' has no parts$"):
-        act(act(Board(), put("a", "x")), react("a/1", Reaction.approve))
+        act(act(Board(), put("a", "---")), react("a/1", Reaction.approve))
     with pytest.raises(ValueError, match=r"^no card 'a': the board has no cards$"):
         act(Board(), remove("a"))

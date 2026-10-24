@@ -66,7 +66,7 @@ class Restore(Model):
 class React(Model):
     kind: Literal[ActionKind.react]
     ref: TRef = Field(
-        description="A card id, or a card id and the number of a list item, table row or code line in it, such as plan/2"
+        description="A card id, or a card id and the number of a heading, paragraph, list item, table row or code line in it, such as plan/2"
     )
     reaction: Reaction
 
