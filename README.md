@@ -110,8 +110,9 @@ Requires [uv](https://docs.astral.sh/uv/) and Node 22.
 | Command | Does |
 |---|---|
 | `cd server && uv run playwright install chromium` | install the browser that the page tests drive, once |
-| `make check` | ruff format and lint, basedpyright, pytest; tsc, eslint, prettier |
+| `make check` | ruff format and lint, basedpyright, pytest; tsc, eslint, prettier, vitest |
 | `make serve` | start the app on port 7676, or `AGENT_HUD_PORT` |
 | `cd ui && npm run build` | build the UI into the server package; commit the build |
 | `claude --plugin-dir .` | run Claude Code with the plugin from this checkout |
 | `cd ui && npm run dev` | Vite dev server, which sends `/ws` to the running server |
+| `cd ui && npm test` | the unit tests of the UI's library, with vitest and fast-check: properties such as that a new card lands clear of every card on the board, and that settled cards cross none |
