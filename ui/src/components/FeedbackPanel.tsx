@@ -32,7 +32,11 @@ const RefText = ({ text }: { text: string }) => {
   );
 };
 
-/** A message or comment; with its ref, a comment starts with a link to the part it is on. */
+/** When it was said, for a hover, as the browser writes the time. */
+const timeOf = (at: string | null) =>
+  at === null ? undefined : new Date(at).toLocaleString();
+
+/** A message or comment, with the time it was said on hover; with its ref, a comment starts with a link to the part it is on. */
 export const Bubble = ({
   said,
   withRef = false,
@@ -45,7 +49,10 @@ export const Bubble = ({
   const Icon = mine ? User : Bot;
   const ref = withRef ? said.ref : null;
   return (
-    <li className={`flex items-end gap-1.5 ${mine ? "flex-row-reverse" : ""}`}>
+    <li
+      className={`flex items-end gap-1.5 ${mine ? "flex-row-reverse" : ""}`}
+      title={timeOf(said.at)}
+    >
       <span
         className={`grid size-5 shrink-0 place-items-center rounded-full ${mine ? "bg-sky-100 text-sky-700" : "bg-stone-200 text-stone-600"}`}
       >

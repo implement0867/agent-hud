@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from secrets import token_urlsafe
@@ -96,7 +97,7 @@ def create_app(hud: Hud | None = None) -> FastAPI:
             async for text in websocket.iter_text():
                 request = Request.model_validate_json(text)
                 try:
-                    hud.act([Action(id=request.id, author=Author.user, body=request.body)])
+                    hud.act([Action(id=request.id, author=Author.user, body=request.body, at=datetime.now(UTC))])
                 except ValueError as error:
                     reply = Rejected(kind=EventKind.rejected, id=request.id, reason=str(error)).model_dump_json()
                 else:

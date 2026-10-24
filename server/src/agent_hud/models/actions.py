@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Discriminator, Field, StringConstraints
+from pydantic import AwareDatetime, Discriminator, Field, StringConstraints
 
 from agent_hud.models.base import Model
 
@@ -177,6 +177,7 @@ class Action(Model):
     id: TActionId
     author: Author
     body: TBody
+    at: AwareDatetime | None = Field(default=None, description="When the board took the action")
 
     @property
     def ends_turn(self) -> bool:

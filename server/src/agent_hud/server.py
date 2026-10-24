@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from shlex import quote
 from typing import Annotated, Any
@@ -193,7 +194,8 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
         before = hud.board
         try:
             bodies = parse(actions)
-            hud.act([Action(id=uuid4().hex, author=Author.agent, body=body) for body in bodies])
+            now = datetime.now(UTC)
+            hud.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in bodies])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
         return written(before, hud.board, bodies)

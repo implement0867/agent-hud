@@ -53,7 +53,7 @@ def said(texts: list[str], author: Author) -> list[Action]:
 
 def turns(actions: list[Action]) -> list[Turn]:
     """A turn of each of the actions, as the user's messages make them."""
-    return [Turn(actions=(Heard(**action.model_dump(), parts={}),)) for action in actions]
+    return [Turn(actions=(Heard(**action.model_dump(exclude={"at"}), parts={}),)) for action in actions]
 
 
 async def take(hud: Hud, count: int, seconds: float = 1) -> list[Turn]:
@@ -288,7 +288,11 @@ async def test_the_agent_gets_the_users_actions_when_the_user_sends(
     hud.act([Action(id="end", author=Author.user, body=send())])
     parts = [{"plan/2": texts[1]}, {"plan/1": texts[0]}]
     assert await take(hud, 1) == [
-        Turn(actions=tuple(Heard(**a.model_dump(), parts=p) for a, p in zip(feedback[:2], parts, strict=True)))
+        Turn(
+            actions=tuple(
+                Heard(**a.model_dump(exclude={"at"}), parts=p) for a, p in zip(feedback[:2], parts, strict=True)
+            )
+        )
     ]
 
 
