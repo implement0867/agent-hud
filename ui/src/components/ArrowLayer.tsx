@@ -21,7 +21,7 @@ const ArrowLabel = ({
   drawn: TDrawn;
   selected: boolean;
 }) => {
-  const { act } = useTools();
+  const { act, select, unlink } = useTools();
   const [text, setText] = useState(arrow.text);
   const relabel = () => {
     if (text !== arrow.text)
@@ -35,12 +35,21 @@ const ArrowLabel = ({
   };
   if (!selected)
     return arrow.text === "" ? null : (
-      <span
-        className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[calc(100%+4px)] rounded-full bg-white px-2 py-0.5 text-xs whitespace-nowrap text-stone-600 shadow-sm ring-1 ring-stone-200"
+      <button
+        type="button"
+        aria-label={`Arrow ${id}: ${arrow.text}`}
+        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-[calc(100%+4px)] cursor-pointer rounded-full bg-white px-2 py-0.5 text-xs whitespace-nowrap text-stone-600 shadow-sm ring-1 ring-stone-200 hover:ring-sky-300"
         style={{ left: middle.x, top: middle.y }}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          select({ kind: SelectionKind.enum.arrow, id });
+        }}
       >
         {arrow.text}
-      </span>
+      </button>
     );
   return (
     <span
@@ -82,7 +91,7 @@ const ArrowLabel = ({
           event.preventDefault();
         }}
         onClick={() => {
-          void act({ kind: ActionKind.enum.unlink, id });
+          unlink(id);
         }}
       >
         <Trash2 className="size-3" />
@@ -93,7 +102,8 @@ const ArrowLabel = ({
 
 /**
  * The arrows between parts, measured from the cards after each render of the board, with each label above the middle of its arrow.
- * A click on an arrow selects it, to label or remove it.
+ * A click on an arrow or its label selects it, to label or remove it. The arrows and their labels paint under the cards,
+ * so that neither covers a card's controls; the selected label paints over them, with its input.
  */
 export const ArrowLayer = ({
   world,

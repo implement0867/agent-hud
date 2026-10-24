@@ -36,7 +36,7 @@ import type { TDirection, TRect, TSize, TView } from "~/lib/geometry";
 import { SelectionKind, ToolContext, newId, useTools } from "~/lib/whiteboard";
 import type { TAct, TLinking, TSelection } from "~/lib/whiteboard";
 import { ActionKind, Reaction } from "~/schemas/actions";
-import type { TPoint } from "~/schemas/board";
+import type { TArrow, TPoint } from "~/schemas/board";
 import type { TSnapshot } from "~/schemas/events";
 
 const home: TView = { x: 64, y: 64, scale: 1 };
@@ -218,11 +218,12 @@ export const Whiteboard = ({
   const [comments, setComments] = useState<
     Record<string, { text: string; version: number }>
   >({});
-  /** The last removed card, to restore it where it was. */
-  const [undo, setUndo] = useState<{
-    id: string;
-    at: TPoint | undefined;
-  } | null>(null);
+  /** The last removed card, to restore it where it was, or the last removed arrow, to link it again. */
+  const [undo, setUndo] = useState<
+    | { id: string; at: TPoint | undefined }
+    | { id: string; arrow: TArrow }
+    | null
+  >(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -320,27 +321,53 @@ export const Whiteboard = ({
     shownNow.current = shown;
   });
 
+  const offerUndo = useCallback((offer: NonNullable<typeof undo>) => {
+    setUndo(offer);
+    if (undoTimer.current !== null) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => {
+      setUndo(null);
+    }, 8000);
+  }, []);
+
   /** Removes the card and offers, for a while, to put it back where it was. */
   const remove = useCallback(
     (id: string) => {
       const at = shownNow.current[id];
       void act({ kind: ActionKind.enum.remove, id }).then((taken) => {
-        if (!taken) return;
-        setUndo({ id, at });
-        if (undoTimer.current !== null) clearTimeout(undoTimer.current);
-        undoTimer.current = setTimeout(() => {
-          setUndo(null);
-        }, 8000);
+        if (taken) offerUndo({ id, at });
       });
     },
-    [act],
+    [act, offerUndo],
   );
 
-  const restore = ({ id, at }: { id: string; at: TPoint | undefined }) => {
+  /** Removes the arrow and offers, for a while, to link it again. */
+  const unlink = useCallback(
+    (id: string) => {
+      const arrow = board.arrows[id];
+      if (arrow === undefined) return;
+      void act({ kind: ActionKind.enum.unlink, id }).then((taken) => {
+        if (!taken) return;
+        setSelection((current) =>
+          current?.kind === SelectionKind.enum.arrow && current.id === id
+            ? null
+            : current,
+        );
+        offerUndo({ id, arrow });
+      });
+    },
+    [act, board.arrows, offerUndo],
+  );
+
+  const restore = (offer: NonNullable<typeof undo>) => {
     setUndo(null);
-    void act({ kind: ActionKind.enum.restore, id }).then((taken) => {
-      if (taken && at !== undefined)
-        void act({ kind: ActionKind.enum.move, id, ...at });
+    if ("arrow" in offer) {
+      const { src, dst, text } = offer.arrow;
+      void act({ kind: ActionKind.enum.link, id: offer.id, src, dst, text });
+      return;
+    }
+    void act({ kind: ActionKind.enum.restore, id: offer.id }).then((taken) => {
+      if (taken && offer.at !== undefined)
+        void act({ kind: ActionKind.enum.move, id: offer.id, ...offer.at });
     });
   };
 
@@ -602,8 +629,7 @@ export const Whiteboard = ({
     else if (key === "-") zoom(1 / 1.25);
     else if (key === "m") document.getElementById("message-box")?.focus();
     else if (selection?.kind === SelectionKind.enum.arrow) {
-      if (key === "delete" || key === "backspace")
-        void act({ kind: ActionKind.enum.unlink, id: selection.id });
+      if (key === "delete" || key === "backspace") unlink(selection.id);
     } else if (selectedRef !== null) {
       const thread = board.threads[selectedRef];
       if (reaction !== undefined)
@@ -650,6 +676,7 @@ export const Whiteboard = ({
       beginLink,
       openHistory,
       remove,
+      unlink,
       readOnly: false,
     }),
     [
@@ -662,6 +689,7 @@ export const Whiteboard = ({
       beginLink,
       openHistory,
       remove,
+      unlink,
     ],
   );
 
@@ -737,7 +765,10 @@ export const Whiteboard = ({
                 role="status"
                 className="pointer-events-auto absolute bottom-20 left-1/2 flex -translate-x-1/2 animate-pop items-center gap-3 rounded-full bg-stone-900 px-4 py-2 text-sm text-white shadow-lg"
               >
-                Removed <span className="font-mono">{undo.id}</span>
+                Removed{" "}
+                <span className="font-mono">
+                  {"arrow" in undo ? "the arrow" : undo.id}
+                </span>
                 <button
                   type="button"
                   className="font-semibold text-sky-300 hover:underline"

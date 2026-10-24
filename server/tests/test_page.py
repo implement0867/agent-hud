@@ -15,7 +15,7 @@ from agent_hud.models.actions import Action, ActionKind, Author, Link, Reaction
 from agent_hud.models.board import Arrow, Card, Point
 from agent_hud.settings import find_static_dir
 from tests.conversation import TOKEN, Agent, open_agent, open_page, serve
-from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, restore, say
+from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, restore, say, unlink
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -191,6 +191,63 @@ async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser
     await page.keyboard.press("Escape")
     await expect(page.get_by_text("decides", exact=True)).to_be_visible()
     await snap(page, tmp_path / "2-label.png")
+
+
+async def test_a_fast_drag_from_the_dot_draws_an_arrow_and_its_label_selects_it_for_delete_with_undo(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: a card of options and a card of questions side by side.
+    Act: the pointer jumps from outside the options card straight onto the dot of option 2, drags to the question and
+    releases; then clicks the dot without a move; the agent labels the arrow; the user clicks the label, presses Delete,
+    clicks Undo in the toast, and sends.
+    Assert: the board did not pan and the agent hears the link; the click on the dot opens no feedback; the label click
+    selects the arrow, Delete removes it with a toast, Undo links it again, and the agent hears the unlink and the link."""
+    await agent.write(
+        put("options", "1. highlight on the server\n2. highlight in the browser"),
+        put("questions", "1. Which languages?"),
+        move("options", 0, 0),
+        move("questions", 500, 0),
+    )
+    card = page.locator('article[data-ref="options"]')
+    await expect(card).to_be_visible()
+    before = await boxes(page, "options")
+    dot = await page.get_by_label("Draw an arrow from options/2").bounding_box()
+    goal = await page.locator('[data-ref="questions/1"]').bounding_box()
+    assert dot is not None and goal is not None
+    await page.mouse.move(dot["x"] + 200, dot["y"] + 150)
+    await page.mouse.move(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2, steps=1)
+    await page.mouse.down()
+    await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=3)
+    await page.mouse.up()
+    assert await boxes(page, "options") == before, "a drag from the dot pans nothing"
+    await send(page)
+    match await agent.hear():
+        case [Link(kind=ActionKind.link, id=arrow_id, src="options/2", dst="questions/1")]:
+            pass
+        case other:
+            pytest.fail(f"the agent heard {other}, not a link from options/2 to questions/1")
+
+    await page.keyboard.press("Escape")
+    await page.mouse.click(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2)
+    await expect(page.get_by_label("Feedback on options/2")).to_have_count(0)
+
+    await agent.write(link(arrow_id, "options/2", "questions/1", "decides"))
+    await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_have_value("decides")
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Escape")
+    label = page.get_by_label(f"Arrow {arrow_id}: decides")
+    await expect(label).to_be_visible()
+    await label.click()
+    await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_be_visible()
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Delete")
+    toast = page.locator('[role="status"]', has_text="Removed the arrow")
+    await expect(toast).to_be_visible()
+    await expect(label).to_have_count(0)
+    await toast.get_by_role("button", name="Undo").click()
+    await expect(page.get_by_label(f"Arrow {arrow_id}: decides")).to_be_visible()
+    await send(page)
+    assert await agent.hear() == [unlink(arrow_id), link(arrow_id, "options/2", "questions/1", "decides")]
 
 
 async def test_the_user_reviews_a_line_of_code_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:

@@ -37,6 +37,8 @@ export type TTools = {
   openHistory: (card: string | null) => void;
   /** Removes the card, with a toast that undoes it for a while. */
   remove: (id: string) => void;
+  /** Removes the arrow, with a toast that undoes it for a while. */
+  unlink: (id: string) => void;
   /** An earlier version of a card shows its feedback, and takes no actions. */
   readOnly: boolean;
 };
@@ -75,6 +77,7 @@ export const readOnlyTools = (tools: TTools, version: TVersion): TTools => ({
   linking: null,
   beginLink: () => undefined,
   remove: () => undefined,
+  unlink: () => undefined,
   readOnly: true,
 });
 
