@@ -177,7 +177,7 @@ const clampWidth = (width: number) => Math.min(1280, Math.max(256, width));
 /**
  * A card at its place on the board, which looks the same for each author but for the icon. A drag on the card's header
  * moves it, a drag on its bottom right corner sets its width, a click selects it, and a double click on its text edits the
- * markdown.
+ * markdown. Cards may cross after their first place; a touch puts the card on top of the others.
  */
 export const CardFrame = ({
   id,
@@ -185,6 +185,8 @@ export const CardFrame = ({
   at,
   scale,
   placed,
+  z,
+  raise,
   editing,
   edit,
   move,
@@ -196,6 +198,10 @@ export const CardFrame = ({
   at: TPoint;
   scale: number;
   placed: boolean;
+  /** The card's layer: a higher one shows over the cards it crosses. */
+  z: number;
+  /** Puts the card on top, on a touch. */
+  raise: () => void;
   editing: boolean;
   edit: (editing: boolean) => void;
   move: (to: TPoint) => void;
@@ -269,9 +275,11 @@ export const CardFrame = ({
         left: at.x,
         top: at.y,
         width,
+        zIndex: z,
         visibility: placed ? "visible" : "hidden",
       }}
       className={`group/card pointer-events-auto absolute flex animate-rise flex-col rounded-xl bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06),0_10px_30px_-12px_rgba(0,0,0,0.18)] transition-shadow ${selected ? "ring-2 ring-sky-400" : "ring-1 ring-stone-900/5"}`}
+      onPointerDownCapture={raise}
       onClick={(event) => {
         event.stopPropagation();
       }}

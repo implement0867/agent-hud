@@ -56,8 +56,8 @@ The app serves the board page at `/`, a whiteboard that updates when the agent w
 
 | On the page | Does |
 |---|---|
-| A new card | goes to the free space below the others, on a grid of three columns; the board keeps its place for every tab and reload, and the agent reads it. No card covers another: a card that grows with a new version, or that a move puts onto others, pushes the cards it crosses down; a card the user drops stays, and the others move A card that arrives out of view gets a chip at the nearest edge, "new: risks", which shows the card on a click |
-| Drag a card's header | moves the card; the board keeps its place for everyone |
+| A new card | goes to the free space below the others, on a grid of three columns; the board keeps its place for every tab and reload, and the agent reads it. A new card lands clear of every card; after that cards may cross, and the card last touched, by the user or by the agent's new version or move, shows on top. A card that arrives out of view gets a chip at the nearest edge, "new: risks", which shows the card on a click |
+| Drag a card's header | moves the card and puts it on top of the cards it crosses; the board keeps its place for everyone |
 | Drag a card's bottom right corner | sets its width; the board keeps it for everyone |
 | Double-click empty space | writes a note there |
 | Double-click a card's text, or `E` | edits its markdown; ⌘↵ saves. A click outside or Esc closes an unchanged editor; with changes, a click outside keeps it open and asks to save or discard, and Esc asks for a second Esc. When the agent puts a new version while the editor is open, the save is refused and the editor says so, with a button to save over the new version. An agent's card that the user edits keeps its look and says "edited by you" |
@@ -115,4 +115,4 @@ Requires [uv](https://docs.astral.sh/uv/) and Node 22.
 | `cd ui && npm run build` | build the UI into the server package; commit the build |
 | `claude --plugin-dir .` | run Claude Code with the plugin from this checkout |
 | `cd ui && npm run dev` | Vite dev server, which sends `/ws` to the running server |
-| `cd ui && npm test` | the unit tests of the UI's library, with vitest and fast-check: properties such as that a new card lands clear of every card on the board, and that settled cards cross none |
+| `cd ui && npm test` | the unit tests of the UI's library, with vitest and fast-check: properties such as that a new card lands clear of every card on the board |
