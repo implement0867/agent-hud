@@ -1,0 +1,334 @@
+{
+ "cards": {
+  "checklist": {
+   "md": "# Release checklist: agent-hud 0.2\n\n| Step | Owner {agent, user} | Hours {number} | Done {check} |\n|---|---|---|---|\n| Bump version in plugin and server | | | |\n| Write the changelog | | | |\n| Run make check | | | |\n| Run make check in a clean container (manual docker run, no CI yet) | | | |\n| Run the test suite | | | |\n| Verify the version matches in plugin and server | | | |\n| Tag the release | | | |\n| Build the UI | | | |\n| Publish the plugin | | | |\n| Smoke-test the published plugin on a fresh board | | | |\n| Announce the release | | | |",
+   "author": "agent",
+   "edited": false
+  },
+  "risks": {
+   "md": "# Risks\n\n- The UI build is stale or missing from the published plugin\n- make check passes locally but fails in a clean environment (no CI job exists yet)\n- The version number is out of sync between the plugin and the server",
+   "author": "agent",
+   "edited": false
+  },
+  "note-140a1398": {
+   "md": "Missing steps: run the test suite before tagging, and smoke-test the published plugin on a fresh board after publishing.",
+   "author": "user",
+   "edited": false
+  }
+ },
+ "threads": {
+  "risks/2": {
+   "reactions": {
+    "user": "approve"
+   },
+   "comments": []
+  },
+  "risks/3": {
+   "reactions": {},
+   "comments": [
+    {
+     "id": "2e854df811634b80a67076c6c860e2b1",
+     "author": "agent",
+     "text": "No CI job exists yet, so it would be a manual `docker run` of make check in a clean container. I added it as a checklist step, owned by the agent.",
+     "ref": "risks/3",
+     "at": "2026-10-24T21:16:08.175339Z"
+    }
+   ]
+  },
+  "checklist/5": {
+   "reactions": {
+    "user": "approve"
+   },
+   "comments": []
+  },
+  "checklist/9": {
+   "reactions": {
+    "user": "approve"
+   },
+   "comments": [
+    {
+     "id": "12ac69ae-01ab-4136-af2c-5e0dcdeedb27",
+     "author": "user",
+     "text": "Is the built UI committed to the repo or only produced at publish time? If it is committed, this step must come right before 'Publish the plugin' or the build goes stale again (risk 1).",
+     "ref": "checklist/9",
+     "at": "2026-10-24T21:18:10.663761Z"
+    },
+    {
+     "id": "ef4da4856c854bf4a499eea7d468c946",
+     "author": "agent",
+     "text": "`dist/` is in .gitignore, so build output is not committed. I can't tell from the repo whether the plugin ships it from somewhere else, so I moved the build to right before 'Publish the plugin'. Please confirm that works.",
+     "ref": "checklist/9",
+     "at": "2026-10-24T21:20:07.387320Z"
+    },
+    {
+     "id": "b90ca629-ae2c-4c3a-9409-5f1fb24644f5",
+     "author": "user",
+     "text": "Confirmed: build right before publish works. Approved.",
+     "ref": "checklist/9",
+     "at": "2026-10-24T21:21:21.545086Z"
+    }
+   ]
+  },
+  "checklist": {
+   "reactions": {
+    "user": "approve"
+   },
+   "comments": [
+    {
+     "id": "a90b9dbc-1f0c-429c-bc2a-cf959f1f658a",
+     "author": "user",
+     "text": "Checklist approved for 0.2: 11 steps, 9.5 h total. Ship it.",
+     "ref": "checklist",
+     "at": "2026-10-24T21:22:36.941896Z"
+    }
+   ]
+  }
+ },
+ "values": {
+  "checklist/2/2": "agent",
+  "checklist/2/3": 1.0,
+  "checklist/3/2": "agent",
+  "checklist/3/3": 2.0,
+  "checklist/9/2": "agent",
+  "checklist/9/3": 1.0,
+  "checklist/4/2": "agent",
+  "checklist/4/3": 1.0,
+  "checklist/8/2": "user",
+  "checklist/8/3": 1.0,
+  "checklist/10/2": "user",
+  "checklist/10/3": 1.0,
+  "checklist/12/2": "agent",
+  "checklist/12/3": 0.5,
+  "checklist/4/4": true,
+  "checklist/5/2": "agent",
+  "checklist/5/3": 1.0,
+  "checklist/6/2": "user",
+  "checklist/6/3": 1.0,
+  "checklist/11/2": "user",
+  "checklist/11/3": 1.0,
+  "checklist/7/2": "agent",
+  "checklist/7/3": 0.5
+ },
+ "arrows": {},
+ "messages": [
+  {
+   "id": "3fab6cbd45f146ad83d6eef325e78f78",
+   "author": "agent",
+   "text": "I drafted the checklist (7 steps) and a risks card (4 risks). Please fill Owner, Hours and Done in the table, react to the risks, and click Send.",
+   "ref": null,
+   "at": "2026-10-24T21:05:20.631097Z"
+  },
+  {
+   "id": "fda6eef4-418b-47df-9c70-64e1d45f1232",
+   "author": "user",
+   "text": "Which clean environment? Is there a CI job for this or is it a manual docker run? Add a step for it.",
+   "ref": "risks/3",
+   "at": "2026-10-24T21:06:54.615658Z"
+  },
+  {
+   "id": "be96850d-7103-4e40-bc23-047a103b4416",
+   "author": "user",
+   "text": "Round 1: filled owners/hours. Two steps are missing: run the test suite before tagging, and smoke-test the published plugin on a fresh board after publishing (see my note and arrow). Rejected the card-format risk: we are not changing the format in 0.2, drop it. Also, who verifies the clean-env make check?",
+   "ref": null,
+   "at": "2026-10-24T21:15:57.240865Z"
+  },
+  {
+   "id": "2e854df811634b80a67076c6c860e2b1",
+   "author": "agent",
+   "text": "No CI job exists yet, so it would be a manual `docker run` of make check in a clean container. I added it as a checklist step, owned by the agent.",
+   "ref": "risks/3",
+   "at": "2026-10-24T21:16:08.175339Z"
+  },
+  {
+   "id": "e507a2cf217144c2ab2a01a7f2c967ab",
+   "author": "agent",
+   "text": "Understood, the format is unchanged in 0.2, so I dropped it.",
+   "ref": "risks/5",
+   "at": "2026-10-24T21:16:08.175339Z"
+  },
+  {
+   "id": "ce750fd2a514461cbadff1f23b7886a6",
+   "author": "agent",
+   "text": "Round 2: I added the clean-container make check (agent, 1h), the test suite before tagging (agent, 0.5h) and the smoke test after publishing (user, 0.5h, since you publish). I dropped the card-format risk and kept your edit to the make check risk. Your values moved with their rows. I filled the three new rows with suggestions, so change them if you disagree. Please review and click Send.",
+   "ref": null,
+   "at": "2026-10-24T21:16:13.897162Z"
+  },
+  {
+   "id": "12ac69ae-01ab-4136-af2c-5e0dcdeedb27",
+   "author": "user",
+   "text": "Is the built UI committed to the repo or only produced at publish time? If it is committed, this step must come right before 'Publish the plugin' or the build goes stale again (risk 1).",
+   "ref": "checklist/9",
+   "at": "2026-10-24T21:18:10.663761Z"
+  },
+  {
+   "id": "29defe10-df42-4a29-81c5-668e09deebb6",
+   "author": "user",
+   "text": "Round 2: approved the clean-container step. Changes: 'Run the test suite' is owner user, 1h (the board did not queue that edit, so take it from here). Tag = 1h, smoke-test = 1h, Announce = agent. Open question on Build the UI ordering (see comment). Also add a 'verify the version matches in plugin and server' check before tagging, since risk 3 says it drifts.",
+   "ref": null,
+   "at": "2026-10-24T21:19:53.829087Z"
+  },
+  {
+   "id": "ef4da4856c854bf4a499eea7d468c946",
+   "author": "agent",
+   "text": "`dist/` is in .gitignore, so build output is not committed. I can't tell from the repo whether the plugin ships it from somewhere else, so I moved the build to right before 'Publish the plugin'. Please confirm that works.",
+   "ref": "checklist/9",
+   "at": "2026-10-24T21:20:07.387320Z"
+  },
+  {
+   "id": "57693f4cbf844a87a51280a4f0fb701e",
+   "author": "agent",
+   "text": "Round 3: I took your values (test suite user 1h, Tag 1h, smoke test 1h, Announce agent). I added 'Verify the version matches in plugin and server' (agent, 0.5h) before Tag. I moved 'Build the UI' to right before 'Publish the plugin'. dist/ is gitignored, so the build isn't committed. See my comment on that step. Please review and click Send. If it all looks right, approve the checklist.",
+   "ref": null,
+   "at": "2026-10-24T21:20:10.968765Z"
+  },
+  {
+   "id": "b90ca629-ae2c-4c3a-9409-5f1fb24644f5",
+   "author": "user",
+   "text": "Confirmed: build right before publish works. Approved.",
+   "ref": "checklist/9",
+   "at": "2026-10-24T21:21:21.545086Z"
+  },
+  {
+   "id": "a90b9dbc-1f0c-429c-bc2a-cf959f1f658a",
+   "author": "user",
+   "text": "Checklist approved for 0.2: 11 steps, 9.5 h total. Ship it.",
+   "ref": "checklist",
+   "at": "2026-10-24T21:22:36.941896Z"
+  },
+  {
+   "id": "90209cd9-66c1-472d-ba07-945832f71a6f",
+   "author": "user",
+   "text": "Round 3: final checklist approved (card-level approve + comment). Nothing missing. Note: the 'insert before' arrow is stale, I could not delete it; ignore it.",
+   "ref": null,
+   "at": "2026-10-24T21:22:38.493541Z"
+  },
+  {
+   "id": "25366bfc296643c59136e70b5e01fff0",
+   "author": "agent",
+   "text": "The checklist is agreed: 11 steps. I removed the stale 'insert before' arrow. One correction: the Hours column adds up to 11 h, not 9.5 h (1 + 2 + 1 + 1 + 1 + 0.5 + 1 + 1 + 1 + 1 + 0.5). Change a value if 9.5 was your intended total. Otherwise it stands as agreed.",
+   "ref": null,
+   "at": "2026-10-24T21:22:46.164990Z"
+  },
+  {
+   "id": "4a0c2a6a-cfb6-46cf-89a5-aa4ffdfca891",
+   "author": "user",
+   "text": "11 h is right, my mistake. Stands as agreed, we are done.",
+   "ref": null,
+   "at": "2026-10-24T21:23:50.829621Z"
+  }
+ ],
+ "positions": {
+  "checklist": {
+   "x": 0.0,
+   "y": 0.0
+  },
+  "risks": {
+   "x": 688.0,
+   "y": 0.0
+  },
+  "note-140a1398": {
+   "x": 486.0,
+   "y": 635.0
+  }
+ },
+ "widths": {
+  "checklist": 664.3756530050168
+ },
+ "history": {
+  "risks": [
+   {
+    "card": {
+     "md": "# Risks\n\n- The UI build is stale or missing from the published plugin\n- make check passes locally but fails in a clean environment\n- The version number is out of sync between the plugin and the server\n- The published plugin breaks existing boards (card format change)",
+     "author": "agent",
+     "edited": false
+    },
+    "threads": {
+     "risks/3": {
+      "reactions": {
+       "user": "question"
+      },
+      "comments": [
+       {
+        "id": "fda6eef4-418b-47df-9c70-64e1d45f1232",
+        "author": "user",
+        "text": "Which clean environment? Is there a CI job for this or is it a manual docker run? Add a step for it.",
+        "ref": "risks/3",
+        "at": "2026-10-24T21:06:54.615658Z"
+       }
+      ]
+     }
+    },
+    "values": {}
+   },
+   {
+    "card": {
+     "md": "# Risks\n\n- The UI build is stale or missing from the published plugin\n- make check passes locally but fails in a clean environment (no CI job exists yet)\n- The version number is out of sync between the plugin and the server\n- The published plugin breaks existing boards (card format change)",
+     "author": "agent",
+     "edited": true
+    },
+    "threads": {
+     "risks/5": {
+      "reactions": {
+       "user": "reject"
+      },
+      "comments": [
+       {
+        "id": "e507a2cf217144c2ab2a01a7f2c967ab",
+        "author": "agent",
+        "text": "Understood, the format is unchanged in 0.2, so I dropped it.",
+        "ref": "risks/5",
+        "at": "2026-10-24T21:16:08.175339Z"
+       }
+      ]
+     }
+    },
+    "values": {}
+   }
+  ],
+  "checklist": [
+   {
+    "card": {
+     "md": "# Release checklist: agent-hud 0.2\n\n| Step | Owner {agent, user} | Hours {number} | Done {check} |\n|---|---|---|---|\n| Bump version in plugin and server | | | |\n| Write the changelog | | | |\n| Build the UI | | | |\n| Run make check | | | |\n| Tag the release | | | |\n| Publish the plugin | | | |\n| Announce the release | | | |",
+     "author": "agent",
+     "edited": false
+    },
+    "threads": {},
+    "values": {}
+   },
+   {
+    "card": {
+     "md": "# Release checklist: agent-hud 0.2\n\n| Step | Owner {agent, user} | Hours {number} | Done {check} |\n|---|---|---|---|\n| Bump version in plugin and server | | | |\n| Write the changelog | | | |\n| Build the UI | | | |\n| Run make check | | | |\n| Run make check in a clean container (manual docker run, no CI yet) | | | |\n| Run the test suite | | | |\n| Tag the release | | | |\n| Publish the plugin | | | |\n| Smoke-test the published plugin on a fresh board | | | |\n| Announce the release | | | |",
+     "author": "agent",
+     "edited": false
+    },
+    "threads": {},
+    "values": {}
+   }
+  ]
+ },
+ "parts": {
+  "checklist": {
+   "1": "Release checklist: agent-hud 0.2",
+   "2": "Bump version in plugin and server |  |  | ",
+   "3": "Write the changelog |  |  | ",
+   "4": "Run make check |  |  | ",
+   "5": "Run make check in a clean container (manual docker run, no CI yet) |  |  | ",
+   "6": "Run the test suite |  |  | ",
+   "7": "Verify the version matches in plugin and server |  |  | ",
+   "8": "Tag the release |  |  | ",
+   "9": "Build the UI |  |  | ",
+   "10": "Publish the plugin |  |  | ",
+   "11": "Smoke-test the published plugin on a fresh board |  |  | ",
+   "12": "Announce the release |  |  | "
+  },
+  "risks": {
+   "1": "Risks",
+   "2": "The UI build is stale or missing from the published plugin",
+   "3": "make check passes locally but fails in a clean environment (no CI job exists yet)",
+   "4": "The version number is out of sync between the plugin and the server"
+  },
+  "note-140a1398": {
+   "1": "Missing steps: run the test suite before tagging, and smoke-test the published plugin on a fresh board after publishing."
+  }
+ }
+}
