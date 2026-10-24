@@ -662,20 +662,53 @@ async def test_cards_may_cross_after_their_first_place_and_the_one_last_touched_
     assert await on_top(page, x, y) == "plan"
 
 
-async def test_the_quick_question_opens_the_comment_box(page: Page, agent: Agent) -> None:
-    """Assemble: a plan on the board.
-    Act: the user hovers a step and clicks its quick question button, types the question and presses Enter, then sends.
-    Assert: the feedback panel opened with the comment box focused, and the agent hears the question and the comment."""
-    await agent.write(put("plan", "1. parse\n2. render"))
-    await page.locator('[data-ref="plan/2"]').hover()
-    await page.get_by_label("question plan/2").click()
+async def test_a_click_on_the_comment_count_opens_the_thread_and_leaves_the_verdict(page: Page, agent: Agent) -> None:
+    """Assemble: a plan, where the agent commented on step 2.
+    Act: the user hovers step 2 and approves it with the quick button; then hovers again and clicks the comment count.
+    Assert: the comment count stays in place while the quick buttons show, beside them and not under them; the click
+    opens the feedback on step 2 with the approve still pressed; the agent hears the approve alone, and no question
+    button is among the quick buttons."""
+    await agent.write(put("plan", "1. parse\n2. render"), comment("plan/2", "the cache is shared"))
+    part = page.locator('[data-ref="plan/2"]')
+    thread = page.get_by_label("Thread on plan/2")
+    await expect(thread).to_be_visible()
+    await settled(page)
+    resting = await thread.bounding_box()
+    await part.hover()
+    approve = page.get_by_label("approve plan/2")
+    await expect(approve).to_be_visible()
+    await expect(page.get_by_label("question plan/2")).to_have_count(0)
+    hovered = await thread.bounding_box()
+    quick = await approve.bounding_box()
+    assert resting is not None and hovered is not None and quick is not None
+    assert {k: round(v) for k, v in hovered.items()} == {k: round(v) for k, v in resting.items()}, "the count stays put"
+    assert quick["x"] + quick["width"] <= hovered["x"], "the quick buttons sit before the comment count"
+    await approve.click()
+    await expect(approve).to_have_attribute("aria-pressed", "true")
+    await page.mouse.move(0, 0)
+    await part.hover()
+    await thread.click()
     await expect(page.get_by_label("Feedback on plan/2")).to_be_visible()
-    box = page.get_by_label("Comment")
-    await expect(box).to_be_focused()
-    await box.fill("which renderer?")
-    await box.press("Enter")
+    await expect(page.get_by_label("approve plan/2")).to_have_attribute("aria-pressed", "true")
     await send(page)
-    assert await agent.hear() == [react("plan/2", Reaction.question), comment("plan/2", "which renderer?")]
+    assert await agent.hear() == [react("plan/2", Reaction.approve)]
+
+
+async def test_the_marks_of_a_table_row_sit_before_its_text(page: Page, agent: Agent) -> None:
+    """Assemble: a table with a check column.
+    Act: the user hovers the first row.
+    Assert: the quick buttons sit before the row's text, and the row's checkbox is clear of them by more than their width."""
+    await agent.write(put("tasks", "| Task | Done {check} |\n|---|---|\n| parse | |\n| render | |"))
+    row = page.locator('[data-ref="tasks/1"]')
+    await row.hover()
+    quick = page.get_by_label("approve tasks/1")
+    await expect(quick).to_be_visible()
+    approve = await quick.bounding_box()
+    text = await row.locator("td").nth(1).bounding_box()
+    check = await page.get_by_label("Input tasks/1/2").bounding_box()
+    assert approve is not None and text is not None and check is not None
+    assert approve["x"] + approve["width"] <= text["x"]
+    assert check["x"] - (approve["x"] + approve["width"]) > 2 * approve["width"]
 
 
 async def test_the_quick_reactions_of_a_card_sit_in_line_with_its_header(page: Page, agent: Agent) -> None:
@@ -685,10 +718,10 @@ async def test_the_quick_reactions_of_a_card_sit_in_line_with_its_header(page: P
     await agent.write(put("plan", "# Plan\n\n1. parse"))
     header = page.locator('article[data-ref="plan"] header')
     await header.hover()
-    question = page.get_by_label("question plan", exact=True)
-    await expect(question).to_be_visible()
+    approve = page.get_by_label("approve plan", exact=True)
+    await expect(approve).to_be_visible()
     await settled(page)
-    strip = await question.locator("..").bounding_box()
+    strip = await approve.locator("..").bounding_box()
     head = await header.bounding_box()
     remove_button = await page.get_by_label("Remove plan").bounding_box()
     heading = await page.locator('[data-ref="plan/1"]').bounding_box()

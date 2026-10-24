@@ -1,7 +1,7 @@
 import { MessageCircle } from "lucide-react";
 
 import { SelectionKind, useTools } from "~/lib/whiteboard";
-import { ActionKind, Reaction } from "~/schemas/actions";
+import { ActionKind, Author, Reaction } from "~/schemas/actions";
 import {
   reactionIcons,
   reactionTones,
@@ -9,10 +9,17 @@ import {
   userReaction,
 } from "~/lib/reactions";
 
+/** The reactions with a button on the part: a question wants words, so it is set in the thread. */
+const quick = Reaction.options.filter(
+  (option) => option !== Reaction.enum.question,
+);
+
 /**
- * The reaction of each author and the comment count of the ref, and, while the pointer is on the part, a button for each reaction.
- * The agent's reaction has a ring. The place puts the marks in the part, at the top right unless it says otherwise.
- * A question wants words, so the question button also opens the part's feedback with the comment box focused.
+ * The marks of the ref, the reaction of each author and the comment count, and, while the pointer is on the part, a
+ * button for approve and for reject before them, so that the marks stay where they are and a click on the comment
+ * count opens the thread. The user's own reaction shows as the pressed button meanwhile. The agent's reaction has a
+ * ring. A question is a comment with its mark, in the thread. The place puts the marks in the part, at the top right
+ * unless it says otherwise.
  */
 export const Marks = ({
   target,
@@ -25,69 +32,72 @@ export const Marks = ({
   const thread = board.threads[target];
   const reaction = userReaction(thread);
   const comments = thread?.comments.length ?? 0;
+  const open = () => {
+    select({ kind: SelectionKind.enum.ref, ref: target });
+  };
   return (
     <span
       className={`not-prose absolute flex items-center gap-1 text-xs select-none ${place}`}
     >
-      <span
-        className={`flex items-center gap-1 ${readOnly ? "" : "group-hover/part:hidden"}`}
-      >
-        {comments > 0 && (
-          <span className="flex items-center gap-0.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-sky-700">
-            <MessageCircle className="size-3" />
-            {comments}
+      {!readOnly && (
+        <span className="-my-0.5 hidden items-center gap-0.5 rounded-full bg-white/90 p-0.5 shadow-sm ring-1 ring-stone-200 group-hover/part:flex">
+          {quick.map((option) => {
+            const Icon = reactionIcons[option];
+            const on = reaction === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                aria-label={`${option} ${target}`}
+                aria-pressed={on}
+                className={`grid size-5 place-items-center rounded-full transition-colors ${on ? reactionTones[option] : "text-stone-400 hover:bg-stone-100 hover:text-stone-700"}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void act(
+                    on
+                      ? { kind: ActionKind.enum.unreact, ref: target }
+                      : {
+                          kind: ActionKind.enum.react,
+                          ref: target,
+                          reaction: option,
+                        },
+                  );
+                }}
+              >
+                <Icon className="size-3.5" strokeWidth={2.5} />
+              </button>
+            );
+          })}
+        </span>
+      )}
+      {comments > 0 && (
+        <button
+          type="button"
+          aria-label={`Thread on ${target}`}
+          className="flex items-center gap-0.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-sky-700 hover:bg-sky-200"
+          onClick={(event) => {
+            event.stopPropagation();
+            open();
+          }}
+        >
+          <MessageCircle className="size-3" />
+          {comments}
+        </button>
+      )}
+      {reactionsOf(thread).map(([author, reacted]) => {
+        const Icon = reactionIcons[reacted];
+        const own = author === Author.enum.user && !readOnly;
+        return (
+          <span
+            key={author}
+            role="img"
+            aria-label={`${author}: ${reacted}`}
+            className={`grid size-5 place-items-center rounded-full ${reactionTones[reacted]} ${author === "agent" ? "ring-2 ring-current ring-inset" : ""} ${own ? "group-hover/part:hidden" : ""}`}
+          >
+            <Icon className="size-3.5" strokeWidth={3} />
           </span>
-        )}
-        {reactionsOf(thread).map(([author, reacted]) => {
-          const Icon = reactionIcons[reacted];
-          return (
-            <span
-              key={author}
-              className={`grid size-5 place-items-center rounded-full ${reactionTones[reacted]} ${author === "agent" ? "ring-2 ring-current ring-inset" : ""}`}
-              title={`${author}: ${reacted}`}
-            >
-              <Icon className="size-3.5" strokeWidth={3} />
-            </span>
-          );
-        })}
-      </span>
-      <span
-        className={`hidden items-center gap-0.5 rounded-full bg-white/90 p-0.5 shadow-sm ring-1 ring-stone-200 ${readOnly ? "" : "group-hover/part:flex"}`}
-      >
-        {Reaction.options.map((option) => {
-          const Icon = reactionIcons[option];
-          const on = reaction === option;
-          return (
-            <button
-              key={option}
-              type="button"
-              aria-label={`${option} ${target}`}
-              aria-pressed={on}
-              title={option}
-              className={`grid size-5 place-items-center rounded-full transition-colors ${on ? reactionTones[option] : "text-stone-400 hover:bg-stone-100 hover:text-stone-700"}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                void act(
-                  on
-                    ? { kind: ActionKind.enum.unreact, ref: target }
-                    : {
-                        kind: ActionKind.enum.react,
-                        ref: target,
-                        reaction: option,
-                      },
-                );
-                if (on || option !== Reaction.enum.question) return;
-                select({ kind: SelectionKind.enum.ref, ref: target });
-                requestAnimationFrame(() => {
-                  document.getElementById("comment-box")?.focus();
-                });
-              }}
-            >
-              <Icon className="size-3.5" strokeWidth={2.5} />
-            </button>
-          );
-        })}
-      </span>
+        );
+      })}
     </span>
   );
 };
