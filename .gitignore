@@ -5,6 +5,7 @@
 !.prettierrc.json
 !.prettierignore
 !.claude-plugin/
+!.github/
 
 __pycache__/
 node_modules/

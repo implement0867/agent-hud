@@ -116,3 +116,9 @@ Requires [uv](https://docs.astral.sh/uv/) and Node 22.
 | `claude --plugin-dir .` | run Claude Code with the plugin from this checkout |
 | `cd ui && npm run dev` | Vite dev server, which sends `/ws` to the running server |
 | `cd ui && npm test` | the unit tests of the UI's library, with vitest and fast-check: properties such as that a new card lands clear of every card on the board |
+
+A merged pull request bumps the versions it changes, in a commit to main: the UI's in `ui/package.json` when it
+changes `ui/`, the server's in `server/pyproject.toml` when it changes `server/`, and the plugin's in
+`.claude-plugin/plugin.json` when it changes either of those, `hooks/`, `commands/`, `skills/` or `.claude-plugin/`.
+The bump is a patch, or a minor or major one with the label `minor` or `major` on the pull request, and the plugin's
+new version gets the tag `v<version>`. A rebuilt UI changes `server/` too, so it bumps the server as well.
