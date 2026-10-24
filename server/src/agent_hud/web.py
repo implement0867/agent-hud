@@ -5,14 +5,17 @@ from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from secrets import token_urlsafe
+from typing import Annotated
 
-from fastapi import FastAPI, WebSocket
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketException, status
+from fastapi import Request as HttpRequest
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from agent_hud.boards import BoardInfo, Huds, TBoardId
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, Author
@@ -57,26 +60,35 @@ def keep_token(token: str, state_dir: Path) -> None:
 
 def create_app(hud: Hud | None = None) -> FastAPI:
     """
-    MCP for the agent at /mcp/, the board websocket at /ws, and the built UI at /, on the hud, or on a new one from the settings.
-    The sockets need the token as a query parameter; /mcp/ needs it as a bearer token when the settings give one.
-    RuntimeError when another process holds the state file, as a second uvicorn worker would.
+    MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
+    the boards in the settings' directory, with the hud as the shared board when one is given. The agent's requests
+    name their board in the X-Agent-Hud-Board header, and the sockets in the board query parameter.
+    The sockets and /boards need the token as a query parameter; /mcp/ needs it as a bearer token when the settings give one.
+    RuntimeError when another process holds a board's file, as a second uvicorn worker would.
     """
     settings = get_settings()
-    if hud is None:
-        hud = Hud(settings.board_file)
+    huds = Huds(settings.board_files, shared=hud)
     token = settings.token or token_urlsafe(32)
     keep_token(token, settings.state_dir)
-    mcp_app = build(hud, token).http_app(path="/")
+    mcp_app = build(huds, token).http_app(path="/")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """The MCP session manager while the app runs, and the state file compacted and let go on shutdown."""
+        """The MCP session manager while the app runs, and each board's file compacted and let go on shutdown."""
         try:
             async with mcp_app.lifespan(app):
                 yield
         finally:
-            hud.compact()
-            hud.close()
+            huds.compact()
+            huds.close()
+
+    def require_board(websocket: WebSocket) -> Hud:
+        """The hud of the board that the socket's board query parameter names; the shared board without one."""
+        board: TBoardId = websocket.query_params.get("board", Huds.shared)
+        hud = huds.get(board)
+        if hud is None:
+            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
+        return hud
 
     app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
@@ -88,9 +100,16 @@ def create_app(hud: Hud | None = None) -> FastAPI:
         """The app, its version and the build fingerprint it was started with, for the hook that starts it: any other answer on the port is another program."""
         return {"app": "agent-hud", "version": version("agent-hud"), "build": settings.build}
 
+    @app.get("/boards")
+    def boards(request: HttpRequest) -> list[BoardInfo]:
+        """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
+        if request.query_params.get("token") != token:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "the token is missing or wrong")
+        return huds.boards()
+
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
-    async def page(websocket: WebSocket) -> None:
-        """Send the snapshot on connect and after each change, and act for the user, until the page disconnects."""
+    async def page(websocket: WebSocket, hud: Annotated[Hud, Depends(require_board)]) -> None:
+        """Send the board's snapshot on connect and after each change, and act for the user, until the page disconnects."""
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
             sender = tg.create_task(send_snapshots(websocket, hud))
@@ -106,8 +125,8 @@ def create_app(hud: Hud | None = None) -> FastAPI:
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[AgentOriginDep, with_token])
-    async def agent(websocket: WebSocket) -> None:
-        """Send each of the user's turns to this agent's monitor, until it disconnects."""
+    async def agent(websocket: WebSocket, hud: Annotated[Hud, Depends(require_board)]) -> None:
+        """Send each of the user's turns on the board to this agent's monitor, until it disconnects."""
         await websocket.accept()
         with hud.monitor():
             async with asyncio.TaskGroup() as tg:

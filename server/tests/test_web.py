@@ -8,11 +8,13 @@ from importlib.metadata import version
 from json import load
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import pytest
 import pytest_asyncio
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.provisional import domains
@@ -21,6 +23,7 @@ from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
+from agent_hud.boards import Huds
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
@@ -29,7 +32,7 @@ from agent_hud.settings import get_settings
 from agent_hud.store import Store
 from agent_hud.web import create_app
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, serve
-from tests.factories import as_json, put, react, say, send
+from tests.factories import as_json, put, react, read_board, say, send
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
@@ -81,7 +84,7 @@ async def listeners(address: tuple[str, int], hud: Hud) -> AsyncIterator[list[Cl
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def agent(hud: Hud) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same hud as the app. MCP over HTTP is slower per call."""
-    async with Client(build(hud)) as client:
+    async with Client(build(Huds(None, shared=hud))) as client:
         yield client
 
 
@@ -145,23 +148,73 @@ async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp
 
 
 async def test_a_second_app_on_the_state_dir_does_not_start(static_dir: Path, tmp_path: Path) -> None:
-    """Assemble: an app served on a state dir.
+    """Assemble: an app served on a state dir, with the shared board's file in its boards directory.
     Act: create an app from the settings on the same state dir, as a second uvicorn worker would.
-    Assert: RuntimeError that names the board file; and once the first app has stopped, the app starts."""
-    async with serve(Hud(tmp_path / "board.db"), static_dir, tmp_path):
+    Assert: RuntimeError that names the shared board's file; and once the first app has stopped, the app starts."""
+    shared = tmp_path / "boards" / "shared.db"
+    async with serve(Hud(shared), static_dir, tmp_path):
         with pytest.MonkeyPatch.context() as env:
             env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
             env.setenv("AGENT_HUD_STATE_DIR", str(tmp_path))
             get_settings.cache_clear()
             try:
-                with pytest.raises(RuntimeError, match=re.escape(str(tmp_path / "board.db"))):
+                with pytest.raises(RuntimeError, match=re.escape(str(shared))):
                     create_app()
             finally:
                 get_settings.cache_clear()
-    async with serve(Hud(tmp_path / "board.db"), static_dir, tmp_path) as address:
+    async with serve(Hud(shared), static_dir, tmp_path) as address:
         host, port = address
         with await asyncio.to_thread(urlopen, f"http://{host}:{port}/health") as answer:
             assert answer.status == 200
+
+
+def project_tools(address: tuple[str, int], project: str) -> StreamableHttpTransport:
+    """The MCP tools over HTTP, with the project directory in the board header, as the plugin sends it."""
+    host, port = address
+    return StreamableHttpTransport(f"http://{host}:{port}/mcp/", headers={"X-Agent-Hud-Board": project}, auth=TOKEN)
+
+
+async def test_each_project_has_its_own_board(address: tuple[str, int], hud: Hud) -> None:
+    """Assemble: the app, whose shared board is the module's hud.
+    Act: an agent whose requests name a project directory puts a card and listens; a page opens that board, and another the shared board; a second agent names another directory of the same name.
+    Assert: the card is on the project's board alone, listen names the board in its URL and the id names the project, the second agent has a third board, the page of the project's board sees the card, and the shared board is as it was."""
+    host, port = address
+    async with Client(project_tools(address, "/home/me/work/agent-hud")) as remote:
+        await remote.call_tool("write", {"actions": as_json(put("plan", "1. a"))})
+        listening = (await remote.call_tool("listen", {})).structured_content
+    assert listening is not None
+    board = str(listening["board"])
+    assert re.fullmatch(r"agent-hud-[0-9a-f]{6}", board)
+    assert f"board={board}" in str(listening["url"]) and listening["monitors"] == 0
+    assert "plan" not in hud.board.cards
+    async with Client(project_tools(address, "/home/you/agent-hud")) as other:
+        assert (await read_board(other)).cards == {}
+        assert str((await other.call_tool("listen", {})).structured_content["board"]) not in {board, "shared"}  # type: ignore[index]
+    origin = f"http://{host}:{port}"
+    async with connect(f"ws://{host}:{port}/ws?token={TOKEN}&board={board}", origin=origin, proxy=None) as page:
+        assert list(Snapshot.model_validate_json(await page.recv()).board.cards) == ["plan"]
+    with await asyncio.to_thread(urlopen, f"http://{host}:{port}/boards?token={TOKEN}") as answer:
+        boards = {entry["id"]: entry["cards"] for entry in load(answer)}
+    assert boards["shared"] == len(hud.board.cards) and boards[board] == 1 and len(boards) == 3
+
+
+async def test_a_monitor_on_one_board_counts_for_that_board_alone(address: tuple[str, int], hud: Hud) -> None:
+    """Assemble: the app, and the id of a project's board from listen.
+    Act: open a monitor on the project's board.
+    Assert: the project's board says an agent waits and the shared board says none; and a socket on a board that there is not fails."""
+    host, port = address
+    async with Client(project_tools(address, "/home/me/work/other")) as remote:
+        listening = (await remote.call_tool("listen", {})).structured_content
+    assert listening is not None
+    async with connect(str(listening["url"]), proxy=None):
+        await asyncio.sleep(0.1)
+        with await asyncio.to_thread(urlopen, f"http://{host}:{port}/boards?token={TOKEN}") as answer:
+            agents = {entry["id"]: entry["agent"] for entry in load(answer)}
+        assert agents[str(listening["board"])] == AgentState.waiting and agents["shared"] == hud.snapshot().agent
+    with pytest.raises(InvalidStatus):
+        await connect(f"ws://{host}:{port}/agent?token={TOKEN}&board=nowhere", proxy=None)
+    with pytest.raises(HTTPError, match="403"):
+        await asyncio.to_thread(urlopen, f"http://{host}:{port}/boards")
 
 
 async def test_the_turns_command_prints_each_turn_as_a_line(address: tuple[str, int]) -> None:

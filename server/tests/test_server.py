@@ -9,6 +9,7 @@ from fastmcp.exceptions import ToolError
 from hypothesis import given
 from mcp.types import Tool
 
+from agent_hud.boards import Huds
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Fill, Reaction, TAgentBody
 from agent_hud.server import build
@@ -22,8 +23,8 @@ async def listed_write(client: Client[Any]) -> Tool:
 
 @pytest.fixture
 async def client(hud: Hud) -> AsyncIterator[Client[Any]]:
-    """The MCP tools in memory, on the test's hud."""
-    async with Client(build(hud)) as client:
+    """The MCP tools in memory, on the test's hud as the shared board."""
+    async with Client(build(Huds(None, shared=hud))) as client:
         yield client
 
 

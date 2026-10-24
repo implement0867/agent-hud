@@ -22,11 +22,11 @@ class Settings(BaseSettings):
 
     static_dir: Path = Field(default_factory=find_static_dir, description="Directory of the built UI")
     state_dir: Path = Field(
-        default_factory=find_state_dir, description="Directory of the token file and of the board file by default"
+        default_factory=find_state_dir, description="Directory of the token file and of the boards by default"
     )
-    state_file: Path | None = Field(
+    boards_dir: Path | None = Field(
         default=None,
-        description="SQLite file of the board's state, replayed on start; board.db in the state dir by default",
+        description="Directory of the SQLite file of each board's state, replayed on start; boards in the state dir by default",
     )
     build: str = Field(
         default="",
@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     )
 
     @property
-    def board_file(self) -> Path:
-        return self.state_file or self.state_dir / "board.db"
+    def board_files(self) -> Path:
+        return self.boards_dir or self.state_dir / "boards"
 
 
 @lru_cache(maxsize=1)

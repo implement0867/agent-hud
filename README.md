@@ -14,9 +14,16 @@ claude plugin install agent-hud@agent-hud
 ```
 
 The plugin needs [uv](https://docs.astral.sh/uv/). At the start of each session, its hook starts the app on
-port 7676 unless the app already runs there, so all sessions share one board. The plugin connects the MCP
+port 7676 unless the app already runs there, so all sessions use one app. The plugin connects the MCP
 server `board` at `http://127.0.0.1:7676/mcp/`, and adds the `board` skill and the `/agent-hud:board`
 command, which gives the page URL and follows the user's actions.
+
+Each project has its own board. The plugin sends the project directory of the session in the `X-Agent-Hud-Board`
+header of each MCP request, and the app keeps a board for each, with an id of the directory's last name and six
+hex digits of the whole, such as `agent-hud-3f2a1c`, so that two sessions in two projects do not see each other's
+cards or get each other's turns. A request without the header, such as one from a client that is not the plugin,
+acts on the board `shared`. The URL that `listen` returns names the session's board, and so does the page URL;
+the page's pill names the board it shows and lists the others, and a click opens one.
 
 The hook asks `GET /health` on the port, which the app answers with its name, its version and the build
 fingerprint it was started with, a checksum of the server's sources that the hook computes. The same build
@@ -31,17 +38,19 @@ that pid.
 |---|---|
 | `AGENT_HUD_PORT` | the port, 7676 by default; the hook, the MCP server URL and `make serve` read it |
 | `AGENT_HUD_TOKEN` | the token that `/mcp/` needs as a bearer token, which the plugin sends from this variable; unset, `/mcp/` is open to local processes and the app makes a token for the sockets alone |
-| `AGENT_HUD_STATE_DIR` | the directory of the token file and, by default, of the board file; `$XDG_STATE_HOME/agent-hud` by default, with `~/.local/state` for the XDG state home |
-| `AGENT_HUD_STATE_FILE` | the SQLite file that the app appends each action to and replays on start; `board.db` in the state dir by default. On a clear and on shutdown the app compacts it: its checkpoint takes the board at the start of the user's turn, and the actions from there alone stay. One process holds the file, so a second one on the same state dir, such as a second uvicorn worker, does not start |
+| `AGENT_HUD_STATE_DIR` | the directory of the token file and, by default, of the boards; `$XDG_STATE_HOME/agent-hud` by default, with `~/.local/state` for the XDG state home |
+| `AGENT_HUD_BOARDS_DIR` | the directory of the SQLite file of each board, named by the board's id, which the app appends each action to and replays on start; `boards` in the state dir by default. On a clear and on shutdown the app compacts each: its checkpoint takes the board at the start of the user's turn, and the actions from there alone stay. One process holds the files, so a second one on the same state dir, such as a second uvicorn worker, does not start |
 | `AGENT_HUD_STATIC_DIR` | the directory of the built UI; the one in the package by default |
 
 The hook of the first session of the day starts the app, so these must be set in the environment that
 starts that session, such as the shell profile.
 
-The app answers `/ws` and `/agent` only with its token as the `token` query parameter. The URL that `listen`
-returns carries it, and so does the page URL that `/agent-hud:board` gives; the app also writes it to
+The app answers `/ws`, `/agent` and `/boards` only with its token as the `token` query parameter, and the sockets
+take the board's id as the `board` query parameter, with `shared` as the default. The URL that `listen` returns
+carries both, and so does the page URL that `/agent-hud:board` gives; the app also writes the token to
 `$XDG_STATE_HOME/agent-hud/token`, readable by the user only. `/ws` also needs the page's own Origin, which
-the browser always sends, so a local script cannot act as the user.
+the browser always sends, so a local script cannot act as the user. `/boards` lists each board with its card count
+and the state of its agent.
 
 The app serves the board page at `/`, a whiteboard that updates when the agent writes:
 
@@ -64,7 +73,7 @@ The app serves the board page at `/`, a whiteboard that updates when the agent w
 | ⌘ or Ctrl + scroll, `+`, `-`, `0`, `1` | zooms, resets, fits all cards in the part of the view that the chat leaves free. Below 1280 px the chat sits above the toolbar, and the toolbar wraps |
 | Send, or ⌘↵ | sends the user's actions since the last send to the agent, as one turn; a chat message sends them too. The chevron beside it lists what the turn carries: the last reaction on a part and the last value of a cell, when they differ from the start of the turn, and no moves or resizes |
 | Chat | messages to and from the agent, and each comment on a part; a ref such as `plan/2` shows the part; `M` focuses it. A drag on its left edge sets its width, which the browser keeps |
-| The pill at the top left | the agent's socket: no agent connected, or connected and working on the user's turn, or connected and waiting for it; and the turns sent that no agent has taken, which wait for the next monitor, across restarts |
+| The pill at the top left | the board the page shows, with a menu of every board on the app, each with its cards and whether an agent follows it, which opens the one clicked; and the agent's socket: no agent connected, or connected and working on the user's turn, or connected and waiting for it; and the turns sent that no agent has taken, which wait for the next monitor, across restarts |
 | History, `H`, or a card's version chip | shows the earlier versions of the cards with the feedback they had |
 | Clear | after a confirm, moves every card to its history with its feedback, and empties the board, its arrows and the chat |
 
@@ -79,7 +88,7 @@ An edit is a `put`: the feedback on the parts whose text it keeps stays with the
 |---|---|
 | `write(actions)` | acts on the board as the agent, all or nothing. Each action is `put {id, md, version?}`, `remove {id}`, `restore {id}`, `react {ref, reaction}`, `unreact {ref}`, `comment {ref, text}`, `say {text}`, `fill {ref, value}`, `link {id, src, dst, text}`, `unlink {id}`, `move {id, x, y}`, `resize {id, width}` or `clear`, with a `kind`. A `ref` is a card id, or a card id and the number of a heading, paragraph, list item, table body row or code line, counted together in document order, such as `plan/2`. Nested list items and the code lines inside a list item count too, and a paragraph inside a list item is text of the item, so the item shown as "2." is not always part 2. A table header such as `cost {number}`, `done {check}`, `note {text}` or `size {S, M, L}` makes an input column, and `fill` sets its cell by row and column, such as `plan/2/3`. An arrow links two refs. A put of a card keeps the feedback, values and arrows on the parts whose text is unchanged, matched by text in order, and on the card itself when its markdown is unchanged; the rest goes with the card as it was to `history`. A replaced card keeps its first `author`, with `edited` true when the other author put the latest version. A put with `version`, the number of earlier versions the card has, is refused when the card has another number or is gone. A remove moves all of it there, a restore puts a removed card back as its last version was, and a clear does so for every card and empties the arrows and the chat. Each author has their own reaction on a part. Returns the cards added and replaced, the parts whose feedback went to the history, the arrows dropped, and the parts of each card put, by number: `{"added": ["plan"], "replaced": [], "retired": [], "dropped": [], "parts": {"plan": {"1": "parse", "2": "render"}}}`. A batch puts each card at most once. |
 | `read()` | the board as JSON, to read once and again when the agent is unsure: `{"cards": {"plan": {"md": "1. a", "author": "agent", "edited": false}}, "threads": {"plan/1": {"reactions": {"user": "approve"}, "comments": [{"id": "9f2c…", "author": "user", "text": "why a?"}]}}, "values": {"plan/2/3": 3.5}, "arrows": {"why": {"src": "risk", "dst": "plan/1", "text": "blocks", "author": "agent"}}, "messages": [{"id": "1c2d…", "author": "user", "text": "go ahead", "ref": null}], "positions": {"plan": {"x": 0.0, "y": 0.0}}, "widths": {}, "parts": {"plan": {"1": "a"}}, "history": {}}`. Each message has a `ref`, which names the part for a comment. `parts` gives the text of each part of each card by its number. `read(history=true)` also returns the earlier versions of each card. `read(cards=["plan"])` returns those cards alone, with the feedback, values, arrows, positions and history on them, and `read(since=id)` returns the messages after the message or comment with that id. |
-| `listen()` | `{"url": "ws://127.0.0.1:7676/agent?token=…", "command": "uv run … agent-hud-turns 'ws://…'"}`: the websocket URL of the user's turns, for Claude Code's Monitor tool with a websocket source, and a shell command that prints each turn as a line, for a Monitor tool that takes a command. Give the monitor the description `board`, which Claude Code shows before each line. Each line is one turn, the changes that the user made since the last send: `{"actions": [{"id": "9f2c…", "author": "user", "body": {"kind": "react", "ref": "plan/2", "reaction": "reject"}, "parts": {"plan/2": "rewrite the cache"}}]}`, where `parts` has the text of each part that the action names, as it was when the user acted. A code line's text starts with its file and line number. A `put` on a card that was on the board comes as `{"kind": "edit", "id": "plan", "diff": "@@ -1,2 +1,2 @@…"}`, a unified diff of its markdown. |
+| `listen()` | `{"url": "ws://127.0.0.1:7676/agent?board=agent-hud-3f2a1c&token=…", "command": "uv run … agent-hud-turns 'ws://…'", "board": "agent-hud-3f2a1c", "monitors": 0}`: the websocket URL of the user's turns on the session's board, for Claude Code's Monitor tool with a websocket source, a shell command that prints each turn as a line, for a Monitor tool that takes a command, the board's id, and the monitors already open on the board: above 0, another session follows the same board, and each turn would go to both. Give the monitor the description `board`, which Claude Code shows before each line. Each line is one turn, the changes that the user made since the last send: `{"actions": [{"id": "9f2c…", "author": "user", "body": {"kind": "react", "ref": "plan/2", "reaction": "reject"}, "parts": {"plan/2": "rewrite the cache"}}]}`, where `parts` has the text of each part that the action names, as it was when the user acted. A code line's text starts with its file and line number. A `put` on a card that was on the board comes as `{"kind": "edit", "id": "plan", "diff": "@@ -1,2 +1,2 @@…"}`, a unified diff of its markdown. |
 
 The listed schema of `write` is one object with the fields of all kinds of action, and the description gives the fields of
 each kind, so that the tools cost the agent fewer tokens. The server still checks each action against the model of its kind.

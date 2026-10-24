@@ -12,6 +12,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
+from agent_hud.boards import Huds
 from agent_hud.hud import Hud
 from agent_hud.models.actions import (
     Action,
@@ -47,6 +48,18 @@ class Listening(Model):
     command: str = Field(
         description="A shell command that prints each turn as a line, for a monitor that takes a command"
     )
+    board: str = Field(description="The id of this session's board, which the URL names")
+    monitors: int = Field(
+        description="The monitors already open on the board: above 0, another session follows it, and both would get each turn"
+    )
+
+
+def board_key() -> str | None:
+    """The board that the agent's request names in its X-Agent-Hud-Board header; none in memory or without the header."""
+    try:
+        return get_http_request().headers.get("x-agent-hud-board") or None
+    except RuntimeError:
+        return None
 
 
 def turns_command(url: str) -> str:
@@ -179,9 +192,15 @@ def parse(actions: list[dict[str, Any]]) -> list[TAgentBody]:
     return bodies
 
 
-def build(hud: Hud, token: str | None = None) -> FastMCP:
-    """The MCP server whose tools act on the hud. With a token, the URL that listen returns carries it."""
+def build(huds: Huds, token: str | None = None) -> FastMCP:
+    """
+    The MCP server whose tools act on the board that each request names, or on the shared board.
+    With a token, the URL that listen returns carries it.
+    """
     mcp = FastMCP("agent-hud")
+
+    def hud_now() -> Hud:
+        return huds.of(board_key())
 
     async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> Written:
         """
@@ -191,6 +210,7 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
         Returns the cards added and replaced, the parts whose feedback went to the history, the arrows dropped,
         and the parts of each card put, by number: use these numbers in refs.
         """
+        hud = hud_now()
         before = hud.board
         try:
             bodies = parse(actions)
@@ -220,6 +240,7 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
         The board: the cards and the parts of each by number, the threads of feedback on them by ref, the values, the arrows and the chat.
         Read it once, then follow the turns; read it again when unsure, with cards or since to read less.
         """
+        hud = hud_now()
         board = hud.board if history else hud.board.model_copy(update={"history": {}})
         board = selected(board, cards, since)
         return Reading(**dict(board), parts={card_id: board.texts_of(card_id) for card_id in board.cards})
@@ -230,10 +251,13 @@ def build(hud: Hud, token: str | None = None) -> FastMCP:
         Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
         Each line is one turn: the changes that the user made up to their send or chat message, with the text of each part that a change names.
         An edit of a card on the board is a diff of its markdown.
+        Also the board's id and the monitors already open on it: above 0, another session follows this board, so tell the user before you open one too.
         """
-        url = get_http_request().url.replace(scheme="ws", path="/agent")
+        key = board_key()
+        board = huds.id_of(key)
+        url = get_http_request().url.replace(scheme="ws", path="/agent").include_query_params(board=board)
         url = str(url if token is None else url.include_query_params(token=token))
-        return Listening(url=url, command=turns_command(url))
+        return Listening(url=url, command=turns_command(url), board=board, monitors=huds.of(key).monitors)
 
     tool = FunctionTool.from_function(write)
     parameters, kinds = compact(FunctionTool.from_function(listed).parameters)
