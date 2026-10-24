@@ -104,7 +104,9 @@ export const Marks = ({
 
 /**
  * A dot beside the right edge of a part or card; a drag from it draws an arrow. The dot sits in a strip that joins the
- * part's edge, so that the pointer stays on the part on its way to the dot.
+ * part's edge, so that the pointer stays on the part on its way to the dot. The strip is there, unseen, while the part
+ * is not hovered, so that a pointer that jumps onto it from outside finds it and the dot shows. A click on the dot
+ * draws nothing and selects nothing.
  */
 export const Connector = ({ target }: { target: string }) => {
   const { beginLink, readOnly } = useTools();
@@ -114,11 +116,14 @@ export const Connector = ({ target }: { target: string }) => {
       role="button"
       tabIndex={-1}
       aria-label={`Draw an arrow from ${target}`}
-      className="group/dot absolute inset-y-0 left-full hidden w-[1.4rem] cursor-crosshair items-center justify-end group-hover/part:flex"
+      className="group/dot absolute inset-y-0 left-full flex w-[1.4rem] cursor-crosshair items-center justify-end opacity-0 group-hover/part:opacity-100"
       onPointerDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
         beginLink(target, event);
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
       }}
     >
       <span className="size-3 rounded-full border-2 border-violet-500 bg-white shadow transition-transform group-hover/dot:scale-125 group-hover/dot:bg-violet-500" />
