@@ -1,3 +1,4 @@
+import { WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
@@ -8,6 +9,7 @@ import { CardFrame, Editor } from "~/components/CardFrame";
 import { Chat } from "~/components/Chat";
 import { FeedbackPanel } from "~/components/FeedbackPanel";
 import { HistoryDrawer } from "~/components/HistoryDrawer";
+import { ShortcutSheet } from "~/components/ShortcutSheet";
 import { reactionKeys, userReaction } from "~/lib/reactions";
 import { Toolbar } from "~/components/Toolbar";
 import {
@@ -72,9 +74,12 @@ const DraftNote = ({ at, close }: { at: TPoint; close: () => void }) => {
 export const Whiteboard = ({
   snapshot,
   act,
+  offline = false,
 }: {
   snapshot: TSnapshot;
   act: TAct;
+  /** The server is away: the board shows as it last was, greyed, with a banner. */
+  offline?: boolean;
 }) => {
   const { board, agent, pending, unsent, waiting } = snapshot;
   const viewport = useRef<HTMLDivElement>(null);
@@ -114,6 +119,8 @@ export const Whiteboard = ({
   const [settling, setSettling] = useState<Record<string, TPoint>>({});
   const [placed, setPlaced] = useState<Record<string, TPoint>>({});
   const [history, setHistory] = useState<{ card: string | null } | null>(null);
+  const [sheet, setSheet] = useState(false);
+  const [toolbarHeight, setToolbarHeight] = useState(44);
 
   /** A card that left the board gets a new place when it comes back. */
   const gone = useCallback((id: string) => !(id in board.cards), [board.cards]);
@@ -398,7 +405,10 @@ export const Whiteboard = ({
     const reaction = Reaction.options.find(
       (option) => reactionKeys[option] === key,
     );
-    if (key === "escape") select(null);
+    if (key === "escape") {
+      setSheet(false);
+      select(null);
+    } else if (key === "?") setSheet(!sheet);
     else if (key === "n") note();
     else if (key === "h") setHistory(history === null ? { card: null } : null);
     else if (key === "1") fit();
@@ -483,9 +493,26 @@ export const Whiteboard = ({
           select(null);
         }}
         create={note}
+        dimmed={offline}
         overlay={
           <>
             <AgentPill agent={agent} waiting={waiting} />
+            {offline ? (
+              <div
+                role="alert"
+                className="pointer-events-auto absolute top-16 left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full bg-rose-600 px-4 py-1.5 text-sm text-white shadow-lg"
+              >
+                <WifiOff className="size-4" />
+                Board server not reachable, retrying…
+              </div>
+            ) : null}
+            {sheet ? (
+              <ShortcutSheet
+                close={() => {
+                  setSheet(false);
+                }}
+              />
+            ) : null}
             {history !== null && (
               <HistoryDrawer
                 card={history.card}
@@ -509,10 +536,6 @@ export const Whiteboard = ({
                 </p>
               </div>
             ) : null}
-            <p className="absolute bottom-6 left-4 hidden text-xs text-stone-400 lg:block">
-              Double-click: note · drag a dot: arrow · Space+drag: pan ·
-              ⌘+scroll: zoom
-            </p>
             {undo !== null && (
               <div
                 role="status"
@@ -547,8 +570,13 @@ export const Whiteboard = ({
               toggleHistory={() => {
                 setHistory(history === null ? { card: null } : null);
               }}
+              shortcuts={sheet}
+              toggleShortcuts={() => {
+                setSheet(!sheet);
+              }}
+              onHeight={setToolbarHeight}
             />
-            <Chat unsent={unsent} />
+            <Chat unsent={unsent} above={toolbarHeight} />
           </>
         }
       >

@@ -1,6 +1,6 @@
 from typing import assert_never
 
-from pydantic import Field, ValidationError, field_validator
+from pydantic import AwareDatetime, Field, ValidationError, field_validator
 
 from agent_hud.models.actions import (
     Action,
@@ -70,6 +70,7 @@ class Said(Model):
     author: Author
     text: TMessage
     ref: TRef | None = None
+    at: AwareDatetime | None = Field(default=None, description="When it was said")
 
 
 class Arrow(Model):
@@ -99,7 +100,7 @@ class Thread(Model):
                     update={"reactions": {k: v for k, v in self.reactions.items() if k != action.author}}
                 )
             case Comment(ref=ref, text=text):
-                said = Said(id=action.id, author=action.author, text=text, ref=ref)
+                said = Said(id=action.id, author=action.author, text=text, ref=ref, at=action.at)
                 return self.model_copy(update={"comments": (*self.comments, said)})
             case (
                 Put() | Remove() | Restore() | Say() | Fill() | Link() | Unlink() | Move() | Place() | Clear() | Send()
@@ -217,7 +218,7 @@ class Board(Model):
                     return self
                 return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
             case Say(text=text):
-                said = Said(id=action.id, author=action.author, text=text)
+                said = Said(id=action.id, author=action.author, text=text, at=action.at)
                 return self.model_copy(update={"messages": (*self.messages, said)})
             case Clear():
                 retired = self

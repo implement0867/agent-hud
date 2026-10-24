@@ -55,9 +55,12 @@ The app serves the board page at `/`, a whiteboard that updates when the agent w
 | Hover a part | shows quick reactions; `A`, `R` and `Q` react to the selection |
 | Drag the dot on a part's right edge | draws an arrow to the part or card under the pointer; click an arrow to label or remove it |
 | Delete | removes the selected card or arrow; a toast offers to undo a card's removal for a few seconds, and the History drawer has Restore on each removed card |
+| `?`, or the keyboard button | opens the sheet of shortcuts, which names ⌘ or Ctrl for the platform |
+| Hover a chat message | shows when it was said |
+| The server stops | the page keeps the last board, greyed, with a banner that it tries again; it reconnects with a delay that grows to ten seconds, and a half-written chat message stays |
 | A comment half written | stays in the box, keyed by its part, when the agent's new version closes the panel, and comes back when the part is selected again |
 | Drag empty space, Space+drag, scroll | pans |
-| ⌘ or Ctrl + scroll, `+`, `-`, `0`, `1` | zooms, resets, fits all cards |
+| ⌘ or Ctrl + scroll, `+`, `-`, `0`, `1` | zooms, resets, fits all cards. Below 1280 px the chat sits above the toolbar, and the toolbar wraps |
 | Send, or ⌘↵ | sends the user's actions since the last send to the agent, as one turn; a chat message sends them too. The chevron beside it lists what the turn carries: the last reaction on a part and the last value of a cell, when they differ from the start of the turn, and no moves |
 | Chat | messages to and from the agent, and each comment on a part; a ref such as `plan/2` shows the part; `M` focuses it |
 | The pill at the top left | the agent's socket: no agent connected, or connected and working on the user's turn, or connected and waiting for it; and the turns sent that no agent has taken, which wait for the next monitor, across restarts |

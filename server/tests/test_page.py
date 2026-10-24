@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -5,10 +6,11 @@ import pytest
 import pytest_asyncio
 from playwright.async_api import Browser, Page, async_playwright, expect
 
-from agent_hud.models.actions import ActionKind, Author, Link, Reaction
+from agent_hud.hud import Hud
+from agent_hud.models.actions import Action, ActionKind, Author, Link, Reaction
 from agent_hud.models.board import Arrow, Card
 from agent_hud.settings import find_static_dir
-from tests.conversation import TOKEN, Agent, open_agent, open_page
+from tests.conversation import TOKEN, Agent, open_agent, open_page, serve
 from tests.factories import comment, fill, link, move, put, react, read_board, remove, restore, say
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -338,3 +340,60 @@ async def test_a_half_written_comment_survives_the_agents_new_version(page: Page
     await expect(page.get_by_label("Feedback on plan/2")).to_contain_text(
         "The card changed since you started this comment"
     )
+
+
+async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
+    browser: Browser, static_dir: Path, tmp_path: Path
+) -> None:
+    """Assemble: a page on a board with a card, and a half-written chat message.
+    Act: stop the server; then start it again on the same port.
+    Assert: while the server is away the page shows a banner and still the card; once it is back the banner goes,
+    the draft is still in the box, and a message reaches the board."""
+    hud = Hud()
+    hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. parse"))])
+    async with serve(hud, static_dir, tmp_path) as (host, port):
+        page = await browser.new_page(viewport={"width": 1440, "height": 900})
+        await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+        await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
+        await page.get_by_label("Message the agent").fill("half a thought")
+    await expect(page.get_by_role("alert")).to_contain_text("not reachable")
+    await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
+    async with serve(hud, static_dir, tmp_path, port=port):
+        await expect(page.get_by_role("alert")).to_have_count(0, timeout=15000)
+        await expect(page.get_by_label("Message the agent")).to_have_value("half a thought")
+        await page.get_by_label("Message the agent").press("Enter")
+        await expect(page.get_by_label("Chat with the agent")).to_contain_text("half a thought")
+        assert [said.text for said in hud.board.messages] == ["half a thought"]
+    await page.close()
+
+
+async def test_the_shortcut_sheet_names_the_keys_for_the_platform(page: Page) -> None:
+    """Act: press ?, then Esc.
+    Assert: a dialog of shortcuts opens, with the modifier of the platform, and closes."""
+    await page.keyboard.press("?")
+    sheet = page.get_by_role("dialog", name="Shortcuts")
+    await expect(sheet).to_be_visible()
+    await expect(sheet).to_contain_text("Ctrl + Enter")
+    await page.keyboard.press("Escape")
+    await expect(sheet).to_have_count(0)
+
+
+async def test_a_narrow_screen_shows_the_toolbar_whole_above_the_chat(
+    browser: Browser, address: tuple[str, int], agent: Agent
+) -> None:
+    """Assemble: a page 390 px wide, with a card and a message from the agent.
+    Assert: the Send button is inside the viewport, the chat ends above the toolbar, and a hover on the message gives its time."""
+    host, port = address
+    await agent.write(put("plan", "1. parse"), say("hello"))
+    page = await browser.new_page(viewport={"width": 390, "height": 800})
+    await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+    await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
+    send_box = await page.get_by_label("Send to the agent").bounding_box()
+    toolbar = await page.get_by_role("navigation", name="Tools").bounding_box()
+    chat = await page.get_by_label("Chat with the agent").bounding_box()
+    assert send_box is not None and toolbar is not None and chat is not None
+    assert send_box["x"] >= 0 and send_box["x"] + send_box["width"] <= 390
+    assert chat["y"] + chat["height"] <= toolbar["y"]
+    title = await page.get_by_label("Chat with the agent").locator("li").first.get_attribute("title")
+    assert title is not None and re.search(r"\d{1,2}:\d{2}", title)
+    await page.close()

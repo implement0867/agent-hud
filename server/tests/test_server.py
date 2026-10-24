@@ -249,3 +249,11 @@ async def test_write_rejects_a_number_given_as_text(client: Client[Any]) -> None
     with pytest.raises(ToolError, match=r"action 1 \(move\): x: Input should be a valid number"):
         await client.call_tool("write", {"actions": [{"kind": "move", "id": "a", "x": "10", "y": 0}]})
     assert (await read_board(client)).positions == {}
+
+
+async def test_write_stamps_the_time_on_what_is_said(client: Client[Any]) -> None:
+    """Act: the agent says a message.
+    Assert: the message in the board has the time, with a time zone."""
+    await client.call_tool("write", {"actions": as_json(say("now"))})
+    [said] = (await read_board(client)).messages
+    assert said.at is not None and said.at.tzinfo is not None
