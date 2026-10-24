@@ -230,6 +230,29 @@ async def test_a_turn_carries_the_net_of_the_users_actions(before: Reaction, aft
     assert [action.id for action in heard.actions] == expected
 
 
+async def test_a_fill_on_a_row_the_agent_put_in_the_turn_counts_against_the_agents_values() -> None:
+    """Assemble: a table of two rows, where the user filled the second row's cell with 1 and sent.
+    Act: the agent puts a version with a row before the second, and fills the new row's cell with 5; the user fills the
+    new row's cell with 1, which the row of that number had at the start of the turn, then with 5, then with 6.
+    Assert: the fill of 1 is pending, since the agent's put made the row; the fill of 5 is not, since the agent put 5;
+    the fill of 6 is, and the moved value of the old row stays in the board."""
+    hud = Hud()
+    hud.act(by(Author.agent, put("plan", table_md([["a"], ["b"]], [" {number}"]))))
+    hud.act([*by(Author.user, fill("plan/2/1", 1)), Action(id="s", author=Author.user, body=send())])
+    await take(hud, 1)
+    hud.act(by(Author.agent, put("plan", table_md([["a"], ["x"], ["b"]], [" {number}"])), fill("plan/2/1", 5)))
+    assert hud.board.values == {"plan/2/1": 5, "plan/3/1": 1}
+    hud.act([Action(id="n1", author=Author.user, body=fill("plan/2/1", 1))])
+    assert [heard.id for heard in hud.snapshot().pending] == ["n1"]
+    hud.act([Action(id="n2", author=Author.user, body=fill("plan/2/1", 5))])
+    assert [heard.id for heard in hud.snapshot().pending] == []
+    hud.act(
+        [Action(id="n3", author=Author.user, body=fill("plan/2/1", 6)), Action(id="e", author=Author.user, body=send())]
+    )
+    [heard] = await take(hud, 1)
+    assert [action.id for action in heard.actions] == ["n3"]
+
+
 @given(batch=st.lists(actions(st.sampled_from(["a", "b"]))), on_clear=st.booleans())
 @settings(deadline=None)
 async def test_a_hud_on_a_compacted_state_file_takes_up_where_the_last_left_off(

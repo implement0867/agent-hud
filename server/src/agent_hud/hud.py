@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from difflib import unified_diff
 from pathlib import Path
 
@@ -180,9 +180,23 @@ class Hud:
             self._positions.remove(position)
 
     def _turn(self, start: int, end: int) -> tuple[Heard, ...]:
-        """The user's actions from the turn start to the end, as the agent hears them."""
-        actions = [action for action in self.log.actions[start:end] if action.author is Author.user]
-        return tuple(self._heard[action.id] for action in net(actions, self._turn_boards[start]))
+        """
+        The user's actions from the turn start to the end, as the agent hears them: the net against the board at the
+        turn's start with the agent's actions of the turn applied, so that a value the user sets on a row that the agent
+        put in the turn counts, even when the row that had that number before carried the same value.
+        """
+        window = self.log.actions[start:end]
+        base = self._turn_boards[start]
+        for action in window:
+            if action.author is not Author.agent:
+                continue
+            # An agent action on what the user made in the turn, such as a reaction on the user's note, does not fit
+            # the board without the user's actions; the net then compares against the board without it, which carries
+            # the user's actions on it.
+            with suppress(ValueError):
+                base = base.apply(action)
+        actions = [action for action in window if action.author is Author.user]
+        return tuple(self._heard[action.id] for action in net(actions, base))
 
     def _mark_read(self, end: int) -> None:
         if end <= self._agent_read:
