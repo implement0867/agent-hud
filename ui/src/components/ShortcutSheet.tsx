@@ -24,6 +24,7 @@ const groups: { title: string; rows: [string, string][] }[] = [
       ["A / R / Q", "Approve, reject, question"],
       ["C or Enter", "Comment"],
       ["E", "Edit the card"],
+      [`${mod} + Enter, in an editor`, "Save"],
       ["Delete", "Remove the card or arrow, with undo"],
       ["Drag the dot on a part", "Draw an arrow"],
       ["Esc", "Close"],

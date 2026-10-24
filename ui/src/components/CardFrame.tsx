@@ -4,9 +4,10 @@ import type { PointerEvent, ReactNode } from "react";
 
 import { CardBody } from "~/components/CardBody";
 import { Connector, Marks } from "~/components/Marks";
+import { mod } from "~/lib/keys";
 import { SelectionKind, isSelected, useTools } from "~/lib/whiteboard";
 import { ActionKind, Author } from "~/schemas/actions";
-import type { TCard, TPoint } from "~/schemas/board";
+import type { TBoard, TCard, TPoint } from "~/schemas/board";
 
 const SmallButton = ({
   onClick,
@@ -18,40 +19,73 @@ const SmallButton = ({
   <button
     type="button"
     className="font-semibold text-sky-700 hover:underline"
+    // The press keeps the focus in the editor's textarea, so that its blur does not change the editor under the click.
+    onPointerDown={(event) => {
+      event.preventDefault();
+    }}
     onClick={onClick}
   >
     {children}
   </button>
 );
 
+/** The text with its whitespace collapsed, for a loose match of a part's text in markdown. */
+const loose = (text: string) => text.replaceAll(/\s+/g, " ").trim();
+
+/** The lines of the markdown as parts read them: without list markers, heading marks, quote marks and table pipes. */
+const partLines = (md: string) =>
+  md.split("\n").map((line) =>
+    loose(
+      line
+        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+        .replace(/^\s*#{1,6}\s+/, "")
+        .replace(/^\s*>\s?/, "")
+        .replaceAll("|", " "),
+    ),
+  );
+
 /**
- * Cmd or Ctrl with Enter saves. Esc and a click outside close the editor while the text is as it was; with changes,
- * a click outside keeps the editor open and asks to save or discard, and Esc asks for a second Esc.
+ * A markdown editor with Save and Cancel; Cmd or Ctrl with Enter saves too. Esc and a click outside close the editor
+ * while the text is as it was; with changes, a click outside keeps the editor open and asks to save or discard, or saves
+ * when the editor saves on blur, as a note's does, and Esc asks for a second Esc. When the text of a part that has
+ * feedback is gone from the new text, the save asks once and says how many parts lose their feedback to the history.
  * When the card got a new version since the editor opened, the editor says so and offers to save over it.
  */
 export const Editor = ({
   md,
   label,
-  warning,
+  feedback = [],
   changed = false,
+  blurSaves = false,
   save,
   cancel,
 }: {
   md: string;
   label: string;
-  warning: string | null;
+  /** The text of each part that has feedback, values or arrows, which a change of the part moves to the history. */
+  feedback?: string[];
   /** Whether the card got a new version since the editor opened. */
   changed?: boolean;
+  /** Whether a click outside saves the changes, as for a note, rather than asks. */
+  blurSaves?: boolean;
   /** Saves the text; over is true to replace a newer version of the card. */
   save: (md: string, over: boolean) => void;
   cancel: () => void;
 }) => {
   const [text, setText] = useState(md);
-  const [asking, setAsking] = useState<"save" | "discard" | null>(null);
+  const [asking, setAsking] = useState<"save" | "discard" | "moving" | null>(
+    null,
+  );
   const dirty = text.trim() !== "" && text !== md;
+  const lines = partLines(text);
+  const moving = feedback.filter(
+    (part) => part === "" || !lines.includes(loose(part)),
+  ).length;
   const done = () => {
     if (!dirty) cancel();
-    else if (!changed) save(text, false);
+    else if (changed) return;
+    else if (moving > 0 && asking !== "moving") setAsking("moving");
+    else save(text, false);
   };
   return (
     <div
@@ -70,8 +104,9 @@ export const Editor = ({
           setText(event.target.value);
         }}
         onBlur={() => {
-          if (dirty) setAsking("save");
-          else cancel();
+          if (!dirty) cancel();
+          else if (blurSaves) done();
+          else setAsking("save");
         }}
         onKeyDown={(event) => {
           event.stopPropagation();
@@ -100,23 +135,43 @@ export const Editor = ({
             <SmallButton onClick={cancel}>Discard mine</SmallButton>
           </span>
         </div>
-      ) : asking === "save" ? (
-        <p className="mt-1 flex gap-3 text-[11px] text-stone-500">
-          Unsaved changes
-          <SmallButton
-            onClick={() => {
-              save(text, false);
-            }}
-          >
-            Save
-          </SmallButton>
-          <SmallButton onClick={cancel}>Discard</SmallButton>
+      ) : asking === "moving" ? (
+        <div
+          role="alert"
+          className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900"
+        >
+          Saving moves the feedback on {moving}{" "}
+          {moving === 1 ? "part" : "parts"} you changed to the history.
+          <span className="mt-1 flex gap-3">
+            <SmallButton
+              onClick={() => {
+                save(text, false);
+              }}
+            >
+              Save anyway
+            </SmallButton>
+            <SmallButton
+              onClick={() => {
+                setAsking(null);
+              }}
+            >
+              Keep editing
+            </SmallButton>
+          </span>
+        </div>
+      ) : (
+        <p className="mt-1 flex items-center gap-3 text-[11px] text-stone-500">
+          <SmallButton onClick={done}>Save</SmallButton>
+          <SmallButton onClick={cancel}>Cancel</SmallButton>
+          <span className="text-stone-400">
+            {asking === "save"
+              ? "unsaved changes"
+              : asking === "discard"
+                ? "esc again discards your changes"
+                : `${mod}↵ saves`}
+          </span>
         </p>
-      ) : warning !== null || asking === "discard" ? (
-        <p className="mt-1 text-[11px] text-stone-400">
-          {asking === "discard" ? "esc again discards your changes" : warning}
-        </p>
-      ) : null}
+      )}
     </div>
   );
 };
@@ -167,6 +222,31 @@ const usePointerDrag = ({
       else click();
     },
   };
+};
+
+/** The text on the page of each part of the card that has feedback, values or arrows, and "" for the card's own feedback. */
+const partsWithFeedback = (id: string, board: TBoard): string[] => {
+  const marked = new Set(
+    [
+      ...Object.entries(board.threads)
+        .filter(
+          ([, thread]) =>
+            thread.comments.length > 0 ||
+            Object.keys(thread.reactions).length > 0,
+        )
+        .map(([ref]) => ref),
+      ...Object.keys(board.values).map((ref) =>
+        ref.slice(0, ref.lastIndexOf("/")),
+      ),
+      ...Object.values(board.arrows).flatMap((arrow) => [arrow.src, arrow.dst]),
+    ].filter((ref) => ref === id || ref.startsWith(`${id}/`)),
+  );
+  return [...marked].map((ref) =>
+    ref === id
+      ? ""
+      : (document.querySelector(`[data-ref="${CSS.escape(ref)}"]`)
+          ?.textContent ?? ""),
+  );
 };
 
 /** The width of a card that no one resized: wider with code. */
@@ -259,9 +339,17 @@ export const CardFrame = ({
       select({ kind: SelectionKind.enum.ref, ref: id });
     },
   });
-  const feedback = Object.keys(board.threads).filter(
-    (ref) => ref === id || ref.startsWith(`${id}/`),
-  ).length;
+  /**
+   * The text of each part of the card that has feedback, values or arrows, read from the page as the editor opens,
+   * so that the editor can say how many of them a change moves to the history; the card's own feedback moves on any
+   * change, so it has no text to find.
+   */
+  const [feedback, setFeedback] = useState<string[]>([]);
+  const [editSeen, setEditSeen] = useState(false);
+  if (editing !== editSeen) {
+    setEditSeen(editing);
+    if (editing) setFeedback(partsWithFeedback(id, board));
+  }
   const save = async (md: string, over: boolean) => {
     const version = over ? {} : { version: opened ?? versions };
     if (await act({ kind: ActionKind.enum.put, id, md, ...version }))
@@ -355,11 +443,7 @@ export const CardFrame = ({
           <Editor
             md={card.md}
             label={`Markdown of ${id}`}
-            warning={
-              feedback === 0
-                ? null
-                : "saving moves the feedback on the parts you change to the history"
-            }
+            feedback={feedback}
             changed={changed}
             save={(md, over) => {
               void save(md, over);
