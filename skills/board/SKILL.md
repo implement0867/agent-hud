@@ -18,7 +18,7 @@ Call `write` with a list of actions. They run in order, all or nothing.
 - `remove {id}` removes a card. `restore {id}` puts a removed card back as its last version was.
 - `clear` starts over: every card goes to its history with its feedback, and the board, its arrows and the chat empty. Use it when the user moves to a new task, rather than a `remove` per card.
 - `say {text}` sends a message to the user. It shows in the chat on the page.
-- `move {id, x, y}` places a card on the board, in pixels. A card with no place goes to the free space below the others, on a grid of three columns 688 pixels apart, once the page shows it, and `read` has its place. A card that grows with a new version pushes the cards below it down.
+- `move {id, x, y}` places a card on the board, in pixels. A card with no place goes to the free space below the others, on a grid of three columns 688 pixels apart, once the page shows it, and `read` has its place. No card covers another: a card that grows with a new version, or that a move puts onto others, pushes the cards it crosses down, so a move onto a card is a way to put a card below it.
 - `resize {id, width}` sets the width of a card, in pixels. A card that no one resized is 384 pixels wide, or 640 with code.
 - `react {ref, reaction}`, `comment {ref, text}`, `fill {ref, value}` and `link {id, src, dst, text}` act on cards as the user does. A comment also shows in the chat, with a link to its part.
 

@@ -170,28 +170,26 @@ export const freePlace = (rects: TRect[]): TPoint => {
 };
 
 /**
- * The places that the rects below the grown rect move to, so that none of them crosses it or another moved rect:
- * each rect that crosses the grown rect's columns and starts below its top goes to the next free space, in order of
- * its top, when it would cross the rect above it. Nothing moves when nothing crosses.
+ * The places that the cards move to so that no card covers another: in order of their tops, each card that crosses
+ * a card settled before it goes below that card, with the gap, until it crosses none. The fixed card, which the user
+ * just dropped, settles first and so stays where it is. Nothing moves when nothing crosses.
  */
-export const pushedBelow = (
-  grown: TRect,
+export const settleCards = (
   rects: Record<string, TRect>,
+  fixed: string | null = null,
 ): Record<string, TPoint> => {
-  const below = Object.entries(rects)
-    .filter(
-      ([, rect]) =>
-        rect.y > grown.y &&
-        rect.x < grown.x + grown.width &&
-        rect.x + rect.width > grown.x,
-    )
-    .sort(([, a], [, b]) => a.y - b.y);
+  const order = Object.entries(rects).sort(([idA, a], [idB, b]) =>
+    idA === fixed ? -1 : idB === fixed ? 1 : a.y - b.y || a.x - b.x,
+  );
+  const settled: TRect[] = [];
   const moved: Record<string, TPoint> = {};
-  let floor = grown.y + grown.height + gap;
-  for (const [id, rect] of below) {
-    if (rect.y >= floor) continue;
-    moved[id] = { x: rect.x, y: floor };
-    floor += rect.height + gap;
+  for (const [id, rect] of order) {
+    let y = rect.y;
+    for (const other of settled) {
+      if (overlap({ ...rect, y }, other)) y = other.y + other.height + gap;
+    }
+    if (y !== rect.y) moved[id] = { x: rect.x, y };
+    settled.push({ ...rect, y });
   }
   return moved;
 };
