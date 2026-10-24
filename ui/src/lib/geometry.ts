@@ -185,8 +185,14 @@ export const settleCards = (
   const moved: Record<string, TPoint> = {};
   for (const [id, rect] of order) {
     let y = rect.y;
-    for (const other of settled) {
-      if (overlap({ ...rect, y }, other)) y = other.y + other.height + gap;
+    // A move below one card can put the card onto one checked before it, so the pass repeats until it crosses none.
+    for (let crossed = true; crossed;) {
+      crossed = false;
+      for (const other of settled) {
+        if (!overlap({ ...rect, y }, other)) continue;
+        y = other.y + other.height + gap;
+        crossed = true;
+      }
     }
     if (y !== rect.y) moved[id] = { x: rect.x, y };
     settled.push({ ...rect, y });

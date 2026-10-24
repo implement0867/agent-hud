@@ -1,6 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -23,5 +23,7 @@ export default defineConfig({
       },
     },
   },
+  // The unit tests of the library, which need no browser; make check runs them.
+  test: { include: ["src/**/*.test.ts"] },
   server: { proxy: { "/ws": { target: "ws://127.0.0.1:7676", ws: true } } },
 });

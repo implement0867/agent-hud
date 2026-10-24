@@ -1,4 +1,5 @@
 import asyncio
+import random
 import re
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -688,3 +689,44 @@ async def test_the_quick_reactions_of_a_card_sit_in_line_with_its_header(page: P
     assert inside(strip, head)
     assert strip["x"] >= remove_button["x"] + remove_button["width"]
     assert strip["y"] + strip["height"] <= heading["y"]
+
+
+def crossing(shown: dict[str, tuple[int, int, int, int]]) -> list[tuple[str, str]]:
+    """The pairs of cards whose screen rects cross."""
+    found = list(shown.items())
+    return [
+        (a, b)
+        for i, (a, (ax, ay, aw, ah)) in enumerate(found)
+        for b, (bx, by, bw, bh) in found[i + 1 :]
+        if ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+    ]
+
+
+async def test_new_cards_of_any_size_land_clear_of_each_other(page: Page, agent: Agent) -> None:
+    """Assemble: eight cards of a seeded random mix of kinds and lengths: lists, code blocks, prose and tables.
+    Act: the agent puts four in one write, then the other four one by one, with the page open.
+    Assert: after each write, once every card has a place, no two cards on the page cross each other."""
+    chance = random.Random(65)
+
+    def md(n: int) -> str:
+        match chance.randrange(4):
+            case 0:
+                return "\n".join(f"{i}. step {i} of card {n}" for i in range(1, chance.randint(2, 15)))
+            case 1:
+                return "```python\n" + "\n".join(f"value_{i} = {i}" for i in range(chance.randint(1, 20))) + "\n```"
+            case 2:
+                return " ".join(f"word{i}" for i in range(chance.randint(3, 120)))
+            case _:
+                rows = "\n".join(f"| task {i} | |" for i in range(chance.randint(1, 8)))
+                return f"| Task | Hours {{number}} |\n|---|---|\n{rows}"
+
+    cards = {f"card{n}": md(n) for n in range(8)}
+    written: list[str] = []
+    writes = [list(cards)[:4], *([card_id] for card_id in list(cards)[4:])]
+    for batch in writes:
+        await agent.write(*(put(card_id, cards[card_id]) for card_id in batch))
+        written += batch
+        placed = await positions_once(agent, set(written).issubset)
+        assert set(written) <= set(placed), "every card has a place"
+        shown = await boxes(page, *written)
+        assert crossing(shown) == [], f"after {batch}: {shown}"
