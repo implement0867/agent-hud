@@ -191,7 +191,7 @@ async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser
 
 async def test_the_user_reviews_a_line_of_code_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:
     """Assemble: the agent puts a card with inline code and a code block of a file from line 10.
-    Act: the user rejects line 2 with the quick reaction, comments on it and sends.
+    Act: the user rejects line 2, which is part 3 after the paragraph, with the quick reaction, comments on it and sends.
     Assert: the inline code shows no backticks, the block shows the file and the line numbers, and the agent hears the reaction and the comment with the file and line of the part; a screenshot goes in tmp_path."""
     await agent.write(
         put(
@@ -201,25 +201,25 @@ async def test_the_user_reviews_a_line_of_code_in_the_browser(page: Page, agent:
     )
     await expect(page.locator('[data-ref="code"] pre.shiki')).to_be_visible()
     await expect(page.locator('[data-ref="code"] figcaption')).to_have_text("src/render.py")
-    await expect(page.locator('[data-ref="code/2"]')).to_have_text("11    return md")
+    await expect(page.locator('[data-ref="code/3"]')).to_have_text("11    return md")
     inline = page.locator('[data-ref="code"] p code')
     assert await inline.evaluate("code => getComputedStyle(code, '::before').content") == "none"
 
-    await page.locator('[data-ref="code/2"]').hover()
-    await page.get_by_label("reject code/2").click()
-    await page.locator('[data-ref="code/2"]').click()
+    await page.locator('[data-ref="code/3"]').hover()
+    await page.get_by_label("reject code/3").click()
+    await page.locator('[data-ref="code/3"]').click()
     await page.get_by_label("Comment").fill("md is not html")
     await page.get_by_label("Comment").press("Enter")
     await send(page)
     turn = await agent.turn()
     assert [heard.body for heard in turn.actions] == [
-        react("code/2", Reaction.reject),
-        comment("code/2", "md is not html"),
+        react("code/3", Reaction.reject),
+        comment("code/3", "md is not html"),
     ]
     assert {ref: text for heard in turn.actions for ref, text in heard.parts.items()} == {
-        "code/2": "src/render.py:11:     return md"
+        "code/3": "src/render.py:11:     return md"
     }
-    await expect(page.get_by_label("reject code/2")).to_have_attribute("aria-pressed", "true")
+    await expect(page.get_by_label("reject code/3")).to_have_attribute("aria-pressed", "true")
     await snap(page, tmp_path / "1-line.png")
 
 
@@ -438,3 +438,150 @@ async def test_a_narrow_screen_shows_the_toolbar_whole_above_the_chat(
     title = await page.get_by_label("Chat with the agent").locator("li").first.get_attribute("title")
     assert title is not None and re.search(r"\d{1,2}:\d{2}", title)
     await page.close()
+
+
+def inside(box: dict[str, float], area: dict[str, float]) -> bool:
+    """Whether the box is in the area, both as Playwright gives bounding boxes."""
+    return (
+        box["x"] >= area["x"]
+        and box["y"] >= area["y"]
+        and box["x"] + box["width"] <= area["x"] + area["width"]
+        and box["y"] + box["height"] <= area["y"] + area["height"]
+    )
+
+
+async def test_the_feedback_panel_stays_in_the_viewport_at_every_zoom(page: Page, agent: Agent) -> None:
+    """Assemble: a wide code card near the right edge of the view, and a chat panel at the right.
+    Act: the user selects a code line; then zooms out to a third.
+    Assert: the panel is inside the viewport, to the left of the card, since the right has no room; zoomed out,
+    the panel has the same size, and sits beside the card still, on either side."""
+    await agent.write(put("code", "```python\nx = 1\ny = 2\n```"), move("code", 700, 0))
+    await page.locator('[data-ref="code/2"]').click()
+    panel = page.get_by_label("Feedback on code/2")
+    await expect(panel).to_be_visible()
+    await settled(page)
+    viewport = {"x": 0, "y": 0, "width": 1440, "height": 900}
+    before = await panel.bounding_box()
+    card = await page.locator('article[data-ref="code"]').bounding_box()
+    assert before is not None and card is not None
+    assert inside(before, viewport)
+    assert before["x"] + before["width"] <= card["x"]
+    for _ in range(5):
+        await page.keyboard.press("-")
+    await settled(page)
+    after = await panel.bounding_box()
+    card = await page.locator('article[data-ref="code"]').bounding_box()
+    assert after is not None and card is not None
+    assert round(card["width"]) < 300, "the card is a third of its size"
+    assert (round(after["width"]), round(after["height"])) == (round(before["width"]), round(before["height"]))
+    assert inside(after, viewport)
+    assert after["x"] >= card["x"] + card["width"] or after["x"] + after["width"] <= card["x"]
+
+
+async def test_the_wheel_over_the_comments_scrolls_them_and_not_the_board(page: Page, agent: Agent) -> None:
+    """Assemble: a plan whose first step has thirty comments from the agent.
+    Act: the user selects the step and turns the wheel over the comments.
+    Assert: the comments scroll, and the card stays where it was."""
+    await agent.write(put("plan", "1. parse\n2. render"), *(comment("plan/1", f"note {n}") for n in range(30)))
+    await page.locator('[data-ref="plan/1"]').click()
+    comments = page.get_by_label("Comments on plan/1")
+    await expect(comments).to_be_visible()
+    await settled(page)
+    card = await boxes(page, "plan")
+    box = await comments.bounding_box()
+    assert box is not None
+    await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    await page.mouse.wheel(0, 400)
+    await expect(comments).not_to_have_js_property("scrollTop", 0)
+    assert await boxes(page, "plan") == card
+
+
+async def test_headings_and_paragraphs_take_feedback(page: Page, agent: Agent) -> None:
+    """Assemble: the agent puts a card with a heading, a paragraph and a list.
+    Act: the user approves the paragraph with the quick reaction and sends.
+    Assert: the heading, the paragraph and the item are parts 1 to 3, the paragraph's feedback opens, and the agent
+    hears the reaction with the paragraph's text."""
+    await agent.write(put("doc", "# Title\n\nSome prose here.\n\n1. a step"))
+    await expect(page.locator('[data-ref="doc/1"]')).to_have_text("Title")
+    await expect(page.locator('[data-ref="doc/2"]')).to_have_text("Some prose here.")
+    await expect(page.locator('[data-ref="doc/3"]')).to_have_text("a step")
+    await page.locator('[data-ref="doc/2"]').click()
+    await expect(page.get_by_label("Feedback on doc/2")).to_be_visible()
+    await page.keyboard.press("a")
+    await send(page)
+    turn = await agent.turn()
+    assert [heard.body for heard in turn.actions] == [react("doc/2", Reaction.approve)]
+    assert [heard.parts for heard in turn.actions] == [{"doc/2": "Some prose here."}]
+
+
+async def test_a_focus_on_an_input_cell_selects_its_row(page: Page, agent: Agent) -> None:
+    """Assemble: a table with an input column.
+    Act: the user focuses the hours cell of the second row with the keyboard, then clicks the check of the first.
+    Assert: the feedback of the second row opens, then the first row's."""
+    await agent.write(
+        put("tasks", "| Task | Hours {number} | Done {check} |\n|---|---|---|\n| parse | | |\n| render | | |")
+    )
+    await page.get_by_label("Input tasks/2/2").focus()
+    await expect(page.get_by_label("Feedback on tasks/2")).to_be_visible()
+    await page.get_by_label("Input tasks/1/3").click()
+    await expect(page.get_by_label("Feedback on tasks/1")).to_be_visible()
+    await expect(page.get_by_label("Feedback on tasks/2")).to_have_count(0)
+
+
+async def test_a_card_out_of_view_gets_a_chip_that_shows_it(page: Page, agent: Agent) -> None:
+    """Assemble: the agent puts a card in view, then one far to the right and below.
+    Act: the user clicks the chip for the far card.
+    Assert: a chip names the far card at the edge of the view, clear of the chat, and none names the near card;
+    after the click the far card is in view, clear of the chat, and the chip is gone."""
+    await agent.write(put("near", "1. here"), put("far", "1. there"), move("far", 2600, 1800))
+    chip = page.get_by_label("New card far")
+    await expect(chip).to_be_visible()
+    await expect(page.get_by_label("New card near")).to_have_count(0)
+    await settled(page)
+    box = await chip.bounding_box()
+    chat = await page.get_by_label("Chat with the agent").bounding_box()
+    assert box is not None and chat is not None
+    assert inside(box, {"x": 0, "y": 0, "width": chat["x"], "height": 900})
+    await chip.click()
+    await expect(chip).to_have_count(0)
+    await settled(page)
+    card = await page.locator('article[data-ref="far"]').bounding_box()
+    assert card is not None
+    assert inside(card, {"x": 0, "y": 0, "width": chat["x"], "height": 900})
+
+
+async def test_fit_all_keeps_the_cards_clear_of_the_chat(page: Page, agent: Agent) -> None:
+    """Assemble: two cards far apart, and the chat open at the right.
+    Act: the user presses 1.
+    Assert: both cards are inside the viewport to the left of the chat."""
+    await agent.write(put("a", "1. one"), put("b", "1. two"), move("a", 0, 0), move("b", 2600, 1800))
+    await expect(page.locator('article[data-ref="b"]')).to_be_attached()
+    await page.keyboard.press("1")
+    await settled(page)
+    chat = await page.get_by_label("Chat with the agent").bounding_box()
+    assert chat is not None
+    for card_id in "ab":
+        card = await page.locator(f'article[data-ref="{card_id}"]').bounding_box()
+        assert card is not None
+        assert inside(card, {"x": 0, "y": 0, "width": chat["x"], "height": 900}), card_id
+
+
+async def test_the_user_drags_the_chat_to_a_width_that_the_browser_keeps(page: Page) -> None:
+    """Act: the user drags the chat's left edge 120 px to the left, then reloads the page.
+    Assert: the chat is 120 px wider, and still after the reload."""
+    chat = page.get_by_label("Chat with the agent")
+    await settled(page)
+    before = await chat.bounding_box()
+    handle = await page.get_by_label("Resize the chat").bounding_box()
+    assert before is not None and handle is not None
+    await page.mouse.move(handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2)
+    await page.mouse.down()
+    await page.mouse.move(handle["x"] + handle["width"] / 2 - 120, handle["y"] + handle["height"] / 2, steps=5)
+    await page.mouse.up()
+    after = await chat.bounding_box()
+    assert after is not None and round(after["width"]) == round(before["width"]) + 120
+    await page.reload()
+    await expect(chat).to_be_visible()
+    await settled(page)
+    again = await chat.bounding_box()
+    assert again is not None and round(again["width"]) == round(after["width"])

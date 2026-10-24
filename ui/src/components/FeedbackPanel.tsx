@@ -141,13 +141,21 @@ export const Composer = ({
   );
 };
 
-/** The reactions and comments of the selected part, beside its card; a half-written comment stays in its draft. */
+/**
+ * The reactions and comments of the selected part, in the viewport beside its card, at most as tall as the given height,
+ * with the comments scrolling inside; a half-written comment stays in its draft.
+ */
 export const FeedbackPanel = ({
   target,
   draft,
+  maxHeight,
+  measure,
 }: {
   target: string;
   draft: { text: string; changed: boolean; set: (text: string) => void };
+  maxHeight: number;
+  /** Gets the panel's element, for the board to place it where it fits. */
+  measure: (element: HTMLElement | null) => void;
 }) => {
   const { board, act, select } = useTools();
   const thread = board.threads[target];
@@ -155,8 +163,10 @@ export const FeedbackPanel = ({
   const agents = thread?.reactions.agent;
   return (
     <section
+      ref={measure}
       aria-label={`Feedback on ${target}`}
-      className="pointer-events-auto w-72 animate-pop select-text rounded-2xl bg-white p-3 shadow-xl ring-1 ring-stone-900/10"
+      style={{ maxHeight }}
+      className="pointer-events-auto flex w-72 animate-pop flex-col select-text rounded-2xl bg-white p-3 shadow-xl ring-1 ring-stone-900/10"
       onPointerDown={(event) => {
         event.stopPropagation();
       }}
@@ -164,7 +174,7 @@ export const FeedbackPanel = ({
         event.stopPropagation();
       }}
     >
-      <header className="mb-2 flex items-center justify-between">
+      <header className="mb-2 flex shrink-0 items-center justify-between">
         <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs text-stone-500">
           {target}
         </span>
@@ -179,7 +189,7 @@ export const FeedbackPanel = ({
           <X className="size-4" />
         </button>
       </header>
-      <div className="mb-3 grid grid-cols-3 gap-1">
+      <div className="mb-3 grid shrink-0 grid-cols-3 gap-1">
         {Reaction.options.map((option) => {
           const Icon = reactionIcons[option];
           const on = reaction === option;
@@ -224,7 +234,10 @@ export const FeedbackPanel = ({
         </p>
       )}
       {(thread?.comments.length ?? 0) > 0 && (
-        <ul className="mb-2 flex max-h-64 flex-col gap-1.5 overflow-y-auto">
+        <ul
+          aria-label={`Comments on ${target}`}
+          className="mb-2 flex min-h-16 flex-col gap-1.5 overflow-y-auto"
+        >
           {thread?.comments.map((said) => (
             <Bubble key={said.id} said={said} />
           ))}

@@ -43,6 +43,54 @@ const partTone = (selected: boolean, linkingFrom: boolean) =>
       ? "bg-sky-50 ring-1 ring-sky-300"
       : "hover:bg-stone-100/80";
 
+/** A paragraph outside a list item is a part; one in a list item is text of the item. */
+const Paragraph = ({ node, children }: ComponentProps<"p"> & ExtraProps) =>
+  node?.properties["dataPart"] === undefined ? (
+    <p>{children}</p>
+  ) : (
+    <Block node={node} tag="p">
+      {children}
+    </Block>
+  );
+
+const headingTags = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
+
+/** A heading is a part, under its own tag. */
+const Heading = ({ node, children }: ComponentProps<"h1"> & ExtraProps) => {
+  const tag = headingTags.find((name) => name === node?.tagName) ?? "h2";
+  return (
+    <Block node={node} tag={tag}>
+      {children}
+    </Block>
+  );
+};
+
+/** A block of prose as a part: a click selects it, as for a list item. */
+const Block = ({
+  node,
+  tag: Tag,
+  children,
+}: ExtraProps & {
+  tag: "p" | (typeof headingTags)[number];
+  children?: ReactNode;
+}) => {
+  const part = usePart(node);
+  return (
+    <Tag
+      data-ref={part.dataRef}
+      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-16 transition-colors ${partTone(part.selected, part.linkingFrom)}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        part.select();
+      }}
+    >
+      {children}
+      <Marks target={part.ref} />
+      <Connector target={part.ref} />
+    </Tag>
+  );
+};
+
 /** A click selects the item; the click does not reach the items around it. */
 const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => {
   const part = usePart(node);
@@ -172,7 +220,7 @@ const CellInput = ({
   kind: unknown;
   options: unknown;
 }) => {
-  const { board, act, readOnly } = useTools();
+  const { board, act, readOnly, selection, select } = useTools();
   const value = board.values[target] ?? null;
   const fill = (next: TValue) => {
     if (next !== value)
@@ -181,6 +229,12 @@ const CellInput = ({
   const label = `Input ${target}`;
   const stop = (event: React.SyntheticEvent) => {
     event.stopPropagation();
+  };
+  /** A focus on the cell selects its row, so that its feedback opens as a click on the row does. */
+  const row = target.slice(0, target.lastIndexOf("/"));
+  const focus = () => {
+    if (!readOnly && !isSelected(selection, row))
+      select({ kind: SelectionKind.enum.ref, ref: row });
   };
   switch (kind) {
     case ColumnKind.enum.check:
@@ -192,6 +246,7 @@ const CellInput = ({
           className="size-4 cursor-pointer accent-emerald-600"
           checked={value === true}
           onClick={stop}
+          onFocus={focus}
           onChange={(event) => {
             fill(event.target.checked);
           }}
@@ -209,6 +264,7 @@ const CellInput = ({
           className={`cursor-pointer rounded-full border-0 px-2 py-0.5 text-xs font-medium outline-none focus:ring-2 focus:ring-sky-300 ${value === null ? "bg-stone-100 text-stone-400" : "bg-sky-100 text-sky-800"}`}
           value={typeof value === "string" ? value : ""}
           onClick={stop}
+          onFocus={focus}
           onChange={(event) => {
             fill(event.target.value === "" ? null : event.target.value);
           }}
@@ -231,6 +287,7 @@ const CellInput = ({
           className="w-full min-w-12 border-b border-dashed border-stone-300 bg-transparent px-0.5 text-sm outline-none placeholder:text-stone-300 focus:border-solid focus:border-sky-500"
           defaultValue={value === null ? "" : String(value)}
           onClick={stop}
+          onFocus={focus}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
@@ -290,6 +347,13 @@ const components = {
   a: Anchor,
   span: Span,
   pre: Pre,
+  p: Paragraph,
+  h1: Heading,
+  h2: Heading,
+  h3: Heading,
+  h4: Heading,
+  h5: Heading,
+  h6: Heading,
 };
 
 const remarkPlugins = [remarkGfm];
@@ -298,7 +362,7 @@ const plainPlugins = [numberParts];
 
 const highlightPlugins = [highlight, numberParts];
 
-/** The card's markdown, with each list item, table body row and code line as a part that takes feedback and arrows, and code blocks in colour. */
+/** The card's markdown, with each heading, paragraph, list item, table body row and code line as a part that takes feedback and arrows, and code blocks in colour. */
 export const CardBody = memo(({ id, md }: { id: string; md: string }) => (
   <div className="prose prose-sm prose-stone max-w-none prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight prose-p:my-1.5 prose-ol:my-1 prose-ul:my-1 prose-li:my-0.5 prose-table:my-2 prose-th:font-medium prose-th:text-stone-500 prose-code:font-normal prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-visible prose-pre:px-0 prose-pre:text-[13px] prose-pre:leading-relaxed prose-pre:break-words prose-pre:whitespace-pre-wrap [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-stone-100 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5">
     <CardContext value={id}>

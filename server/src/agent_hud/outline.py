@@ -12,8 +12,8 @@ def fence_options(info: str) -> dict[str, str]:
 class Outline:
     """
     The parts of a markdown document the board can address, and the text of each:
-    list items, table body rows and code lines by number in document order, and input cells as row/column.
-    A code line's text starts with its file and line number when its block has a file option.
+    headings, paragraphs outside list items, list items, table body rows and code lines by number in document order,
+    and input cells as row/column. A code line's text starts with its file and line number when its block has a file option.
     """
 
     def __init__(self, md: str) -> None:
@@ -24,6 +24,12 @@ class Outline:
             match node.type, node.parent:
                 case "list_item", _:
                     self._add(next((child.content for child in node.walk() if child.type == "inline"), ""))
+                case "heading", _:
+                    self._add(node.children[0].content)
+                case "paragraph", SyntaxTreeNode(type="list_item"):
+                    pass
+                case "paragraph", _:
+                    self._add(node.children[0].content)
                 case "tr", SyntaxTreeNode(type="thead"):
                     columns = [Column.from_header(cell.children[0].content) for cell in node.children]
                 case "tr", SyntaxTreeNode(type="tbody"):

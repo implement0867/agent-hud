@@ -1,4 +1,10 @@
-import { WifiOff } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  WifiOff,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
@@ -14,15 +20,20 @@ import { reactionKeys, userReaction } from "~/lib/reactions";
 import { Toolbar } from "~/components/Toolbar";
 import {
   centreOn,
+  edgeTowards,
   endOnBoard,
   fitAll,
+  freeArea,
   freePlace,
+  onScreen,
+  overlap,
+  placePanel,
   pushedBelow,
   rectOnBoard,
   toBoard,
   zoomAt,
 } from "~/lib/geometry";
-import type { TRect, TView } from "~/lib/geometry";
+import type { TDirection, TRect, TSize, TView } from "~/lib/geometry";
 import { SelectionKind, ToolContext, newId, useTools } from "~/lib/whiteboard";
 import type { TAct, TLinking, TSelection } from "~/lib/whiteboard";
 import { ActionKind, Reaction } from "~/schemas/actions";
@@ -38,6 +49,48 @@ const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable ||
     ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+
+/** The size of the feedback panel before it is measured. */
+const panelGuess: TSize = { width: 288, height: 260 };
+
+/** The size of a chip that points at a new card, for placing it at the edge. */
+const chipSize: TSize = { width: 180, height: 32 };
+
+const arrows: Record<TDirection, typeof ArrowUp> = {
+  up: ArrowUp,
+  down: ArrowDown,
+  left: ArrowLeft,
+  right: ArrowRight,
+};
+
+/** A chip at the edge of the view nearest to a card that arrived out of view; a click shows the card. */
+const NewCardChip = ({
+  id,
+  at,
+  show,
+}: {
+  id: string;
+  at: TPoint & { direction: TDirection };
+  show: (ref: string) => void;
+}) => {
+  const Arrow = arrows[at.direction];
+  return (
+    <button
+      type="button"
+      aria-label={`New card ${id}`}
+      className="pointer-events-auto absolute flex h-8 max-w-45 animate-pop items-center gap-1.5 rounded-full bg-sky-600 pr-3 pl-2 text-sm text-white shadow-lg hover:bg-sky-700"
+      style={{ left: at.x, top: at.y }}
+      onClick={() => {
+        show(id);
+      }}
+    >
+      <Arrow className="size-4 shrink-0" />
+      <span className="truncate">
+        new: <span className="font-mono">{id}</span>
+      </span>
+    </button>
+  );
+};
 
 /** A note that the user is writing; it goes on the board when the user saves it. */
 const DraftNote = ({ at, close }: { at: TPoint; close: () => void }) => {
@@ -85,6 +138,58 @@ export const Whiteboard = ({
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
   const elements = useRef(new Map<string, HTMLElement>());
+  /** The elements whose rects the board tracks: the viewport, the chat, the feedback panel and each card by id. */
+  const tracked = useRef(new Map<string, HTMLElement>());
+  /** The rect of each tracked element: its place in the viewport, and its size as laid out, before the view scales it. */
+  const [rects, setRects] = useState<Record<string, TRect>>({});
+  const observer = useRef<ResizeObserver | null>(null);
+  useEffect(
+    () => () => {
+      observer.current?.disconnect();
+    },
+    [],
+  );
+  /** A ref callback that tracks the element's rect under the key, until the element goes. */
+  const track = useCallback(
+    (key: string) => (element: HTMLElement | null) => {
+      observer.current ??= new ResizeObserver(() => {
+        const origin = viewport.current?.getBoundingClientRect();
+        setRects(
+          Object.fromEntries(
+            [...tracked.current].map(([id, tracking]) => {
+              const box = tracking.getBoundingClientRect();
+              return [
+                id,
+                {
+                  x: box.left - (origin?.left ?? 0),
+                  y: box.top - (origin?.top ?? 0),
+                  width: tracking.offsetWidth,
+                  height: tracking.offsetHeight,
+                },
+              ];
+            }),
+          ),
+        );
+      });
+      const was = tracked.current.get(key);
+      if (was !== undefined) {
+        observer.current.unobserve(was);
+        tracked.current.delete(key);
+      }
+      if (element === null) {
+        setRects(({ [key]: _gone, ...rest }) => rest);
+        return;
+      }
+      tracked.current.set(key, element);
+      observer.current.observe(element);
+    },
+    [],
+  );
+  useEffect(() => {
+    track("viewport")(viewport.current);
+  }, [track]);
+  const trackChat = useMemo(() => track("chat"), [track]);
+  const trackPanel = useMemo(() => track("panel"), [track]);
   const placing = useRef(new Map<string, TPoint>());
   const heights = useRef(new Map<string, number>());
   const [view, setView] = useState(home);
@@ -93,7 +198,12 @@ export const Whiteboard = ({
     viewNow.current = view;
   });
   const [selection, setSelection] = useState<TSelection>(null);
-  const [panelOffset, setPanelOffset] = useState<TPoint | null>(null);
+  /** The selected part's rect in its card, and the card's size, in board units, so that the panel follows the card. */
+  const [anchor, setAnchor] = useState<{ card: TSize; part: TRect } | null>(
+    null,
+  );
+  /** The cards that arrived since the page saw the board, until the view shows each. */
+  const [fresh, setFresh] = useState<string[]>([]);
   const [linking, setLinking] = useState<TLinking | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, TPoint>>({});
@@ -134,6 +244,12 @@ export const Whiteboard = ({
           )
         : current,
     );
+    setFresh((current) => [
+      ...current.filter((id) => !gone(id)),
+      ...Object.keys(board.cards).filter(
+        (id) => !(id in cardsSeen) && !current.includes(id),
+      ),
+    ]);
   }
 
   const [positionsSeen, setPositionsSeen] = useState(board.positions);
@@ -194,24 +310,29 @@ export const Whiteboard = ({
    * A card that has no place yet gets the free place below the others, once its size is known, and the page tells the
    * server, so that every tab and reload shows it there and the agent reads it; the first tab to do so wins.
    */
-  const measure = (id: string) => (element: HTMLElement | null) => {
-    if (element === null) {
-      elements.current.delete(id);
-      return;
-    }
-    elements.current.set(id, element);
-    if (shown[id] !== undefined || placing.current.has(id)) return;
-    const rects: TRect[] = [...elements.current].flatMap(([other, card]) => {
-      const at = shown[other] ?? placing.current.get(other);
-      return at === undefined
-        ? []
-        : [{ ...at, width: card.offsetWidth, height: card.offsetHeight }];
-    });
-    const place = freePlace(rects);
-    placing.current.set(id, place);
-    setPlaced((current) => ({ ...current, [id]: place }));
-    void act({ kind: ActionKind.enum.place, id, ...place });
-  };
+  const measure = useCallback(
+    (id: string, element: HTMLElement | null) => {
+      track(id)(element);
+      if (element === null) {
+        elements.current.delete(id);
+        return;
+      }
+      elements.current.set(id, element);
+      const shown = shownNow.current;
+      if (shown[id] !== undefined || placing.current.has(id)) return;
+      const taken: TRect[] = [...elements.current].flatMap(([other, card]) => {
+        const at = shown[other] ?? placing.current.get(other);
+        return at === undefined
+          ? []
+          : [{ ...at, width: card.offsetWidth, height: card.offsetHeight }];
+      });
+      const place = freePlace(taken);
+      placing.current.set(id, place);
+      setPlaced((current) => ({ ...current, [id]: place }));
+      void act({ kind: ActionKind.enum.place, id, ...place });
+    },
+    [act, track],
+  );
 
   /**
    * A card that grew with a new version or a new width pushes the cards below it down, so that it does not cover them.
@@ -248,19 +369,34 @@ export const Whiteboard = ({
     }
   }, [act, board.cards, board.positions, board.widths, gone]);
 
-  /** Selecting a part also measures where its feedback panel goes, beside its card. */
+  /** Selecting a part also measures where it is in its card, for its feedback panel to go beside. */
   const select = useCallback((next: TSelection) => {
     setSelection(next);
     const root = world.current;
-    const end =
-      root === null || next?.kind !== SelectionKind.enum.ref
-        ? null
-        : endOnBoard(root, next.ref, viewNow.current.scale);
-    setPanelOffset(
-      end === null
-        ? null
-        : { x: end.card.width + 20, y: end.y - end.card.y - 22 },
+    if (root === null || next?.kind !== SelectionKind.enum.ref) {
+      setAnchor(null);
+      return;
+    }
+    const [cardId = ""] = next.ref.split("/");
+    const card = root.querySelector(
+      `article[data-ref="${CSS.escape(cardId)}"]`,
     );
+    const part = root.querySelector(`[data-ref="${CSS.escape(next.ref)}"]`);
+    if (card === null || part === null) {
+      setAnchor(null);
+      return;
+    }
+    const { scale } = viewNow.current;
+    const cardRect = rectOnBoard(card, root, scale);
+    const partRect = rectOnBoard(part, root, scale);
+    setAnchor({
+      card: { width: cardRect.width, height: cardRect.height },
+      part: {
+        ...partRect,
+        x: partRect.x - cardRect.x,
+        y: partRect.y - cardRect.y,
+      },
+    });
   }, []);
 
   const selectedRef =
@@ -279,42 +415,78 @@ export const Whiteboard = ({
     if (versionSeen.card === selectedCard && selectedRef?.includes("/"))
       setSelection(null);
   }
+  /** The part of the viewport that the chat leaves free, which the view fits and centres in. */
+  const area = freeArea(
+    rects["viewport"] ?? { width: 0, height: 0 },
+    rects["chat"] ?? null,
+  );
+  const areaNow = useRef(area);
+  useEffect(() => {
+    areaNow.current = area;
+  });
+
   const cardAt = shown[selectedCard];
   const panelAt =
-    cardAt === undefined || panelOffset === null
+    cardAt === undefined || anchor === null
       ? null
-      : { x: cardAt.x + panelOffset.x, y: cardAt.y + panelOffset.y };
+      : placePanel(
+          onScreen(view, { ...cardAt, ...anchor.card }),
+          onScreen(view, {
+            ...anchor.part,
+            x: cardAt.x + anchor.part.x,
+            y: cardAt.y + anchor.part.y,
+          }),
+          rects["panel"] ?? panelGuess,
+          area,
+        );
 
-  const size = () => {
-    const box = viewport.current?.getBoundingClientRect();
-    return { width: box?.width ?? 0, height: box?.height ?? 0 };
-  };
+  /** Where each fresh card is in the viewport, once the page has placed and measured it. */
+  const freshRects = Object.fromEntries(
+    fresh.flatMap((id) => {
+      const at = shown[id];
+      const rect = rects[id];
+      return at === undefined || rect === undefined
+        ? []
+        : [[id, onScreen(view, { ...rect, ...at })]];
+    }),
+  );
+  const shownFresh = Object.entries(freshRects)
+    .filter(([, rect]) => overlap(rect, area))
+    .map(([id]) => id);
+  if (shownFresh.length > 0)
+    setFresh((current) => current.filter((id) => !shownFresh.includes(id)));
+  const chips = Object.entries(freshRects)
+    .filter(([id]) => !shownFresh.includes(id))
+    .map(([id, rect]) => ({ id, at: edgeTowards(rect, area, chipSize) }));
 
   const zoom = (factor: number) => {
-    const { width, height } = size();
+    const { x, y, width, height } = areaNow.current;
     setView((current) =>
-      zoomAt(current, factor, { x: width / 2, y: height / 2 }),
+      zoomAt(current, factor, { x: x + width / 2, y: y + height / 2 }),
     );
   };
 
   const fit = () => {
     const root = world.current;
     if (root === null) return;
-    const rects = [...root.querySelectorAll("article")].map((card) =>
+    const cards = [...root.querySelectorAll("article")].map((card) =>
       rectOnBoard(card, root, view.scale),
     );
-    if (rects.length > 0) setView(fitAll(rects, size()));
+    if (cards.length > 0) setView(fitAll(cards, areaNow.current));
   };
 
   const show = useCallback(
     (ref: string) => {
       const root = world.current;
       const element = root?.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
-      const box = viewport.current?.getBoundingClientRect();
-      if (root == null || element == null || box === undefined) return;
+      if (root == null || element == null) return;
       select({ kind: SelectionKind.enum.ref, ref });
       setView((current) =>
-        centreOn(current, rectOnBoard(element, root, current.scale), box),
+        centreOn(
+          current,
+          rectOnBoard(element, root, current.scale),
+          areaNow.current,
+        ),
       );
     },
     [select, setView],
@@ -333,8 +505,11 @@ export const Whiteboard = ({
   };
 
   const note = (at?: TPoint) => {
-    const { width, height } = size();
-    const centre = toBoard(view, { x: width / 2 - 128, y: height / 2 - 60 });
+    const { x, y, width, height } = areaNow.current;
+    const centre = toBoard(view, {
+      x: x + width / 2 - 128,
+      y: y + height / 2 - 60,
+    });
     setDrafts((current) => ({ ...current, [newId("draft")]: at ?? centre }));
   };
 
@@ -522,6 +697,33 @@ export const Whiteboard = ({
                 }}
               />
             )}
+            {chips.map(({ id, at }) => (
+              <NewCardChip key={id} id={id} at={at} show={show} />
+            ))}
+            {selectedRef !== null && panelAt !== null && linking === null && (
+              <div
+                className="absolute"
+                style={{ left: panelAt.x, top: panelAt.y }}
+              >
+                <FeedbackPanel
+                  key={selectedRef}
+                  target={selectedRef}
+                  maxHeight={Math.max(160, area.height - 16)}
+                  measure={trackPanel}
+                  draft={{
+                    text: comments[selectedRef]?.text ?? "",
+                    changed: comments[selectedRef]?.version !== version,
+                    set: (text) => {
+                      setComments(({ [selectedRef]: _old, ...rest }) =>
+                        text === ""
+                          ? rest
+                          : { ...rest, [selectedRef]: { text, version } },
+                      );
+                    },
+                  }}
+                />
+              </div>
+            )}
             {undo !== null && (
               <div
                 role="status"
@@ -562,7 +764,7 @@ export const Whiteboard = ({
               }}
               onHeight={setToolbarHeight}
             />
-            <Chat unsent={unsent} above={toolbarHeight} />
+            <Chat unsent={unsent} above={toolbarHeight} measure={trackChat} />
           </>
         }
       >
@@ -598,7 +800,7 @@ export const Whiteboard = ({
                 },
               );
             }}
-            measure={measure(id)}
+            measure={measure}
           />
         ))}
         {Object.entries(drafts).map(([id, at]) => (
@@ -614,25 +816,6 @@ export const Whiteboard = ({
             }}
           />
         ))}
-        {selectedRef !== null && panelAt !== null && linking === null && (
-          <div className="absolute" style={{ left: panelAt.x, top: panelAt.y }}>
-            <FeedbackPanel
-              key={selectedRef}
-              target={selectedRef}
-              draft={{
-                text: comments[selectedRef]?.text ?? "",
-                changed: comments[selectedRef]?.version !== version,
-                set: (text) => {
-                  setComments(({ [selectedRef]: _old, ...rest }) =>
-                    text === ""
-                      ? rest
-                      : { ...rest, [selectedRef]: { text, version } },
-                  );
-                },
-              }}
-            />
-          </div>
-        )}
       </Canvas>
     </ToolContext>
   );

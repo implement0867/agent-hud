@@ -80,7 +80,7 @@ async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], hud
 
 @pytest.mark.parametrize(
     "actions",
-    [as_json(put("b", "y"), remove("missing")), as_json(put("b", "y"), react("a/1", Reaction.reject)), []],
+    [as_json(put("b", "y"), remove("missing")), as_json(put("b", "y"), react("a/2", Reaction.reject)), []],
     ids=["missing-card", "missing-part", "no-actions"],
 )
 async def test_rejected_write_changes_nothing(client: Client[Any], actions: list[dict[str, Any]]) -> None:
@@ -96,8 +96,8 @@ async def test_rejected_write_changes_nothing(client: Client[Any], actions: list
 
 async def test_write_returns_the_parts_of_each_card_it_put(client: Client[Any]) -> None:
     """Assemble: a client connected to a new server.
-    Act: write a put of a card with a nested list, a code block in an item and a table, a say, and a put of a plain card.
-    Assert: the result names both cards as added and gives the text of each part of both by its number, as refs count them."""
+    Act: write a put of a card with a nested list, a code block in an item and a table, a say, and a put of a card of one line.
+    Assert: the result names both cards as added and gives the text of each part of both by its number, as refs count them, with the line as the paragraph of the second."""
     md = "1. a\n   - a1\n   - a2\n2. b\n\n   ```sh\n   make\n   ```\n3. c\n\n| task | size {S, M} |\n|---|---|\n| parse | |"
     result = await client.call_tool("write", {"actions": as_json(put("plan", md), say("hi"), put("risk", "locks"))})
     assert result.structured_content == {
@@ -107,7 +107,7 @@ async def test_write_returns_the_parts_of_each_card_it_put(client: Client[Any]) 
         "dropped": [],
         "parts": {
             "plan": {"1": "a", "2": "a1", "3": "a2", "4": "b", "5": "make", "6": "c", "7": "parse | "},
-            "risk": {},
+            "risk": {"1": "locks"},
         },
     }
 
@@ -127,7 +127,7 @@ async def test_write_reports_the_feedback_and_arrows_a_put_moves_aside(client: C
         "replaced": ["plan"],
         "retired": ["plan/2"],
         "dropped": ["one", "two"],
-        "parts": {"plan": {"1": "a", "2": "c"}, "new": {}},
+        "parts": {"plan": {"1": "a", "2": "c"}, "new": {"1": "x"}},
     }
 
 

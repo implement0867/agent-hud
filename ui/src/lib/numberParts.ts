@@ -80,7 +80,8 @@ const markLines = (pre: Element, code: Element, lines: Element[]) => {
 
 /**
  * A rehype plugin, after highlight, as the server's outline reads parts:
- * data-part on each list item, table body row and line of a code block is its number in the document, from 1;
+ * data-part on each heading, paragraph outside a list item, list item, table body row and line of a code block is its
+ * number in the document, from 1;
  * a code line has data-line, its number in the file, when its fence has file= or start=, and data-diff in a diff;
  * each header cell shows its title, and each cell of an input column has data-input (row/column), data-kind and data-options.
  */
@@ -88,7 +89,13 @@ export const numberParts = () => (tree: Root) => {
   let count = 0;
   let columns: TColumn[] = [];
   const visit = (node: Root | RootContent, parent: Root | Element) => {
-    if (node.type === "element" && node.tagName === "li") {
+    if (
+      node.type === "element" &&
+      (/^h[1-6]$/.test(node.tagName) ||
+        node.tagName === "li" ||
+        (node.tagName === "p" &&
+          !(parent.type === "element" && parent.tagName === "li")))
+    ) {
       count += 1;
       node.properties["dataPart"] = count;
     }
