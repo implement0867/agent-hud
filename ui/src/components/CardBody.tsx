@@ -78,7 +78,7 @@ const Block = ({
   return (
     <Tag
       data-ref={part.dataRef}
-      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-16 transition-colors ${partTone(part.selected, part.linkingFrom)}`}
+      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-24 transition-colors ${partTone(part.selected, part.linkingFrom)}`}
       onClick={(event) => {
         event.stopPropagation();
         part.select();
@@ -97,7 +97,7 @@ const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => {
   return (
     <li
       data-ref={part.dataRef}
-      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-16 transition-colors ${partTone(part.selected, part.linkingFrom)}`}
+      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-24 transition-colors ${partTone(part.selected, part.linkingFrom)}`}
       onClick={(event) => {
         event.stopPropagation();
         part.select();
@@ -121,9 +121,11 @@ const BodyRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => {
         part.select();
       }}
     >
+      <td className="relative w-20">
+        <Marks target={part.ref} place="top-1/2 left-0 -translate-y-1/2" />
+      </td>
       {children}
-      <td className="relative w-16">
-        <Marks target={part.ref} />
+      <td className="relative w-0 p-0">
         <Connector target={part.ref} />
       </td>
     </tr>
@@ -154,7 +156,7 @@ const CodeLine = ({
   return (
     <span
       data-ref={part.dataRef}
-      className={`group/part relative block min-h-[1lh] cursor-pointer px-4 pr-20 transition-colors ${diffTone(node?.properties["dataDiff"])} ${lineTone(part.selected, part.linkingFrom)}`}
+      className={`group/part relative block min-h-[1lh] cursor-pointer px-4 pr-28 transition-colors ${diffTone(node?.properties["dataDiff"])} ${lineTone(part.selected, part.linkingFrom)}`}
       onClick={(event) => {
         event.stopPropagation();
         part.select();
@@ -199,12 +201,13 @@ const Span = ({ node, ...props }: ComponentProps<"span"> & ExtraProps) =>
     <CodeLine node={node}>{props.children}</CodeLine>
   );
 
-/** Header rows get an empty cell above the marks of the body rows. */
+/** Header rows get an empty cell above the marks of the body rows, which sit before the row's text, clear of its inputs. */
 const TableRow = (props: ComponentProps<"tr"> & ExtraProps) =>
   props.node?.properties["dataPart"] === undefined ? (
     <tr>
-      {props.children}
       <th />
+      {props.children}
+      <th className="p-0" />
     </tr>
   ) : (
     <BodyRow {...props} />
