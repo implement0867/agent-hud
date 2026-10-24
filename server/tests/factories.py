@@ -14,6 +14,7 @@ from agent_hud.models.actions import (
     React,
     Reaction,
     Remove,
+    Resize,
     Restore,
     Say,
     Send,
@@ -68,6 +69,10 @@ def unlink(arrow_id: str) -> Unlink:
 
 def move(card_id: str, x: float, y: float) -> Move:
     return Move(kind=ActionKind.move, id=card_id, x=x, y=y)
+
+
+def resize(card_id: str, width: float) -> Resize:
+    return Resize(kind=ActionKind.resize, id=card_id, width=width)
 
 
 def place(card_id: str, x: float, y: float) -> Place:

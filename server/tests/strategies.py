@@ -12,6 +12,7 @@ from tests.factories import (
     put,
     react,
     remove,
+    resize,
     restore,
     say,
     send,
@@ -84,6 +85,10 @@ def coordinates() -> st.SearchStrategy[float]:
     return st.floats(allow_nan=False, allow_infinity=False)
 
 
+def widths() -> st.SearchStrategy[float]:
+    return st.floats(min_value=0, exclude_min=True, allow_infinity=False)
+
+
 def agent_bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TAgentBody]:
     return st.one_of(
         st.builds(put, ids, mds()),
@@ -97,6 +102,7 @@ def agent_bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TAgentBody]:
         st.builds(link, ids, refs(ids), refs(ids)),
         st.builds(unlink, ids),
         st.builds(move, ids, coordinates(), coordinates()),
+        st.builds(resize, ids, widths()),
         st.builds(clear),
     )
 

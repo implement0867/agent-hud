@@ -1,4 +1,4 @@
-import { Bot, SendHorizontal, Spline, User, X } from "lucide-react";
+import { Bot, SendHorizontal, User, X } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -243,10 +243,6 @@ export const FeedbackPanel = ({
         }
         draft={draft}
       />
-      <p className="mt-2 flex items-center gap-1 text-[11px] text-stone-400">
-        <Spline className="size-3" />
-        Drag the dot on the right edge to draw an arrow
-      </p>
     </section>
   );
 };

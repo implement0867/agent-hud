@@ -43,6 +43,7 @@ export const boardSchema = z.strictObject({
   arrows: z.record(z.string(), arrowSchema),
   messages: z.array(saidSchema),
   positions: z.record(z.string(), pointSchema),
+  widths: z.record(z.string(), z.number()),
   history: z.record(z.string(), z.array(versionSchema)),
 });
 
