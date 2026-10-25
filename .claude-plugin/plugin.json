@@ -1,6 +1,6 @@
 {
   "name": "agent-hud",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "A board in the browser that the agent and the user share: cards, feedback, input cells and arrows",
   "author": {
     "name": "implement0867"
