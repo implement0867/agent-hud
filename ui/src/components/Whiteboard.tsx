@@ -403,9 +403,12 @@ export const Whiteboard = ({
       placing.current.delete(id);
   }, [board.cards, gone]);
 
+  /** Whether the feedback of the selected part is open; a click on a card's header selects without it, and Esc closes it first. */
+  const [feedbackOpen, setFeedbackOpen] = useState(true);
   /** Selecting a part also measures where it is in its card, for its feedback panel to go beside. */
-  const select = useCallback((next: TSelection) => {
+  const select = useCallback((next: TSelection, feedback = true) => {
     setSelection(next);
+    setFeedbackOpen(feedback);
     const root = world.current;
     if (root === null || next?.kind !== SelectionKind.enum.ref) {
       setAnchor(null);
@@ -460,6 +463,13 @@ export const Whiteboard = ({
   });
 
   const cardAt = shown[selectedCard];
+  /** The cards as the viewport shows them, which the panel keeps clear of when it can. */
+  const cardRects = Object.entries(shown).flatMap(([id, at]) => {
+    const size = rects[id];
+    return size === undefined
+      ? []
+      : [onScreen(view, { ...at, width: size.width, height: size.height })];
+  });
   const panelAt =
     cardAt === undefined || anchor === null
       ? null
@@ -472,6 +482,7 @@ export const Whiteboard = ({
           }),
           rects["panel"] ?? panelGuess,
           area,
+          cardRects,
         );
 
   /** Where each fresh card is in the viewport, once the page has placed and measured it. */
@@ -625,8 +636,9 @@ export const Whiteboard = ({
       (option) => reactionKeys[option] === key,
     );
     if (key === "escape") {
-      setSheet(false);
-      select(null);
+      if (sheet) setSheet(false);
+      else if (feedbackOpen && selectedRef !== null) setFeedbackOpen(false);
+      else select(null);
     } else if (key === "?") setSheet(!sheet);
     else if (key === "n") note();
     else if (key === "h") setHistory(history === null ? { card: null } : null);
@@ -647,7 +659,10 @@ export const Whiteboard = ({
         );
       else if (key === "c" || key === "enter") {
         event.preventDefault();
-        document.getElementById("comment-box")?.focus();
+        setFeedbackOpen(true);
+        requestAnimationFrame(() => {
+          document.getElementById("comment-box")?.focus();
+        });
       } else if (!selectedRef.includes("/") && key === "e") {
         event.preventDefault();
         setEditing(selectedRef);
@@ -743,7 +758,10 @@ export const Whiteboard = ({
             {chips.map(({ id, at }) => (
               <NewCardChip key={id} id={id} at={at} show={show} />
             ))}
-            {selectedRef !== null && panelAt !== null && linking === null && (
+            {selectedRef !== null &&
+            panelAt !== null &&
+            linking === null &&
+            feedbackOpen ? (
               <div
                 className="absolute"
                 style={{ left: panelAt.x, top: panelAt.y }}
@@ -766,7 +784,7 @@ export const Whiteboard = ({
                   }}
                 />
               </div>
-            )}
+            ) : null}
             {undo !== null && (
               <div
                 role="status"

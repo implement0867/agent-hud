@@ -86,19 +86,42 @@ const clamp = (value: number, low: number, high: number) =>
   Math.min(Math.max(value, low), Math.max(low, high));
 
 /**
- * Where a panel of the size goes in the area, beside a part of a card, both as the viewport shows them:
- * to the right of the card at the part's top; to the left of the card when the right has no room;
- * below the part when neither side has; and in the area top to bottom, when it fits.
+ * Where a panel of the size goes in the area, beside a part of a card, both as the viewport shows them: to the right
+ * of the card at the part's top, to the left of the card, below the card or above it, the first of these that fits
+ * the area and covers none of the rects to avoid, which are the cards; failing all, to the right, or to the left
+ * when the right has no room, or below the part, in the area top to bottom when it fits.
  */
 export const placePanel = (
   card: TRect,
   part: TRect,
   panel: TSize,
   area: TRect,
+  avoid: TRect[] = [],
 ): TPoint => {
   const gap = 12;
   const right = card.x + card.width + gap;
   const left = card.x - gap - panel.width;
+  const fit = (at: TPoint): TPoint => ({
+    x: clamp(at.x, area.x + 8, area.x + area.width - panel.width - 8),
+    y: clamp(at.y, area.y + 8, area.y + area.height - panel.height - 8),
+  });
+  const wanted = [
+    { x: right, y: part.y - 22 },
+    { x: left, y: part.y - 22 },
+    { x: card.x, y: card.y + card.height + gap },
+    { x: card.x, y: card.y - gap - panel.height },
+  ];
+  const clear = wanted.find((at) => {
+    const placed = fit(at);
+    // The panel's size may come as a rect with its current place, which does not stand for the candidate's.
+    const rect = { ...placed, width: panel.width, height: panel.height };
+    return (
+      placed.x === at.x &&
+      placed.y === at.y &&
+      !avoid.some((other) => overlap(rect, other))
+    );
+  });
+  if (clear !== undefined) return clear;
   const x =
     right + panel.width <= area.x + area.width
       ? right
@@ -106,10 +129,7 @@ export const placePanel = (
         ? left
         : null;
   const y = x === null ? part.y + part.height + gap : part.y - 22;
-  return {
-    x: clamp(x ?? card.x, area.x + 8, area.x + area.width - panel.width - 8),
-    y: clamp(y, area.y + 8, area.y + area.height - panel.height - 8),
-  };
+  return fit({ x: x ?? card.x, y });
 };
 
 export type TDirection = "up" | "down" | "left" | "right";

@@ -223,7 +223,7 @@ const CellInput = ({
   kind: unknown;
   options: unknown;
 }) => {
-  const { board, act, readOnly, selection, select } = useTools();
+  const { board, act, readOnly } = useTools();
   const value = board.values[target] ?? null;
   const fill = (next: TValue) => {
     if (next !== value)
@@ -232,12 +232,6 @@ const CellInput = ({
   const label = `Input ${target}`;
   const stop = (event: React.SyntheticEvent) => {
     event.stopPropagation();
-  };
-  /** A focus on the cell selects its row, so that its feedback opens as a click on the row does. */
-  const row = target.slice(0, target.lastIndexOf("/"));
-  const focus = () => {
-    if (!readOnly && !isSelected(selection, row))
-      select({ kind: SelectionKind.enum.ref, ref: row });
   };
   switch (kind) {
     case ColumnKind.enum.check:
@@ -249,7 +243,6 @@ const CellInput = ({
           className="size-4 cursor-pointer accent-emerald-600"
           checked={value === true}
           onClick={stop}
-          onFocus={focus}
           onChange={(event) => {
             fill(event.target.checked);
           }}
@@ -267,7 +260,6 @@ const CellInput = ({
           className={`cursor-pointer rounded-full border-0 px-2 py-0.5 text-xs font-medium outline-none focus:ring-2 focus:ring-sky-300 ${value === null ? "bg-stone-100 text-stone-400" : "bg-sky-100 text-sky-800"}`}
           value={typeof value === "string" ? value : ""}
           onClick={stop}
-          onFocus={focus}
           onChange={(event) => {
             fill(event.target.value === "" ? null : event.target.value);
           }}
@@ -290,7 +282,6 @@ const CellInput = ({
           className="w-full min-w-12 border-b border-dashed border-stone-300 bg-transparent px-0.5 text-sm outline-none placeholder:text-stone-300 focus:border-solid focus:border-sky-500"
           defaultValue={value === null ? "" : String(value)}
           onClick={stop}
-          onFocus={focus}
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}

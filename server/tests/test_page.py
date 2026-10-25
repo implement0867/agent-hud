@@ -648,18 +648,91 @@ async def test_headings_and_paragraphs_take_feedback(page: Page, agent: Agent) -
     assert [heard.parts for heard in turn.actions] == [{"doc/2": "Some prose here."}]
 
 
-async def test_a_focus_on_an_input_cell_selects_its_row(page: Page, agent: Agent) -> None:
-    """Assemble: a table with an input column.
-    Act: the user focuses the hours cell of the second row with the keyboard, then clicks the check of the first.
-    Assert: the feedback of the second row opens, then the first row's."""
+async def test_a_cell_and_a_header_open_no_feedback_and_c_opens_the_selections(page: Page, agent: Agent) -> None:
+    """Assemble: a table with input columns.
+    Act: the user focuses a cell with the keyboard and clicks a checkbox; then clicks the card's header and presses C.
+    Assert: no feedback opens for the cells; the header click selects the card without its feedback; C opens the
+    card's feedback with the comment box focused."""
     await agent.write(
         put("tasks", "| Task | Hours {number} | Done {check} |\n|---|---|---|\n| parse | | |\n| render | | |")
     )
     await page.get_by_label("Input tasks/2/2").focus()
-    await expect(page.get_by_label("Feedback on tasks/2")).to_be_visible()
     await page.get_by_label("Input tasks/1/3").click()
-    await expect(page.get_by_label("Feedback on tasks/1")).to_be_visible()
-    await expect(page.get_by_label("Feedback on tasks/2")).to_have_count(0)
+    await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
+    card = page.locator('article[data-ref="tasks"]')
+    await card.locator("header").click(position={"x": 150, "y": 10})
+    await expect(card).to_have_class(re.compile("ring-sky-400"))
+    await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
+    await page.keyboard.press("c")
+    await expect(page.get_by_label("Feedback on tasks")).to_be_visible()
+    await expect(page.get_by_label("Comment")).to_be_focused()
+
+
+async def test_escape_closes_the_feedback_then_the_selection_and_the_pending_list(page: Page, agent: Agent) -> None:
+    """Assemble: a plan.
+    Act: the user clicks step 2, focuses the comment box and presses Esc, then A; presses Esc and A again; then opens
+    the list of what Send carries and presses Esc; opens it again and clicks the empty board.
+    Assert: the first Esc closes the panel and keeps step 2 selected, so A approves it; the second Esc clears the
+    selection, so A changes nothing; Esc and a click outside close the list."""
+    await agent.write(put("plan", "1. parse\n2. render"))
+    part = page.locator('[data-ref="plan/2"]')
+    await part.click()
+    panel = page.get_by_label("Feedback on plan/2")
+    await expect(panel).to_be_visible()
+    await page.get_by_label("Comment").focus()
+    await page.keyboard.press("Escape")
+    await expect(panel).to_have_count(0)
+    await page.keyboard.press("a")
+    await page.mouse.move(700, 700)
+    await expect(part.get_by_role("img", name="user: approve")).to_be_visible()
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("a")
+    await expect(part.get_by_role("img", name="user: approve")).to_be_visible()
+    chevron = page.get_by_label("What goes to the agent")
+    pending = page.get_by_label("Pending actions")
+    await chevron.click()
+    await expect(pending).to_be_visible()
+    await page.keyboard.press("Escape")
+    await expect(pending).to_have_count(0)
+    await chevron.click()
+    await expect(pending).to_be_visible()
+    await page.mouse.click(700, 700)
+    await expect(pending).to_have_count(0)
+
+
+async def test_the_quick_buttons_are_not_in_the_tab_order(page: Page, agent: Agent) -> None:
+    """Assemble: a table of two rows with a number column.
+    Act: the user hovers the first row, so that its quick buttons show, focuses its cell and presses Tab.
+    Assert: the focus lands on the second row's cell, past the quick buttons."""
+    await agent.write(put("tasks", "| Task | Hours {number} |\n|---|---|\n| parse | |\n| render | |"))
+    await page.locator('[data-ref="tasks/1"]').hover()
+    await expect(page.get_by_label("approve tasks/1")).to_be_visible()
+    await page.get_by_label("Input tasks/1/2").focus()
+    await page.keyboard.press("Tab")
+    await expect(page.get_by_label("Input tasks/2/2")).to_be_focused()
+
+
+async def test_the_feedback_panel_keeps_clear_of_the_cards(page: Page, agent: Agent) -> None:
+    """Assemble: two cards side by side at the left edge of the view, with a gap narrower than the panel.
+    Act: the user clicks a step of the left card.
+    Assert: the panel is inside the viewport and covers neither card."""
+    await agent.write(
+        put("a", "1. parse\n2. render"),
+        put("b", "\n".join(f"{n}. step {n}" for n in range(1, 9))),
+        move("a", 0, 0),
+        move("b", 430, 0),
+    )
+    await page.locator('[data-ref="a/1"]').click()
+    panel = await page.get_by_label("Feedback on a/1").bounding_box()
+    assert panel is not None
+    shown = await boxes(page, "a", "b")
+    assert inside(panel, {"x": 0, "y": 0, "width": 1440, "height": 900})
+    assert (
+        crossing(
+            {"panel": (round(panel["x"]), round(panel["y"]), round(panel["width"]), round(panel["height"])), **shown}
+        )
+        == []
+    )
 
 
 async def test_a_card_out_of_view_gets_a_chip_that_shows_it(page: Page, agent: Agent) -> None:

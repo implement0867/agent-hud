@@ -27,7 +27,8 @@ export type TTools = {
   board: TBoard;
   act: TAct;
   selection: TSelection;
-  select: (selection: TSelection) => void;
+  /** Selects, and opens the feedback of a part unless told not to, as a click on a card's header does. */
+  select: (selection: TSelection, feedback?: boolean) => void;
   /** Selects the part or card and moves the view to it. */
   show: (ref: string) => void;
   linking: TLinking | null;

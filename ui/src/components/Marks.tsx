@@ -50,6 +50,8 @@ export const Marks = ({
                 type="button"
                 aria-label={`${option} ${target}`}
                 aria-pressed={on}
+                // The buttons are for the pointer; the keys A and R react to the selection, so Tab passes them.
+                tabIndex={-1}
                 className={`grid size-5 place-items-center rounded-full transition-colors ${on ? reactionTones[option] : "text-stone-400 hover:bg-stone-100 hover:text-stone-700"}`}
                 onClick={(event) => {
                   event.stopPropagation();

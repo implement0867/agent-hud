@@ -1,7 +1,13 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { columnWidth, freePlace, gap, overlap } from "~/lib/geometry";
+import {
+  columnWidth,
+  freePlace,
+  gap,
+  overlap,
+  placePanel,
+} from "~/lib/geometry";
 import type { TRect, TSize } from "~/lib/geometry";
 
 const sizes = (): fc.Arbitrary<TSize> =>
@@ -73,5 +79,39 @@ describe("freePlace", () => {
         expect(disjoint(placedInTurn(all))).toBe(true);
       }),
     );
+  });
+});
+
+describe("placePanel", () => {
+  const area = { x: 0, y: 0, width: 1440, height: 900 };
+  const panel = { width: 288, height: 300 };
+  const card = { x: 100, y: 100, width: 384, height: 400 };
+  const part = { x: 116, y: 300, width: 352, height: 24 };
+
+  it("goes to the right of the card at the part's top when nothing is there", () => {
+    expect(placePanel(card, part, panel, area)).toEqual({ x: 496, y: 278 });
+  });
+
+  it("goes below the card when a card on the right and the left edge leave no room beside", () => {
+    const other = { x: 530, y: 0, width: 384, height: 600 };
+    const at = placePanel(card, part, panel, area, [card, other]);
+    expect(at).toEqual({ x: 100, y: 512 });
+    expect(overlap({ ...at, ...panel }, other)).toBe(false);
+    expect(overlap({ ...at, ...panel }, card)).toBe(false);
+  });
+
+  it("judges a candidate by its own place when the size comes with the panel's current place", () => {
+    const other = { x: 530, y: 0, width: 384, height: 600 };
+    const sized = { x: 496, y: 278, width: 288, height: 300 };
+    const at = placePanel(card, part, sized, area, [card, other]);
+    expect(at).toEqual({ x: 100, y: 512 });
+  });
+
+  it("falls back to the side when every place covers a card", () => {
+    const everywhere = { x: 0, y: 0, width: 1440, height: 900 };
+    expect(placePanel(card, part, panel, area, [everywhere])).toEqual({
+      x: 496,
+      y: 278,
+    });
   });
 });
