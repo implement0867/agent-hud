@@ -48,6 +48,7 @@ describe("diffBoards", () => {
       left: ["b"],
       revised: ["a"],
       moved: ["c"],
+      lost: [],
     });
   });
 
@@ -61,7 +62,15 @@ describe("diffBoards", () => {
       left: [],
       revised: [],
       moved: [],
+      lost: [],
     });
+  });
+
+  it("finds the arrows that went, with what they were", () => {
+    const arrow = { src: "a/1", dst: "b/1", text: "", author: "user" as const };
+    const before = board({ arrows: { ab: arrow, kept: arrow } });
+    const after = board({ arrows: { kept: arrow } });
+    expect(diffBoards(before, after).lost).toEqual([{ id: "ab", arrow }]);
   });
 });
 
@@ -76,7 +85,7 @@ describe("afterChange", () => {
     const after = board({ cards: { a: card, c: card } });
     const next = afterChange(
       local,
-      { arrived: ["c"], left: ["b"], revised: [], moved: [] },
+      { arrived: ["c"], left: ["b"], revised: [], moved: [], lost: [] },
       after,
     );
     expect(next.touched).toEqual(["a", "c"]);
@@ -95,10 +104,57 @@ describe("afterChange", () => {
     });
     const next = afterChange(
       local,
-      { arrived: [], left: [], revised: [], moved: [] },
+      { arrived: [], left: [], revised: [], moved: [], lost: [] },
       after,
     );
     expect(next.dropped).toEqual({ b: { x: 1, y: 1 } });
+  });
+
+  it("marks what a new version changed, unless the user put it from this page, and drops the marks of a card that left", () => {
+    const old = { ...card, md: "1. parse\n2. render" };
+    const after = board({
+      cards: {
+        a: { ...card, md: "1. parse\n2. render fast" },
+        b: { ...card, md: "1. parse\n2. ship" },
+      },
+      history: {
+        a: [{ card: old, threads: {}, values: {} }],
+        b: [{ card: old, threads: {}, values: {} }],
+      },
+    });
+    const next = afterChange(
+      {
+        ...emptyLocal,
+        expected: ["b"],
+        changed: { gone: { parts: [1], removed: [] } },
+      },
+      { arrived: [], left: ["gone"], revised: ["a", "b"], moved: [], lost: [] },
+      after,
+    );
+    expect(next.changed).toEqual({ a: { parts: [2], removed: ["render"] } });
+    expect(next.expected).toEqual([]);
+  });
+
+  it("keeps the user's arrows that went without the user's unlink, and not the agent's or the expected", () => {
+    const mine = { src: "a/1", dst: "b/1", text: "", author: "user" as const };
+    const theirs = { ...mine, author: "agent" as const };
+    const next = afterChange(
+      { ...emptyLocal, expected: ["own"] },
+      {
+        arrived: [],
+        left: [],
+        revised: [],
+        moved: [],
+        lost: [
+          { id: "own", arrow: mine },
+          { id: "taken", arrow: mine },
+          { id: "theirs", arrow: theirs },
+        ],
+      },
+      board({}),
+    );
+    expect(next.lostArrows).toEqual([{ id: "taken", arrow: mine }]);
+    expect(next.expected).toEqual([]);
   });
 });
 

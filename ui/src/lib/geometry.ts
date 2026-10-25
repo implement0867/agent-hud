@@ -71,15 +71,29 @@ export const overlap = (a: TRect, b: TRect) =>
   a.y + a.height > b.y;
 
 /**
- * The part of the viewport that the chat leaves free, for what the view fits, centres and tells the user about:
- * the viewport to the left of a chat at its right side, or above a chat that spans its width, with a gap.
+ * The part of the viewport that the chat and the history leave free, for what the view fits, centres and tells the
+ * user about: the viewport to the left of a chat at its right side, or above a chat that spans its width, and to the
+ * right of the history when it is open, with a gap.
  */
-export const freeArea = (size: TSize, chat: TRect | null): TRect => {
+export const freeArea = (
+  size: TSize,
+  chat: TRect | null,
+  history: TRect | null = null,
+): TRect => {
   const whole = { x: 0, y: 0, ...size };
-  if (chat === null) return whole;
-  return chat.x >= size.width / 2
-    ? { ...whole, width: Math.max(0, chat.x - 16) }
-    : { ...whole, height: Math.max(0, chat.y - 16) };
+  const beside =
+    chat === null
+      ? whole
+      : chat.x >= size.width / 2
+        ? { ...whole, width: Math.max(0, chat.x - 16) }
+        : { ...whole, height: Math.max(0, chat.y - 16) };
+  if (history === null) return beside;
+  const left = history.x + history.width + 16;
+  return {
+    ...beside,
+    x: left,
+    width: Math.max(0, beside.width - left),
+  };
 };
 
 const clamp = (value: number, low: number, high: number) =>

@@ -41,6 +41,7 @@ export const Marks = ({ target, placement }: TMarksProps) => {
     !readOnly && thread.comments.some(({ id }) => unsent.ids.has(id));
   const reactionUnsent =
     !readOnly && reaction !== null && unsent.refs.has(target);
+  const agentLast = thread.comments.at(-1)?.author === Author.enum.agent;
   return (
     <span
       data-chrome
@@ -74,11 +75,17 @@ export const Marks = ({ target, placement }: TMarksProps) => {
       {comments > 0 && (
         <button
           type="button"
-          aria-label={`Thread on ${target}${commentUnsent ? ", unsent" : ""}`}
-          title={commentUnsent ? "A comment not sent yet" : undefined}
+          aria-label={`Thread on ${target}${commentUnsent ? ", unsent" : ""}${agentLast ? ", last by the agent" : ""}`}
+          title={
+            commentUnsent
+              ? "A comment not sent yet"
+              : agentLast
+                ? "The agent commented last"
+                : undefined
+          }
           data-unsent={commentUnsent ? "" : undefined}
           disabled={readOnly}
-          className={`flex items-center gap-0.5 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent-strong enabled:hover:bg-accent-muted ${commentUnsent ? `${unsentTone} outline-offset-1` : ""}`}
+          className={`flex items-center gap-0.5 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent-strong enabled:hover:bg-accent-muted ${commentUnsent ? `${unsentTone} outline-offset-1` : ""} ${agentLast ? "ring-2 ring-current ring-inset" : ""}`}
           onClick={(event) => {
             event.stopPropagation();
             select({ kind: SelectionKind.enum.ref, ref: target });

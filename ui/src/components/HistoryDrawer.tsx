@@ -46,18 +46,28 @@ const Threads = ({ threads }: TThreadsProps) => {
   );
 };
 
-type THistoryDrawerProps = { card: string | null; close: () => void };
+type THistoryDrawerProps = {
+  card: string | null;
+  close: () => void;
+  /** Takes the drawer's element, for the board to keep clear of it; returns what to do when it goes. */
+  measure: (element: HTMLElement) => () => void;
+};
 
 /**
  * The earlier versions of one card, or of all cards, newest first, each with the feedback it had, in parts that take
- * no actions; a removed card has Restore.
+ * no actions; a removed card has Restore. The drawer docks at the left: the board moves right to stay in view.
  */
-export const HistoryDrawer = ({ card, close }: THistoryDrawerProps) => {
+export const HistoryDrawer = ({
+  card,
+  close,
+  measure,
+}: THistoryDrawerProps) => {
   const { model } = useBoard();
   const store = useStore();
   const { openHistory } = useWhiteboard();
   return (
     <aside
+      ref={measure}
       aria-label="History"
       className="panel pointer-events-auto absolute top-16 bottom-20 left-4 flex w-96 animate-pop flex-col"
     >
