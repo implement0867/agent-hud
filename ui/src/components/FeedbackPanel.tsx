@@ -1,134 +1,14 @@
-import { Bot, SendHorizontal, User, X } from "lucide-react";
-import { useState } from "react";
+import { Bot, X } from "lucide-react";
 
+import { Bubble } from "~/components/Bubble";
+import { Composer } from "~/components/Composer";
+import type { TDraft } from "~/components/Composer";
 import { IconButton } from "~/components/IconButton";
-import { useBoard, useThread } from "~/data/useBoard";
-import { ActionKind, Author, Reaction, messageSchema } from "~/domain/actions";
-import type { TSaid } from "~/domain/board";
-import { reactionKeys, userReaction } from "~/domain/reactions";
-import { splitRefs } from "~/domain/ref";
+import { useStore, useThread } from "~/data/context";
+import { ActionKind, Reaction } from "~/domain/actions";
+import { reactionKeys, toggleReaction, userReaction } from "~/domain/reactions";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
 import { reactionIcons, reactionTones } from "~/theme";
-
-type TRefTextProps = { text: string };
-
-/** The text, with each ref to a part on the board, such as plan/2, as a link that shows the part. */
-const RefText = ({ text }: TRefTextProps) => {
-  const { model } = useBoard();
-  const { show } = useWhiteboard();
-  return splitRefs(text, (card) => Object.hasOwn(model.board.cards, card)).map(
-    ({ text: piece, ref, at }) =>
-      ref === null ? (
-        <span key={at}>{piece}</span>
-      ) : (
-        <button
-          key={at}
-          type="button"
-          className="font-mono underline decoration-dotted underline-offset-2"
-          onClick={() => {
-            show(ref);
-          }}
-        >
-          {piece}
-        </button>
-      ),
-  );
-};
-
-type TBubbleProps = { said: TSaid; withRef?: boolean };
-
-/** A message or comment, with the time it was said on hover; with its ref, a comment starts with a link to the part it is on. */
-export const Bubble = ({ said, withRef = false }: TBubbleProps) => {
-  const { show } = useWhiteboard();
-  const mine = said.author === Author.enum.user;
-  const Icon = mine ? User : Bot;
-  const ref = withRef ? said.ref : null;
-  return (
-    <li
-      className={`flex items-end gap-1.5 ${mine ? "flex-row-reverse" : ""}`}
-      title={said.at === null ? undefined : new Date(said.at).toLocaleString()}
-    >
-      <span
-        className={`grid size-5 shrink-0 place-items-center rounded-full ${mine ? "bg-accent-soft text-accent-strong" : "bg-outline text-ink-soft"}`}
-      >
-        <Icon className="size-3" />
-      </span>
-      <span
-        className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-sm whitespace-pre-wrap ${mine ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm bg-surface-sunken text-ink"}`}
-      >
-        {ref !== null && (
-          <button
-            type="button"
-            aria-label={`Show ${ref}`}
-            className="mr-1.5 rounded bg-black/10 px-1 font-mono text-[11px]"
-            onClick={() => {
-              show(ref);
-            }}
-          >
-            {ref}
-          </button>
-        )}
-        <RefText text={said.text} />
-      </span>
-    </li>
-  );
-};
-
-/** Text that the user is writing, kept by the composer's parent so that it survives the composer closing. */
-export type TDraft = { text: string; set: (text: string) => void };
-
-type TComposerProps = {
-  label: string;
-  id: string;
-  send: (text: string) => Promise<boolean>;
-  draft: TDraft;
-};
-
-/** Enter sends and Shift+Enter starts a new line; the text stays until the server takes it. */
-export const Composer = ({ label, id, send, draft }: TComposerProps) => {
-  const [sending, setSending] = useState(false);
-  const ready = !sending && messageSchema.safeParse(draft.text).success;
-  const submit = async () => {
-    if (!ready) return;
-    setSending(true);
-    if (await send(draft.text)) draft.set("");
-    setSending(false);
-  };
-  return (
-    <div className="flex items-end gap-1 rounded-2xl bg-surface-sunken p-1 focus-within:ring-2 focus-within:ring-accent-ring">
-      <textarea
-        rows={1}
-        aria-label={label}
-        placeholder={label}
-        id={id}
-        className="field-sizing-content max-h-40 min-h-8 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
-        value={draft.text}
-        readOnly={sending}
-        onChange={(event) => {
-          draft.set(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          event.stopPropagation();
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            void submit();
-          }
-        }}
-      />
-      <button
-        type="button"
-        aria-label="Send"
-        disabled={!ready}
-        className="grid size-8 place-items-center rounded-full bg-accent text-white transition-opacity disabled:opacity-30"
-        onClick={() => {
-          void submit();
-        }}
-      >
-        <SendHorizontal className="size-4" />
-      </button>
-    </div>
-  );
-};
 
 type TFeedbackPanelProps = {
   target: string;
@@ -149,7 +29,7 @@ export const FeedbackPanel = ({
   maxHeight,
   measure,
 }: TFeedbackPanelProps) => {
-  const { store } = useBoard();
+  const store = useStore();
   const { select } = useWhiteboard();
   const thread = useThread(target);
   const reaction = userReaction(thread);
@@ -198,15 +78,7 @@ export const FeedbackPanel = ({
               aria-pressed={on}
               className={`flex flex-col items-center gap-0.5 rounded-xl py-1.5 text-xs capitalize transition-colors ${on ? reactionTones[option] : "text-ink-muted hover:bg-surface-sunken"}`}
               onClick={() => {
-                void store.act(
-                  on
-                    ? { kind: ActionKind.enum.unreact, ref: target }
-                    : {
-                        kind: ActionKind.enum.react,
-                        ref: target,
-                        reaction: option,
-                      },
-                );
+                void store.act(toggleReaction(thread, target, option));
               }}
             >
               <Icon className="size-4" strokeWidth={2.5} />

@@ -1,5 +1,5 @@
 import { BoardMenu } from "~/components/BoardMenu";
-import { useBoard } from "~/data/useBoard";
+import { useBoard } from "~/data/context";
 import { AgentState } from "~/domain/events";
 import type { TAgentState } from "~/domain/events";
 import { agentDots } from "~/theme";

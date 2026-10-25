@@ -2,9 +2,10 @@ import { MessagesSquare, PanelRightClose } from "lucide-react";
 import { useState } from "react";
 import type { PointerEvent } from "react";
 
-import { Bubble, Composer } from "~/components/FeedbackPanel";
+import { Bubble } from "~/components/Bubble";
+import { Composer } from "~/components/Composer";
 import { IconButton } from "~/components/IconButton";
-import { useBoard } from "~/data/useBoard";
+import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Author } from "~/domain/actions";
 
 const widthKey = "agent-hud:chat-width";
@@ -50,7 +51,8 @@ type TChatProps = {
  * A drag on the chat's left edge sets its width, which the browser keeps.
  */
 export const Chat = ({ above, measure }: TChatProps) => {
-  const { model, store } = useBoard();
+  const { model } = useBoard();
+  const store = useStore();
   const [width, setWidth] = useState(storedWidth);
   const [message, setMessage] = useState("");
   const [open, setOpen] = useState(true);

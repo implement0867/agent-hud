@@ -1,8 +1,13 @@
 import { MessageCircle } from "lucide-react";
 
-import { useBoard, useReadOnly, useThread } from "~/data/useBoard";
-import { ActionKind, Author } from "~/domain/actions";
-import { quickReactions, reactionsOf, userReaction } from "~/domain/reactions";
+import { useReadOnly, useStore, useThread } from "~/data/context";
+import { Author } from "~/domain/actions";
+import {
+  quickReactions,
+  reactionsOf,
+  toggleReaction,
+  userReaction,
+} from "~/domain/reactions";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
 import { reactionIcons, reactionTones } from "~/theme";
 
@@ -25,7 +30,7 @@ type TMarksProps = { target: string; placement: TMarksPlacement };
  * ring. A question is a comment with its mark, in the thread.
  */
 export const Marks = ({ target, placement }: TMarksProps) => {
-  const { store } = useBoard();
+  const store = useStore();
   const { select } = useWhiteboard();
   const thread = useThread(target);
   const readOnly = useReadOnly();
@@ -33,6 +38,7 @@ export const Marks = ({ target, placement }: TMarksProps) => {
   const comments = thread.comments.length;
   return (
     <span
+      data-chrome
       className={`not-prose flex items-center gap-1 text-xs select-none ${placements[placement]}`}
     >
       {!readOnly && (
@@ -51,15 +57,7 @@ export const Marks = ({ target, placement }: TMarksProps) => {
                 className={`grid size-5 place-items-center rounded-full transition-colors ${on ? reactionTones[option] : "text-ink-faint hover:bg-surface-sunken hover:text-ink-soft"}`}
                 onClick={(event) => {
                   event.stopPropagation();
-                  void store.act(
-                    on
-                      ? { kind: ActionKind.enum.unreact, ref: target }
-                      : {
-                          kind: ActionKind.enum.react,
-                          ref: target,
-                          reaction: option,
-                        },
-                  );
+                  void store.act(toggleReaction(thread, target, option));
                 }}
               >
                 <Icon className="size-3.5" strokeWidth={2.5} />

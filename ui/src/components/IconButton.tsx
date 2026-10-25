@@ -1,13 +1,17 @@
 import type { ReactNode } from "react";
 
-export type TIconButtonVariant = "ghost" | "close" | "tool";
+export type TIconButtonVariant = "ghost" | "close" | "tool" | "danger";
+
+const toolShape =
+  "flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-sm text-ink-soft transition-colors";
 
 const variants: Record<TIconButtonVariant, string> = {
   ghost:
     "grid size-6 place-items-center rounded-md text-ink-faint hover:bg-edge-faint hover:text-ink-soft",
   close:
     "rounded p-1 text-ink-faint hover:bg-surface-sunken hover:text-ink-soft",
-  tool: "flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-sm text-ink-soft transition-colors hover:bg-surface-sunken hover:text-ink aria-pressed:bg-accent-soft aria-pressed:text-accent-strong",
+  tool: `${toolShape} hover:bg-surface-sunken hover:text-ink aria-pressed:bg-accent-soft aria-pressed:text-accent-strong`,
+  danger: `${toolShape} enabled:hover:bg-danger-faint enabled:hover:text-danger-strong disabled:text-ink-ghost`,
 };
 
 type TIconButtonProps = {
@@ -17,6 +21,7 @@ type TIconButtonProps = {
   title?: string;
   /** Whether the button's state is on, for a toggle. */
   pressed?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 };
@@ -27,6 +32,7 @@ export const IconButton = ({
   label,
   title = label,
   pressed,
+  disabled,
   onClick,
   children,
 }: TIconButtonProps) => (
@@ -34,6 +40,7 @@ export const IconButton = ({
     type="button"
     aria-label={label}
     aria-pressed={pressed}
+    disabled={disabled}
     title={title}
     className={variants[variant]}
     onPointerDown={(event) => {

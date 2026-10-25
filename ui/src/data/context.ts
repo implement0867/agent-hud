@@ -7,15 +7,21 @@ import type { TFeedback, TThread } from "~/domain/board";
 import type { TValue } from "~/domain/actions";
 import { invariant } from "~/lib/invariant";
 
-/** The board below the provider's gate: the model of the last snapshot, whether the server is away, and the store. */
-export type TLiveBoard = {
-  model: TBoardModel;
-  offline: boolean;
-  store: TBoardStore;
+/** The store of the board, which does not change while the page is open, for the components that act on the board. */
+export const StoreContext = createContext<TBoardStore | null>(null);
+
+export const useStore = (): TBoardStore => {
+  const store = useContext(StoreContext);
+  invariant(store !== null, "the board renders inside BoardProvider");
+  return store;
 };
+
+/** The board below the provider's gate: the model of the last snapshot, and whether the server is away. */
+export type TLiveBoard = { model: TBoardModel; offline: boolean };
 
 export const BoardContext = createContext<TLiveBoard | null>(null);
 
+/** The live board, for the components that render it; they render again on each change of the model. */
 export const useBoard = (): TLiveBoard => {
   const board = useContext(BoardContext);
   invariant(board !== null, "the board renders inside BoardProvider");

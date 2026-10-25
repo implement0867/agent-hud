@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { RefObject } from "react";
 
-import { useBoard } from "~/data/useBoard";
+import { useBoard, useStore } from "~/data/context";
 import { versionsOf } from "~/domain/board";
 import type { TBoard } from "~/domain/board";
 import { cardOf, isCardRef } from "~/domain/ref";
@@ -45,7 +45,8 @@ const holds = ({ selection, versions }: TChosen, board: TBoard) => {
  * without it, and Esc closes it before it ends the selection.
  */
 export const useSelection = (world: RefObject<HTMLElement | null>) => {
-  const { model, store } = useBoard();
+  const { model } = useBoard();
+  const store = useStore();
   const [chosen, setChosen] = useState<TChosen>({
     selection: null,
     anchor: null,

@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { IconButton } from "~/components/IconButton";
-import { useBoard } from "~/data/useBoard";
+import { useBoard, useStore } from "~/data/context";
 import { ActionKind } from "~/domain/actions";
 import { describeHeard } from "~/domain/events";
 import { TallyKind, tally } from "~/domain/reactions";
@@ -147,15 +147,14 @@ const SendButton = ({ send }: TSendButtonProps) => {
           aria-label="Pending actions"
           className="panel absolute bottom-11 left-0 max-h-64 w-80 overflow-y-auto p-2 text-xs text-ink-soft"
         >
-          {model.pending.map((heard) => (
-            <li
-              key={heard.id}
-              className="truncate px-2 py-1"
-              title={describeHeard(heard)}
-            >
-              {describeHeard(heard)}
-            </li>
-          ))}
+          {model.pending.map((heard) => {
+            const line = describeHeard(heard);
+            return (
+              <li key={heard.id} className="truncate px-2 py-1" title={line}>
+                {line}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>
@@ -164,7 +163,8 @@ const SendButton = ({ send }: TSendButtonProps) => {
 
 type TToolbarProps = {
   scale: number;
-  zoom: (factor: number) => void;
+  /** Zooms in by the steps, or out by negative steps. */
+  zoom: (steps: number) => void;
   reset: () => void;
   fit: () => void;
   note: () => void;
@@ -191,7 +191,8 @@ export const Toolbar = ({
   toggleShortcuts,
   measure,
 }: TToolbarProps) => {
-  const { model, store } = useBoard();
+  const { model } = useBoard();
+  const store = useStore();
   return (
     <nav
       ref={measure}
@@ -228,26 +229,25 @@ export const Toolbar = ({
       >
         <Keyboard className="size-4" />
       </IconButton>
-      <button
-        type="button"
-        aria-label="Clear the board"
+      <IconButton
+        variant="danger"
+        label="Clear the board"
         title="Clear the board: the cards go to the history"
         disabled={model.cards.length === 0}
-        className="flex h-9 min-w-9 items-center justify-center rounded-xl px-2 text-ink-soft transition-colors hover:bg-danger-faint hover:text-danger-strong disabled:text-ink-ghost disabled:hover:bg-transparent"
         onClick={() => {
           if (window.confirm("Clear the board? The cards go to the history."))
             void store.act({ kind: ActionKind.enum.clear });
         }}
       >
         <Eraser className="size-4" />
-      </button>
+      </IconButton>
       <Divider />
       <IconButton
         variant="tool"
         label="Zoom out"
         title="Zoom out (-)"
         onClick={() => {
-          zoom(1 / 1.25);
+          zoom(-1);
         }}
       >
         <Minus className="size-4" />
@@ -267,7 +267,7 @@ export const Toolbar = ({
         label="Zoom in"
         title="Zoom in (+)"
         onClick={() => {
-          zoom(1.25);
+          zoom(1);
         }}
       >
         <Plus className="size-4" />

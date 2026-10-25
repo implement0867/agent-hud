@@ -157,6 +157,12 @@ const inputSchema = z.object({
   dataOptions: z.array(z.string()),
 });
 
+/** The number that numberParts gave the part, or null for an element that is not a part. */
+export const partNumberOf = (node: Element | undefined): number | null => {
+  const number = node?.properties["dataPart"];
+  return typeof number === "number" ? number : null;
+};
+
 /** The input of a cell in an input column: the row's part number, the column's number from 1, the kind and the options. */
 export type TInput = {
   row: number;

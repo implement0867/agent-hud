@@ -3,7 +3,12 @@ import { X } from "lucide-react";
 import { CardBody } from "~/components/CardBody";
 import { IconButton } from "~/components/IconButton";
 import { TextButton } from "~/components/TextButton";
-import { FeedbackContext, ReadOnlyContext, useBoard } from "~/data/useBoard";
+import {
+  FeedbackContext,
+  ReadOnlyContext,
+  useBoard,
+  useStore,
+} from "~/data/context";
 import { ActionKind } from "~/domain/actions";
 import { earlierVersions } from "~/domain/board";
 import type { TThread } from "~/domain/board";
@@ -48,7 +53,8 @@ type THistoryDrawerProps = { card: string | null; close: () => void };
  * no actions; a removed card has Restore.
  */
 export const HistoryDrawer = ({ card, close }: THistoryDrawerProps) => {
-  const { model, store } = useBoard();
+  const { model } = useBoard();
+  const store = useStore();
   const { openHistory } = useWhiteboard();
   return (
     <aside

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { ConnectionStatus, createBoardStore } from "~/data/boardStore";
-import { BoardContext, FeedbackContext } from "~/data/useBoard";
+import { BoardContext, FeedbackContext, StoreContext } from "~/data/context";
 
 type TBoardProviderProps = { children: ReactNode };
 
@@ -18,15 +18,16 @@ export const BoardProvider = ({ children }: TBoardProviderProps) => {
         : {
             model: connection.model,
             offline: connection.status === ConnectionStatus.enum.offline,
-            store,
           },
-    [connection, store],
+    [connection],
   );
   if (live === null)
     return <p className="m-auto text-ink-muted">Connecting to the board…</p>;
   return (
-    <BoardContext value={live}>
-      <FeedbackContext value={live.model.board}>{children}</FeedbackContext>
-    </BoardContext>
+    <StoreContext value={store}>
+      <BoardContext value={live}>
+        <FeedbackContext value={live.model.board}>{children}</FeedbackContext>
+      </BoardContext>
+    </StoreContext>
   );
 };

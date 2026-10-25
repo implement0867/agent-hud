@@ -28,11 +28,11 @@ import { TextButton } from "~/components/TextButton";
 import { Toolbar } from "~/components/Toolbar";
 import { cardIn } from "~/data/boardModel";
 import type { TCardView } from "~/data/boardModel";
-import { useBoard } from "~/data/useBoard";
+import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Reaction } from "~/domain/actions";
 import { newId, refsWithFeedback, threadOf, versionsOf } from "~/domain/board";
 import type { TPoint } from "~/domain/board";
-import { reactionKeys, userReaction } from "~/domain/reactions";
+import { reactionKeys, toggleReaction } from "~/domain/reactions";
 import { cardOf, isCardRef } from "~/domain/ref";
 import { useLayout } from "~/hooks/useLayout";
 import { useLinking } from "~/hooks/useLinking";
@@ -52,10 +52,22 @@ import {
   toBoard,
   zoomAt,
 } from "~/lib/geometry";
-import type { TDirection, TView } from "~/lib/geometry";
+import type { TDirection, TSize, TView } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
 
 const home: TView = { x: 64, y: 64, scale: 1 };
+
+/** The factor of one step of zoom, from the keys and the toolbar. */
+const zoomStep = 1.25;
+
+/** The size of the feedback panel before it is measured: its w-72 and a few comments. */
+const panelGuess: TSize = { width: 288, height: 260 };
+
+/** The size of a chip that points at a new card: its h-8 and max-w-45. */
+const chipSize: TSize = { width: 180, height: 32 };
+
+/** The size of a note being written, before it is measured: its w-96 and a few lines. */
+const draftSize: TSize = { width: 384, height: 144 };
 
 /** Whether a key goes to a field the user types in, rather than to the board. */
 const typing = (target: EventTarget | null) =>
@@ -101,7 +113,7 @@ type TDraftNoteProps = { at: TPoint; close: () => void };
 
 /** A note that the user is writing; it goes on the board where it is when the user saves it. */
 const DraftNote = ({ at, close }: TDraftNoteProps) => {
-  const { store } = useBoard();
+  const store = useStore();
   const save = async (md: string) => {
     const id = newId("note");
     if (!(await store.act({ kind: ActionKind.enum.put, id, md }))) return;
@@ -165,7 +177,8 @@ type TCommentDraft = { text: string; versions: number };
  * whose turn it is, and the history of the cards when the user opens it.
  */
 export const Whiteboard = () => {
-  const { model, offline, store } = useBoard();
+  const { model, offline } = useBoard();
+  const store = useStore();
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
   const [view, setView] = useState(home);
@@ -179,6 +192,7 @@ export const Whiteboard = () => {
     deselectArrow,
   } = useSelection(world);
   const { linking, beginLink } = useLinking(world, store.act, select);
+  const linkingFrom = linking?.from ?? null;
   const {
     removed,
     remove: removeCard,
@@ -282,7 +296,7 @@ export const Whiteboard = () => {
       selection,
       select,
       show,
-      linking,
+      linkingFrom,
       beginLink,
       editing,
       edit,
@@ -294,7 +308,7 @@ export const Whiteboard = () => {
       selection,
       select,
       show,
-      linking,
+      linkingFrom,
       beginLink,
       editing,
       edit,
@@ -329,7 +343,7 @@ export const Whiteboard = () => {
             x: cardAt.x + anchor.part.x,
             y: cardAt.y + anchor.part.y,
           }),
-          layout.panel ?? { width: 288, height: 260 },
+          layout.panel ?? panelGuess,
           area,
           model.cards.flatMap((card) => onView(card) ?? []),
         );
@@ -349,12 +363,13 @@ export const Whiteboard = () => {
     .filter(({ id }) => !seen.includes(id))
     .map(({ id, rect }) => ({
       id,
-      at: edgeTowards(rect, area, { width: 180, height: 32 }),
+      at: edgeTowards(rect, area, chipSize),
     }));
 
-  const zoom = (factor: number) => {
+  /** Zooms in by the steps, or out by negative steps, about the centre of the free area. */
+  const zoom = (steps: number) => {
     setView((current) =>
-      zoomAt(current, factor, {
+      zoomAt(current, zoomStep ** steps, {
         x: area.x + area.width / 2,
         y: area.y + area.height / 2,
       }),
@@ -376,15 +391,19 @@ export const Whiteboard = () => {
       void store.act({ kind: ActionKind.enum.send });
   };
 
-  /** A new note at the point, or at the centre of the free area, kept whole inside that area. */
+  /** A new note at the point, or at the centre of the free area, kept whole inside that area with a margin. */
   const note = (at?: TPoint) => {
     const { x, y, width, height } = area;
+    const margin = 16;
     const centre = toBoard(view, {
-      x: x + width / 2 - 192,
-      y: y + height / 2 - 60,
+      x: x + (width - draftSize.width) / 2,
+      y: y + (height - draftSize.height) / 2,
     });
-    const low = toBoard(view, { x: x + 16, y: y + 16 });
-    const high = toBoard(view, { x: x + width - 400, y: y + height - 160 });
+    const low = toBoard(view, { x: x + margin, y: y + margin });
+    const high = toBoard(view, {
+      x: x + width - draftSize.width - margin,
+      y: y + height - draftSize.height - margin,
+    });
     const wanted = at ?? centre;
     const place = {
       x: Math.max(low.x, Math.min(wanted.x, high.x)),
@@ -418,19 +437,15 @@ export const Whiteboard = () => {
     else if (key === "h") toggleHistory();
     else if (key === "1") fit();
     else if (key === "0") setView(home);
-    else if (key === "+" || key === "=") zoom(1.25);
-    else if (key === "-") zoom(1 / 1.25);
+    else if (key === "+" || key === "=") zoom(1);
+    else if (key === "-") zoom(-1);
     else if (key === "m") document.getElementById("message-box")?.focus();
     else if (selection?.kind === SelectionKind.enum.arrow) {
       if (key === "delete" || key === "backspace") unlink(selection.id);
     } else if (selectedRef !== null) {
       const thread = threadOf(model.board, selectedRef);
       if (reaction !== undefined)
-        void store.act(
-          userReaction(thread) === reaction
-            ? { kind: ActionKind.enum.unreact, ref: selectedRef }
-            : { kind: ActionKind.enum.react, ref: selectedRef, reaction },
-        );
+        void store.act(toggleReaction(thread, selectedRef, reaction));
       else if (key === "c" || key === "enter") {
         event.preventDefault();
         setFeedbackOpen(true);
@@ -531,9 +546,7 @@ export const Whiteboard = () => {
                 setView(home);
               }}
               fit={fit}
-              note={() => {
-                note();
-              }}
+              note={note}
               send={send}
               history={history !== null}
               toggleHistory={toggleHistory}
@@ -547,7 +560,7 @@ export const Whiteboard = () => {
           </>
         }
       >
-        <ArrowLayer world={world} />
+        <ArrowLayer world={world} linking={linking} />
         {/* One stacking context for the cards, so that their layers stay under the arrow labels and the panel. */}
         <div className="pointer-events-none absolute inset-0 isolate">
           {model.cards.map((card) => (

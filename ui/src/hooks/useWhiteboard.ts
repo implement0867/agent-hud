@@ -36,7 +36,8 @@ export type TWhiteboard = {
   select: (selection: TSelection, feedback?: boolean) => void;
   /** Selects the part or card and moves the view to it. */
   show: (ref: string) => void;
-  linking: TLinking | null;
+  /** The part or card that the arrow being drawn starts at; the arrow's loose end moves without changing this. */
+  linkingFrom: string | null;
   /** Starts an arrow from the ref; it ends on the part under the pointer when the button goes up. */
   beginLink: (from: string, event: PointerEvent) => void;
   editing: TEditing | null;

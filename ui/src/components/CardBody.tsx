@@ -13,11 +13,11 @@ import { z } from "zod";
 import { Connector, Marks } from "~/components/Marks";
 import {
   CardContext,
-  useBoard,
   useCardId,
   useCellValue,
   useReadOnly,
-} from "~/data/useBoard";
+  useStore,
+} from "~/data/context";
 import { ActionKind } from "~/domain/actions";
 import type { TValue } from "~/domain/actions";
 import { ColumnKind } from "~/domain/columns";
@@ -30,7 +30,12 @@ import {
 import { assertNever } from "~/lib/assertNever";
 import { highlight } from "~/lib/highlight";
 import { invariant } from "~/lib/invariant";
-import { DiffKind, inputOf, numberParts } from "~/lib/numberParts";
+import {
+  DiffKind,
+  inputOf,
+  numberParts,
+  partNumberOf,
+} from "~/lib/numberParts";
 import type { TInput } from "~/lib/numberParts";
 
 type TPartTone = "idle" | "selected" | "linking";
@@ -65,10 +70,10 @@ type TPart = {
  * have no data-ref, so that the board finds only the parts of the cards on it, and no click.
  */
 const usePart = (node: ExtraProps["node"]): TPart => {
-  const number = node?.properties["dataPart"];
-  invariant(typeof number === "number", "numberParts numbers each part");
+  const number = partNumberOf(node);
+  invariant(number !== null, "numberParts numbers each part");
   const ref = partRef(useCardId(), number);
-  const { selection, select, linking } = useWhiteboard();
+  const { selection, select, linkingFrom } = useWhiteboard();
   const readOnly = useReadOnly();
   if (readOnly)
     return { ref, dataRef: undefined, tone: "idle", onClick: undefined };
@@ -76,7 +81,7 @@ const usePart = (node: ExtraProps["node"]): TPart => {
     ref,
     dataRef: ref,
     tone:
-      linking?.from === ref
+      linkingFrom === ref
         ? "linking"
         : isSelected(selection, ref)
           ? "selected"
@@ -113,7 +118,7 @@ const Part = ({ node, tag: Tag, children }: TPartProps) => {
 
 /** A paragraph outside a list item is a part; one in a list item is text of the item. */
 const Paragraph = ({ node, children }: ComponentProps<"p"> & ExtraProps) =>
-  node?.properties["dataPart"] === undefined ? (
+  partNumberOf(node) === null ? (
     <p>{children}</p>
   ) : (
     <Part node={node} tag="p">
@@ -156,7 +161,7 @@ const BodyRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => {
 
 /** Header rows get an empty cell above the marks of the body rows. */
 const TableRow = (props: ComponentProps<"tr"> & ExtraProps) =>
-  props.node?.properties["dataPart"] === undefined ? (
+  partNumberOf(props.node) === null ? (
     <tr>
       <th />
       {props.children}
@@ -181,7 +186,10 @@ const CodeLine = ({
       onClick={part.onClick}
     >
       {typeof line === "number" && (
-        <span className="mr-4 inline-block w-8 text-right text-ink-muted select-none">
+        <span
+          data-chrome
+          className="mr-4 inline-block w-8 text-right text-ink-muted select-none"
+        >
           {line}
         </span>
       )}
@@ -194,7 +202,7 @@ const CodeLine = ({
 
 /** The lines of code blocks are parts; Shiki's other spans colour the code. */
 const Span = ({ node, ...props }: ComponentProps<"span"> & ExtraProps) =>
-  node?.properties["dataPart"] === undefined ? (
+  partNumberOf(node) === null ? (
     <span {...props} />
   ) : (
     <CodeLine node={node}>{props.children}</CodeLine>
@@ -227,7 +235,7 @@ type TCellInputProps = { target: string; input: TInput };
 
 /** Text and number cells fill when they lose focus or on Enter, checks and choices on each change; empty clears. */
 const CellInput = ({ target, input }: TCellInputProps) => {
-  const { store } = useBoard();
+  const store = useStore();
   const value = useCellValue(target);
   const readOnly = useReadOnly();
   const fill = (next: TValue) => {

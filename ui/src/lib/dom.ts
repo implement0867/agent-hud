@@ -78,9 +78,20 @@ export const anchorOf = (world: Element, ref: string): TAnchor | null => {
   };
 };
 
-/** The text that the page shows for the ref, or "" when the ref is not on the board. */
-export const textOf = (world: Element, ref: string) =>
-  elementOf(world, ref)?.textContent ?? "";
+/**
+ * The text of the card or part on the page, without what the page adds to it, such as its marks and a code line's
+ * number, which carry data-chrome; "" when the ref is not on the board.
+ */
+export const textOf = (world: Element, ref: string) => {
+  const element = elementOf(world, ref);
+  if (element === null) return "";
+  const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let text = "";
+  for (let node = texts.nextNode(); node !== null; node = texts.nextNode())
+    if (node.parentElement?.closest("[data-chrome]") == null)
+      text += node.textContent ?? "";
+  return text;
+};
 
 /** The ref of the card or part under the point of the screen, or null. */
 export const refAt = (client: { clientX: number; clientY: number }) =>

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { Author, Reaction } from "~/domain/actions";
-import type { TAuthor, TReaction } from "~/domain/actions";
+import { ActionKind, Author, Reaction } from "~/domain/actions";
+import type { TAuthor, TBody, TReaction } from "~/domain/actions";
 import type { TThread } from "~/domain/board";
 
 /** The key that sets each reaction on the selection. */
@@ -26,6 +26,16 @@ export const reactionsOf = (thread: TThread): [TAuthor, TReaction][] =>
 /** The user's reaction on the thread, which the page's buttons set and clear. */
 export const userReaction = (thread: TThread): TReaction | null =>
   thread.reactions.user ?? null;
+
+/** The action that sets the user's reaction on the ref, or clears it when the user has that reaction there. */
+export const toggleReaction = (
+  thread: TThread,
+  ref: string,
+  reaction: TReaction,
+): TBody =>
+  userReaction(thread) === reaction
+    ? { kind: ActionKind.enum.unreact, ref }
+    : { kind: ActionKind.enum.react, ref, reaction };
 
 export const TallyKind = z
   .enum([...Reaction.options, "comments"])

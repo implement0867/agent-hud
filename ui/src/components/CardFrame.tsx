@@ -7,7 +7,7 @@ import { IconButton } from "~/components/IconButton";
 import { Connector, Marks } from "~/components/Marks";
 import { MarkdownEditor } from "~/components/MarkdownEditor";
 import type { TCardView } from "~/data/boardModel";
-import { useBoard } from "~/data/useBoard";
+import { useStore } from "~/data/context";
 import { ActionKind, Author } from "~/domain/actions";
 import type { TPoint } from "~/domain/board";
 import {
@@ -89,7 +89,7 @@ type TCardFrameProps = {
  */
 export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   const { id, card, at, versions, layer } = view;
-  const { store } = useBoard();
+  const store = useStore();
   const { selection, select, editing, edit, openHistory, remove } =
     useWhiteboard();
   const frame = useRef<HTMLElement | null>(null);

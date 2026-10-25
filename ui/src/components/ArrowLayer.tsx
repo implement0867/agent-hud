@@ -2,10 +2,11 @@ import { Trash2 } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
 import type { RefObject } from "react";
 
-import { useBoard } from "~/data/useBoard";
+import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Author } from "~/domain/actions";
 import type { TArrow, TPoint } from "~/domain/board";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
+import type { TLinking } from "~/hooks/useWhiteboard";
 import { endOnBoard } from "~/lib/dom";
 import { arrowCurve } from "~/lib/geometry";
 
@@ -38,7 +39,7 @@ const ArrowLabel = ({
   drawn: { id, arrow, middle },
   selected,
 }: TArrowLabelProps) => {
-  const { store } = useBoard();
+  const store = useStore();
   const { select, unlink } = useWhiteboard();
   const [text, setText] = useState(arrow.text);
   const relabel = () => {
@@ -116,7 +117,11 @@ const ArrowLabel = ({
   );
 };
 
-type TArrowLayerProps = { world: RefObject<HTMLDivElement | null> };
+type TArrowLayerProps = {
+  world: RefObject<HTMLDivElement | null>;
+  /** The arrow that the user draws, which follows the pointer. */
+  linking: TLinking | null;
+};
 
 /**
  * The arrows between parts, measured from the cards whenever the board or a card's size changes, with each label above
@@ -124,9 +129,9 @@ type TArrowLayerProps = { world: RefObject<HTMLDivElement | null> };
  * labels paint under the cards, so that neither covers a card's controls; the selected label paints over them, with
  * its input.
  */
-export const ArrowLayer = ({ world }: TArrowLayerProps) => {
+export const ArrowLayer = ({ world, linking }: TArrowLayerProps) => {
   const { model } = useBoard();
-  const { selection, select, linking } = useWhiteboard();
+  const { selection, select } = useWhiteboard();
   const [drawn, setDrawn] = useState<TDrawn[]>([]);
 
   useLayoutEffect(() => {
