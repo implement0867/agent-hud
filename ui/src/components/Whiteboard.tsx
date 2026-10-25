@@ -541,6 +541,11 @@ export const Whiteboard = () => {
             )}
             <Toolbar
               scale={view.scale}
+              atHome={
+                view.x === home.x &&
+                view.y === home.y &&
+                view.scale === home.scale
+              }
               zoom={zoom}
               reset={() => {
                 setView(home);

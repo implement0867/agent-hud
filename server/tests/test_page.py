@@ -1061,3 +1061,56 @@ async def test_one_send_in_the_chat_lists_the_changes_by_card_and_marks_them_uns
     await expect(step.get_by_role("img", name="user: approve")).to_be_visible()
     assert await toolbar.bounding_box() == before
     await snap(page, tmp_path / "2-sent.png")
+
+
+async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
+    page: Page, agent: Agent, tmp_path: Path
+) -> None:
+    """Assemble: two cards with an arrow between them.
+    Act: the user reads the toolbar, fits the cards and resets the view; opens the board menu, chooses Clear this board
+    and keeps the board; chooses it again and clears.
+    Assert: Note, History, Shortcuts and Fit show their names, and the toolbar has no Clear; after Fit the zoom
+    button reads another percentage and resets the view to 100 %, where it is disabled; the confirm is in the page and
+    names the board, 2 cards and 1 arrow; Keep leaves the cards; Clear empties the board; screenshots go in tmp_path."""
+    await agent.write(
+        put("a", "1. parse"), put("b", "1. render"), move("a", 0, 0), move("b", 1400, 0), link("ab", "a/1", "b/1")
+    )
+    await expect(page.locator("article")).to_have_count(2)
+    toolbar = page.get_by_role("navigation", name="Tools")
+    for name, text in [
+        ("New note", "Note"),
+        ("History", "History"),
+        ("Shortcuts", "Shortcuts"),
+        ("Fit all cards", "Fit"),
+    ]:
+        await expect(toolbar.get_by_role("button", name=name)).to_have_text(text)
+    await expect(toolbar.get_by_role("button", name="Clear")).to_have_count(0)
+    reset = toolbar.get_by_role("button", name="Reset the view")
+    await expect(reset).to_have_text("100%")
+    await expect(reset).to_be_disabled()
+    await toolbar.get_by_role("button", name="Fit all cards").click()
+    await expect(reset).not_to_have_text("100%")
+    await expect(reset).to_be_enabled()
+    await snap(page, tmp_path / "1-fit.png")
+    await reset.click()
+    await expect(reset).to_have_text("100%")
+    await expect(reset).to_be_disabled()
+
+    await page.get_by_role("button", name="Boards").click()
+    await page.get_by_role("menuitem", name="Clear this board").click()
+    dialog = page.get_by_role("dialog", name="Clear this board?")
+    await expect(dialog).to_contain_text("Clear shared?")
+    await expect(dialog).to_contain_text(
+        "2 cards go to the history with their feedback. 1 arrow and 0 messages go for good."
+    )
+    await snap(page, tmp_path / "2-confirm.png")
+    await dialog.get_by_role("button", name="Keep").click()
+    await expect(dialog).to_have_count(0)
+    await expect(page.locator("article")).to_have_count(2)
+    await page.get_by_role("button", name="Boards").click()
+    await page.get_by_role("menuitem", name="Clear this board").click()
+    await dialog.get_by_role("button", name="Clear the board").click()
+    await expect(page.locator("article")).to_have_count(0)
+    assert (await read_board(agent.tools)).cards == {}
+    await page.get_by_role("button", name="Boards").click()
+    await expect(page.get_by_role("menuitem", name="Clear this board")).to_be_disabled()
