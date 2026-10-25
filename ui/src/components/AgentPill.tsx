@@ -24,7 +24,7 @@ export const AgentPill = ({
     waiting === 0
       ? state
       : agent === "away"
-        ? `${state} · ${turns}; run /agent-hud:board in Claude Code to deliver ${waiting === 1 ? "it" : "them"}`
+        ? `${state} · ${turns}; run /agent-hud:open in Claude Code to deliver ${waiting === 1 ? "it" : "them"}`
         : `${state} · ${turns}`;
   return (
     <div

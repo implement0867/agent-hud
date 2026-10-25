@@ -15,7 +15,7 @@ claude plugin install agent-hud@agent-hud
 
 The plugin needs [uv](https://docs.astral.sh/uv/). At the start of each session, its hook starts the app on
 port 7676 unless the app already runs there, so all sessions use one app. The plugin connects the MCP
-server `board` at `http://127.0.0.1:7676/mcp/`, and adds the `board` skill and the `/agent-hud:board`
+server `board` at `http://127.0.0.1:7676/mcp/`, and adds the `board` skill and the `/agent-hud:open`
 command, which gives the page URL and follows the user's actions.
 
 Each project has its own board. The plugin sends the project directory of the session in the `X-Agent-Hud-Board`
@@ -47,7 +47,7 @@ starts that session, such as the shell profile.
 
 The app answers `/ws`, `/agent` and `/boards` only with its token as the `token` query parameter, and the sockets
 take the board's id as the `board` query parameter, with `shared` as the default. The URL that `listen` returns
-carries both, and so does the page URL that `/agent-hud:board` gives; the app also writes the token to
+carries both, and so does the page URL that `/agent-hud:open` gives; the app also writes the token to
 `$XDG_STATE_HOME/agent-hud/token`, readable by the user only. `/ws` also needs the page's own Origin, which
 the browser always sends, so a local script cannot act as the user. `/boards` lists each board with its card count
 and the state of its agent.
@@ -100,7 +100,7 @@ server/          Python 3.12 package (uv, ruff, basedpyright), with the built UI
 ui/              React + Vite + strict TypeScript (ESLint strictTypeChecked, Prettier)
 .claude-plugin/  plugin and marketplace manifests
 hooks/           the hook that starts the app
-skills/ commands/  the board skill and command
+skills/ commands/  the board skill and the open command
 ```
 
 ## Development
