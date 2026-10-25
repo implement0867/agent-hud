@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from shlex import quote
@@ -12,22 +13,26 @@ from pydantic import Field, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
 from agent_hud.boards import Huds
-from agent_hud.hud import Hud
+from agent_hud.hud import Hud, Since
 from agent_hud.models.actions import (
     Action,
     ActionKind,
     Author,
+    Fill,
     Misfit,
     Put,
     TActionId,
     TAgentBody,
     TCardId,
     TRef,
+    TValue,
     Unlink,
 )
 from agent_hud.models.base import Model
-from agent_hud.models.board import Board
+from agent_hud.models.board import Board, Said
+from agent_hud.models.columns import Table
 from agent_hud.models.refs import card_of
+from agent_hud.outline import outline_of
 from agent_hud.schema import compact
 
 type TActions = Annotated[list[TAgentBody], Field(min_length=1)]
@@ -83,6 +88,12 @@ class Written(Model):
         description="The arrows the write dropped, since an end of each was on a changed part"
     )
     parts: TParts = Field(description="The text of each part of each card the write put, by card id and part number")
+    tables: dict[TCardId, list[Table]] = Field(
+        description="The tables of each card the write put: the part numbers of the body rows of each, and its input columns by column number"
+    )
+    values: dict[TRef, TValue] = Field(
+        description="The value of each cell the write filled, by cell ref, as the board has it after the write"
+    )
 
 
 class Reading(Board):
@@ -91,16 +102,19 @@ class Reading(Board):
     parts: TParts = Field(description="The text of each part of each card, by card id and part number")
 
 
-def selected(board: Board, cards: list[TCardId] | None, since: TActionId | None) -> Board:
+def messages_after(chat: Sequence[Said], since: TActionId) -> tuple[Said, ...]:
+    """The messages after the one with the id, if it is there; all of them when it is not."""
+    found = [n for n, said in enumerate(chat) if said.id == since]
+    return tuple(chat[found[-1] + 1 :] if found else chat)
+
+
+def selected(board: Board, cards: list[TCardId] | None, chat: Sequence[Said]) -> Board:
     """
     The board with the given cards only, if given, with everything keyed by card or by a ref on it kept for those cards;
-    and with the messages after the one with the id since, if it is there.
+    and with the chat in place of its messages.
     """
-    chat = board.messages
-    if since is not None and (found := [n for n, said in enumerate(chat) if said.id == since]):
-        chat = chat[found[-1] + 1 :]
     if cards is None:
-        return board.model_copy(update={"messages": chat})
+        return board.model_copy(update={"messages": tuple(chat)})
     kept = set(cards)
     return board.model_copy(
         update={
@@ -108,7 +122,7 @@ def selected(board: Board, cards: list[TCardId] | None, since: TActionId | None)
             "threads": {k: v for k, v in board.threads.items() if card_of(k) in kept},
             "values": {k: v for k, v in board.values.items() if card_of(k) in kept},
             "arrows": {k: v for k, v in board.arrows.items() if card_of(v.src) in kept or card_of(v.dst) in kept},
-            "messages": chat,
+            "messages": tuple(chat),
             "positions": {k: v for k, v in board.positions.items() if k in kept},
             "widths": {k: v for k, v in board.widths.items() if k in kept},
             "history": {k: v for k, v in board.history.items() if k in kept},
@@ -131,6 +145,8 @@ def written(before: Board, after: Board, bodies: list[TAgentBody]) -> Written:
         ],
         dropped=[arrow_id for arrow_id in before.arrows if arrow_id not in {*after.arrows, *unlinked}],
         parts={card_id: after.texts_of(card_id) for card_id in put},
+        tables={card_id: tables for card_id in put if (tables := outline_of(after.cards[card_id].md).tables)},
+        values={body.ref: after.values.get(body.ref) for body in bodies if isinstance(body, Fill)},
     )
 
 
@@ -190,7 +206,7 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
         A put replaces the card. Feedback on a part whose text is unchanged stays with it; the rest goes to the card's history.
         A ref is a card id, a part of the card such as plan/2, or an input cell such as plan/2/3.
         Returns the cards added and replaced, the parts whose feedback went to the history, the arrows dropped,
-        and the parts of each card put, by number: use these numbers in refs.
+        the parts of each card put, by number, the tables of each with their row numbers and input columns, and the value of each cell filled: use these numbers in refs.
         """
         hud = hud_now()
         before = hud.board
@@ -215,7 +231,10 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
             ),
         ] = None,
         since: Annotated[
-            TActionId | None, Field(description="Only the messages after the message or comment with this id")
+            TActionId | None,
+            Field(
+                description="Only the cards that changed after the action with this id, such as a turn's, and the messages after it; the whole board when the board no longer has the id"
+            ),
         ] = None,
     ) -> Reading:
         """
@@ -224,7 +243,17 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
         """
         hud = hud_now()
         board = hud.board if history else hud.board.model_copy(update={"history": {}})
-        board = selected(board, cards, since)
+        chat: Sequence[Said] = board.messages
+        match None if since is None else hud.changed_since(since):
+            case Since(cards=changed, actions=ids):
+                chat = [said for said in chat if said.id in ids]
+                if changed is not None:
+                    cards = [card_id for card_id in (board.cards if cards is None else cards) if card_id in changed]
+            case None if since is not None:
+                chat = messages_after(chat, since)
+            case _:
+                pass
+        board = selected(board, cards, chat)
         return Reading(**dict(board), parts={card_id: board.texts_of(card_id) for card_id in board.cards})
 
     async def listen() -> Listening:

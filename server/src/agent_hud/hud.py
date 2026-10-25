@@ -3,27 +3,34 @@ from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager, suppress
 from difflib import unified_diff
 from pathlib import Path
+from typing import NamedTuple
 
 from agent_hud.log import Log
 from agent_hud.models.actions import (
     Action,
     Author,
     Clear,
+    Comment,
     Fill,
+    Link,
     Misfit,
     Move,
     Place,
     Put,
     React,
+    Remove,
     Resize,
+    Restore,
     Send,
     TActionId,
     TBody,
+    TCardId,
     TRef,
     Unreact,
 )
 from agent_hud.models.board import Board, Thread
 from agent_hud.models.events import AgentState, Edit, EventKind, Heard, Snapshot, Turn
+from agent_hud.models.refs import card_of
 from agent_hud.store import Store
 
 
@@ -72,6 +79,13 @@ def net(actions: list[Action], board: Board) -> list[Action]:
                 return True
 
     return [action for n, action in enumerate(actions) if carries(n, action)]
+
+
+class Since(NamedTuple):
+    """What came after an action: the cards that changed, or None when every card counts, and the ids of the actions."""
+
+    cards: set[TCardId] | None
+    actions: set[TActionId]
 
 
 class Hud:
@@ -185,6 +199,43 @@ class Hud:
                     self._mark_read(end)
         finally:
             self._positions.remove(position)
+
+    def changed_since(self, action_id: TActionId) -> Since | None:
+        """
+        What came after the action with the id: the cards that the actions after it touched, put, removed, restored,
+        moved or resized, or with feedback, a value or an arrow on a part, or every card when a clear came after it;
+        and the ids of those actions. None when the log no longer has the id.
+        """
+        found = [n for n, action in enumerate(self.log.actions) if action.id == action_id]
+        if not found:
+            return None
+        after = self.log.actions[found[-1] + 1 :]
+        changed: set[TCardId] | None = set()
+        for action in after:
+            match action.body, changed:
+                case Clear(), _:
+                    changed = None
+                case _, None:
+                    pass
+                case (
+                    (
+                        Put(id=card_id)
+                        | Remove(id=card_id)
+                        | Restore(id=card_id)
+                        | Move(id=card_id)
+                        | Resize(id=card_id)
+                        | Place(id=card_id)
+                    ),
+                    _,
+                ):
+                    changed.add(card_id)
+                case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref) | Fill(ref=ref), _:
+                    changed.add(card_of(ref))
+                case Link(src=src, dst=dst), _:
+                    changed.update((card_of(src), card_of(dst)))
+                case _:
+                    pass
+        return Since(changed, {action.id for action in after})
 
     def _turn(self, start: int, end: int) -> tuple[Heard, ...]:
         """

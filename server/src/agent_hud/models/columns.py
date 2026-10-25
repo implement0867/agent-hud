@@ -2,6 +2,8 @@ import re
 from enum import StrEnum
 from typing import Self
 
+from pydantic import Field
+
 from agent_hud.models.actions import TValue
 from agent_hud.models.base import Model
 
@@ -69,3 +71,12 @@ class Column(Model):
                 return option in self.options
             case _:
                 return False
+
+
+class Table(Model):
+    """A table of a card, as write reports it: the numbers of its body rows as parts, and its input columns by number."""
+
+    rows: list[str] = Field(description="The part number of each body row, in order")
+    columns: dict[str, Column] = Field(
+        description="The input columns by their number in the table, counted with the plain columns from 1"
+    )

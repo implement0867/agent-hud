@@ -13,7 +13,7 @@ from agent_hud.boards import Huds
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Fill, Reaction, TAgentBody
 from agent_hud.server import build
-from tests.factories import as_json, comment, link, put, react, read, read_board, remove, say, unlink
+from tests.factories import as_json, comment, fill, link, put, react, read, read_board, remove, say, send, unlink
 from tests.strategies import agent_bodies, card_ids
 
 
@@ -69,6 +69,23 @@ async def test_read_since_returns_the_messages_after_the_one_named(client: Clien
     assert [said.text for said in (await read_board(client, since="none")).messages] == ["one", "two", "three"]
 
 
+async def test_read_since_a_turn_returns_the_cards_that_changed_after_it_and_the_messages(
+    client: Client[Any], hud: Hud
+) -> None:
+    """Assemble: two cards and a message from the agent; the user reacts on the first and sends; the agent puts a third card, comments on the second and says.
+    Act: read since the send, with and without cards named; then since an id the log does not have.
+    Assert: the cards the agent touched after the send, with the comment and the message after it; the first card alone when named with the third; and the whole board for the id the log does not have."""
+    await client.call_tool("write", {"actions": as_json(put("a", "1. a"), put("b", "1. b"), say("review"))})
+    hud.act([Action(id="r", author=Author.user, body=react("a/1", Reaction.approve))])
+    hud.act([Action(id="turn", author=Author.user, body=send())])
+    await client.call_tool("write", {"actions": as_json(put("c", "1. c"), comment("b/1", "fine"), say("done"))})
+    board = await read_board(client, since="turn")
+    assert (set(board.cards), [said.text for said in board.messages]) == ({"b", "c"}, ["fine", "done"])
+    assert set((await read_board(client, since="turn", cards=["a", "c"])).cards) == {"c"}
+    whole = await read_board(client, since="gone")
+    assert (set(whole.cards), len(whole.messages)) == ({"a", "b", "c"}, 3)
+
+
 async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], hud: Hud) -> None:
     """Assemble: a server where the agent put a card, then put it again.
     Act: read, and read with the history.
@@ -110,6 +127,10 @@ async def test_write_returns_the_parts_of_each_card_it_put(client: Client[Any]) 
             "plan": {"1": "a", "2": "a1", "3": "a2", "4": "b", "5": "make", "6": "c", "7": "parse | "},
             "risk": {"1": "locks"},
         },
+        "tables": {
+            "plan": [{"rows": ["7"], "columns": {"2": {"kind": "select", "name": "size", "options": ["S", "M"]}}}]
+        },
+        "values": {},
     }
 
 
@@ -129,7 +150,41 @@ async def test_write_reports_the_feedback_and_arrows_a_put_moves_aside(client: C
         "retired": ["plan/2"],
         "dropped": ["one", "two"],
         "parts": {"plan": {"1": "a", "2": "c"}, "new": {"1": "x"}},
+        "tables": {},
+        "values": {},
     }
+
+
+async def test_write_returns_the_tables_it_put_with_their_rows_and_input_columns_and_the_values_it_fills(
+    client: Client[Any],
+) -> None:
+    """Assemble: a client connected to a new server.
+    Act: write a put of a card with a heading, a table with an owner, hours and done column, and a plain table; then fills of three cells, one to null.
+    Assert: the first result gives each table's row numbers and its input columns by their number in the table, with none for the plain table; the second gives the value of each cell filled and no tables."""
+    md = (
+        "# Tasks\n\n| Task | Owner {you, agent} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n"
+        "| render | | | |\n\n| a | b |\n|---|---|\n| x | y |"
+    )
+    result = (await client.call_tool("write", {"actions": as_json(put("tasks", md))})).structured_content
+    assert result is not None
+    assert result["tables"] == {
+        "tasks": [
+            {
+                "rows": ["2", "3"],
+                "columns": {
+                    "2": {"kind": "select", "name": "Owner", "options": ["you", "agent"]},
+                    "3": {"kind": "number", "name": "Hours", "options": []},
+                    "4": {"kind": "check", "name": "Done", "options": []},
+                },
+            },
+            {"rows": ["4"], "columns": {}},
+        ]
+    }
+    assert result["values"] == {}
+    fills = as_json(fill("tasks/2/2", "you"), fill("tasks/3/3", 2.5), fill("tasks/2/4", None))
+    filled = (await client.call_tool("write", {"actions": fills})).structured_content
+    assert filled is not None
+    assert (filled["tables"], filled["values"]) == ({}, {"tasks/2/2": "you", "tasks/3/3": 2.5, "tasks/2/4": None})
 
 
 async def test_read_returns_the_parts_of_each_card(client: Client[Any]) -> None:

@@ -8,12 +8,12 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from agent_hud.hud import Hud, hear
+from agent_hud.hud import Hud, Since, hear
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reaction, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, THeardBody, Turn
 from agent_hud.store import Store
-from tests.factories import clear, comment, fill, move, place, put, react, resize, say, send, unreact
+from tests.factories import clear, comment, fill, link, move, place, put, react, resize, say, send, unreact
 from tests.strategies import actions, item_texts, list_md, messages, table_md
 
 
@@ -350,3 +350,28 @@ async def test_the_agent_hears_an_edit_of_a_card_as_a_diff(texts: list[str]) -> 
     [turn] = await take(hud, 1)
     diff = "\n".join(["@@ -1,3 +1,3 @@", f" 1. {first}", f"-1. {second}", f"+1. {new}", f" 1. {third}"])
     assert list(turn.actions) == [Edit(kind="edit", id="plan", diff=diff), put("note", new)]
+
+
+def test_changed_since_names_the_cards_the_later_actions_touched_and_their_ids() -> None:
+    """Assemble: a hud with three cards, where after the user's send the agent puts one, the user fills a cell of another and links the third to it, and the user moves a card.
+    Act: ask what changed since the send, since an id the log does not have, and since the send after a clear.
+    Assert: the cards put, filled, linked and moved with the ids of those actions; None for the unknown id; and no cards, which means all, after the clear."""
+    hud = Hud()
+    table = table_md([["x"]], [" {number}"])
+    hud.act(by(Author.agent, put("a", "1. a"), put("b", table), put("c", "1. c"), put("d", "1. d")))
+    hud.act([Action(id="turn", author=Author.user, body=send())])
+    hud.act([Action(id="p", author=Author.agent, body=put("a", "1. a2"))])
+    hud.act(
+        [
+            Action(id="f", author=Author.user, body=fill("b/1/1", 3)),
+            Action(id="l", author=Author.user, body=link("arrow", "c/1", "b/1")),
+            Action(id="m", author=Author.user, body=move("d", 1, 1)),
+        ]
+    )
+    assert hud.changed_since("turn") == Since({"a", "b", "c", "d"}, {"p", "f", "l", "m"})
+    assert hud.changed_since("f") == Since({"c", "b", "d"}, {"l", "m"})
+    assert hud.changed_since("nope") is None
+    hud.act(
+        [Action(id="clear", author=Author.agent, body=clear()), Action(id="s", author=Author.agent, body=say("hi"))]
+    )
+    assert hud.changed_since("turn") == Since(None, {"p", "f", "l", "m", "clear", "s"})
