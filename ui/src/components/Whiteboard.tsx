@@ -93,12 +93,11 @@ const NewCardChip = ({
 
 /** A note that the user is writing; it goes on the board when the user saves it. */
 const DraftNote = ({ at, close }: { at: TPoint; close: () => void }) => {
-  const { act, select } = useTools();
+  const { act } = useTools();
   const save = async (md: string) => {
     const id = newId("note");
     if (!(await act({ kind: ActionKind.enum.put, id, md }))) return;
     await act({ kind: ActionKind.enum.move, id, ...at });
-    select({ kind: SelectionKind.enum.ref, ref: id });
     close();
   };
   return (
@@ -109,7 +108,7 @@ const DraftNote = ({ at, close }: { at: TPoint; close: () => void }) => {
       <Editor
         md=""
         label="New note"
-        warning={null}
+        blurSaves
         save={(md) => {
           void save(md);
         }}
@@ -539,13 +538,21 @@ export const Whiteboard = ({
     void act({ kind: ActionKind.enum.clear });
   };
 
+  /** A new note at the point, or at the centre of the free area, kept whole inside that area. */
   const note = (at?: TPoint) => {
     const { x, y, width, height } = areaNow.current;
     const centre = toBoard(view, {
-      x: x + width / 2 - 128,
+      x: x + width / 2 - 192,
       y: y + height / 2 - 60,
     });
-    setDrafts((current) => ({ ...current, [newId("draft")]: at ?? centre }));
+    const low = toBoard(view, { x: x + 16, y: y + 16 });
+    const high = toBoard(view, { x: x + width - 400, y: y + height - 160 });
+    const wanted = at ?? centre;
+    const place = {
+      x: Math.max(low.x, Math.min(wanted.x, high.x)),
+      y: Math.max(low.y, Math.min(wanted.y, high.y)),
+    };
+    setDrafts((current) => ({ ...current, [newId("draft")]: place }));
   };
 
   const beginLink = useCallback(

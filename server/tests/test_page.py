@@ -412,6 +412,70 @@ async def test_an_edit_does_not_replace_a_newer_version_unless_the_user_says_so(
     assert board.cards["plan"] == Card(md="1. parse\n2. render\n3. ship", author=Author.agent, edited=True)
 
 
+async def test_the_editor_saves_with_its_button_and_asks_once_when_a_changed_part_has_feedback(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: a plan of two steps, where the user approved step 2.
+    Act: the user opens the editor with the pencil, changes step 2 and clicks Save, then Keep editing, then saves with
+    Ctrl+Enter and Save anyway; then opens the editor again, changes step 1 alone and clicks Save.
+    Assert: the editor shows Save and Cancel; the first save asks once, naming one part whose feedback moves, and keeps
+    the editor open on Keep editing; Save anyway saves and the approve is gone with the changed text; a change of a part
+    without feedback saves without a question."""
+    await agent.write(put("plan", "1. parse\n2. render"))
+    card = page.locator('article[data-ref="plan"]')
+    await page.locator('[data-ref="plan/2"]').hover()
+    await page.get_by_label("approve plan/2").click()
+    await page.mouse.move(700, 700)
+    await expect(card.get_by_role("img", name="user: approve")).to_be_visible()
+
+    await card.hover()
+    await page.get_by_label("Edit plan").click()
+    box = page.get_by_label("Markdown of plan")
+    await expect(box).to_be_visible()
+    await expect(card.get_by_role("button", name="Save", exact=True)).to_be_visible()
+    await expect(card.get_by_role("button", name="Cancel")).to_be_visible()
+    await box.fill("1. parse\n2. render fast")
+    await card.get_by_role("button", name="Save", exact=True).click()
+    await expect(card.get_by_role("alert")).to_contain_text("moves the feedback on 1 part you changed")
+    await card.get_by_role("button", name="Keep editing").click()
+    await expect(box).to_be_visible()
+    await expect(card.get_by_role("alert")).to_have_count(0)
+    await box.press("Control+Enter")
+    await card.get_by_role("button", name="Save anyway").click()
+    await expect(page.locator('[data-ref="plan/2"]')).to_have_text("render fast")
+    await expect(card.get_by_role("img", name="user: approve")).to_have_count(0)
+
+    await card.hover()
+    await page.get_by_label("Edit plan").click()
+    await box.fill("1. parse the config\n2. render fast")
+    await card.get_by_role("button", name="Save", exact=True).click()
+    await expect(page.locator('[data-ref="plan/1"]')).to_have_text("parse the config")
+    await expect(box).to_have_count(0)
+
+
+async def test_a_note_lands_in_view_saves_on_a_click_outside_and_opens_no_feedback(page: Page, agent: Agent) -> None:
+    """Assemble: an empty board with the chat at the bottom right.
+    Act: the user double-clicks near the bottom right of the free space, types a note and clicks elsewhere on the board.
+    Assert: the draft is whole inside the viewport and left of the chat; the click outside saves the note as a card by
+    the user, with no feedback panel open."""
+    await agent.write(say("hello"))
+    chat = await page.get_by_role("complementary", name="Chat with the agent").bounding_box()
+    assert chat is not None
+    await page.mouse.dblclick(chat["x"] - 40, 860)
+    draft = page.get_by_role("textbox", name="New note")
+    await expect(draft).to_be_visible()
+    box = await draft.locator("xpath=ancestor::div[contains(@class, 'absolute')][1]").bounding_box()
+    assert box is not None
+    assert box["x"] + box["width"] <= chat["x"], "the draft is left of the chat"
+    assert box["y"] + box["height"] <= 900, "the draft is above the bottom of the viewport"
+    await draft.fill("remember the docs")
+    await page.mouse.click(600, 100)
+    note = page.locator("article").filter(has_text="remember the docs")
+    await expect(note).to_be_visible()
+    await expect(note.get_by_role("img", name="By you")).to_be_visible()
+    await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
+
+
 async def test_a_removed_card_comes_back_with_undo_or_from_the_history(page: Page, agent: Agent) -> None:
     """Assemble: two cards of the agent, placed.
     Act: the user selects the first and presses Delete, then clicks Undo in the toast; then removes the second with its
