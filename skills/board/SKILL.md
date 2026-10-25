@@ -19,7 +19,7 @@ Call `write` with a list of actions. They run in order, all or nothing.
 - `clear` starts over: every card goes to its history with its feedback, and the board, its arrows and the chat empty. Use it when the user moves to a new task, rather than a `remove` per card.
 - `say {text}` sends a message to the user. It shows in the chat on the page.
 - `move {id, x, y}` places a card on the board, in pixels. A card with no place goes to the free space below the others, on a grid of three columns 688 pixels apart, once the page shows it, and `read` has its place. A new card lands clear of every card; after that cards may cross, and the card last touched, by a `move` or a new version too, shows on top.
-- `resize {id, width}` sets the width of a card, in pixels. A card that no one resized is 384 pixels wide, or 640 with code.
+- `resize {id, width}` sets the width of a card, in pixels. A card that no one resized is as wide as its content needs, between 256 pixels and a column of the grid, 640.
 - `react {ref, reaction}`, `comment {ref, text}`, `fill {ref, value}` and `link {id, src, dst, text}` act on cards as the user does. A comment also shows in the chat, with a link to its part.
 
 `write` returns the cards it added and replaced, the parts whose feedback went to the history, the arrows it dropped, and the parts of each card it put, by number: `{"added": ["plan"], "replaced": [], "retired": [], "dropped": [], "parts": {"plan": {"1": "parse", "2": "render"}}}`. Take the numbers for refs from there, not from the markdown. Put each card at most once in a batch.

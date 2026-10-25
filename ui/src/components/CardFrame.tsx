@@ -184,7 +184,8 @@ const usePointerDrag = ({
   click,
 }: {
   scale: number;
-  at: TPoint;
+  /** Where the drag starts from, or how to find out when the button goes down, as for a width the page measures. */
+  at: TPoint | (() => TPoint);
   move: (to: TPoint) => void;
   drop: (to: TPoint) => void;
   click: () => void;
@@ -207,7 +208,11 @@ const usePointerDrag = ({
       if (document.activeElement instanceof HTMLElement)
         document.activeElement.blur();
       event.currentTarget.setPointerCapture(event.pointerId);
-      start.current = { x: event.clientX, y: event.clientY, at };
+      start.current = {
+        x: event.clientX,
+        y: event.clientY,
+        at: typeof at === "function" ? at() : at,
+      };
       moved.current = false;
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) => {
@@ -252,13 +257,16 @@ const partsWithFeedback = (id: string, board: TBoard): string[] => {
   );
 };
 
-/** The width of a card that no one resized: wider with code. */
-const defaultWidth = (md: string) => (/^ {0,3}(```|~~~)/m.test(md) ? 640 : 384);
+/** The widths a card can have: as wide as its content needs by default, between the least and a column of the grid. */
+const leastWidth = 256;
+const columnWidth = 640;
 
-const clampWidth = (width: number) => Math.min(1280, Math.max(256, width));
+const clampWidth = (width: number) =>
+  Math.min(1280, Math.max(leastWidth, width));
 
 /**
- * A card at its place on the board, which looks the same for each author but for the icon. A drag on the card's header
+ * A card at its place on the board, as wide as its content needs up to a column of the grid unless someone set its width,
+ * which looks the same for each author but for the icon. A drag on the card's header
  * moves it, a drag on its bottom right corner sets its width, a click selects it, and a double click on its text edits the
  * markdown. Cards may cross after their first place; a touch puts the card on top of the others.
  */
@@ -293,8 +301,10 @@ export const CardFrame = ({
   measure: (id: string, element: HTMLElement | null) => void;
 }) => {
   const { board, act, selection, select, openHistory, remove } = useTools();
+  const frame = useRef<HTMLElement | null>(null);
   const measured = useCallback(
     (element: HTMLElement | null) => {
+      frame.current = element;
       measure(id, element);
     },
     [id, measure],
@@ -315,10 +325,11 @@ export const CardFrame = ({
     setStoredSeen(stored);
     setStretch(null);
   }
-  const width = stretch ?? stored ?? defaultWidth(card.md);
+  /** The width the user or the agent set, or none: then the card is as wide as its content needs, up to a column. */
+  const width = stretch ?? stored;
   const resize = usePointerDrag({
     scale,
-    at: { x: width, y: 0 },
+    at: () => ({ x: width ?? frame.current?.offsetWidth ?? leastWidth, y: 0 }),
     move: (to) => {
       setStretch(clampWidth(to.x));
     },
@@ -366,7 +377,9 @@ export const CardFrame = ({
       style={{
         left: at.x,
         top: at.y,
-        width,
+        width: width ?? "max-content",
+        minWidth: leastWidth,
+        maxWidth: width === undefined ? columnWidth : undefined,
         zIndex: z,
         visibility: placed ? "visible" : "hidden",
       }}
@@ -431,9 +444,7 @@ export const CardFrame = ({
             <Trash2 className="size-3.5" />
           </IconButton>
         </span>
-        <span className="relative h-5 w-18 shrink-0">
-          <Marks target={id} place="top-1/2 right-0 -translate-y-1/2" />
-        </span>
+        <Marks target={id} place="shrink-0" />
         <Connector target={id} />
       </header>
       <div
@@ -466,7 +477,7 @@ export const CardFrame = ({
         role="separator"
         aria-orientation="vertical"
         aria-label={`Width of ${id}`}
-        aria-valuenow={Math.round(width)}
+        aria-valuenow={width === undefined ? undefined : Math.round(width)}
         className="absolute right-0 bottom-0 size-4 cursor-ew-resize rounded-br-xl text-stone-300 hover:text-stone-500"
         {...resize}
       >

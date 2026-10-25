@@ -19,11 +19,11 @@ const quick = Reaction.options.filter(
  * button for approve and for reject before them, so that the marks stay where they are and a click on the comment
  * count opens the thread. The user's own reaction shows as the pressed button meanwhile. The agent's reaction has a
  * ring. A question is a comment with its mark, in the thread. The place puts the marks in the part, at the top right
- * unless it says otherwise.
+ * unless it says otherwise; a place without "absolute" makes the marks a flex item of the part, as in a card's header.
  */
 export const Marks = ({
   target,
-  place = "top-0.5 right-1",
+  place = "absolute top-0.5 right-1",
 }: {
   target: string;
   place?: string;
@@ -37,7 +37,7 @@ export const Marks = ({
   };
   return (
     <span
-      className={`not-prose absolute flex items-center gap-1 text-xs select-none ${place}`}
+      className={`not-prose flex items-center gap-1 text-xs select-none ${place}`}
     >
       {!readOnly && (
         <span className="-my-0.5 hidden items-center gap-0.5 rounded-full bg-white/90 p-0.5 shadow-sm ring-1 ring-stone-200 group-hover/part:flex">

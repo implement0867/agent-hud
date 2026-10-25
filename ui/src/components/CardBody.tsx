@@ -122,7 +122,10 @@ const BodyRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => {
       }}
     >
       <td className="relative w-20">
-        <Marks target={part.ref} place="top-1/2 left-0 -translate-y-1/2" />
+        <Marks
+          target={part.ref}
+          place="absolute top-1/2 left-0 -translate-y-1/2"
+        />
       </td>
       {children}
       <td className="relative w-0 p-0">
@@ -168,7 +171,10 @@ const CodeLine = ({
         </span>
       )}
       {children}
-      <Marks target={part.ref} place="top-1/2 right-1 -translate-y-1/2" />
+      <Marks
+        target={part.ref}
+        place="absolute top-1/2 right-1 -translate-y-1/2"
+      />
       <Connector target={part.ref} />
     </span>
   );
@@ -279,7 +285,7 @@ const CellInput = ({
           aria-label={label}
           disabled={readOnly}
           placeholder="…"
-          className="w-full min-w-12 border-b border-dashed border-stone-300 bg-transparent px-0.5 text-sm outline-none placeholder:text-stone-300 focus:border-solid focus:border-sky-500"
+          className={`border-b border-dashed border-stone-300 bg-transparent px-0.5 text-sm outline-none placeholder:text-stone-300 focus:border-solid focus:border-sky-500 ${kind === ColumnKind.enum.number ? "w-16" : "w-40"}`}
           defaultValue={value === null ? "" : String(value)}
           onClick={stop}
           onKeyDown={(event) => {
