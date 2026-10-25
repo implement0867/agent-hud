@@ -16,10 +16,12 @@ fail() {
 }
 
 probe() {
-  # What answers on the port: "agent-hud <version> <build>", "other" for another program, or nothing.
+  # What answers on the port: "agent-hud <version> <build>" from this app's /health, "old" for an agent-hud from
+  # before /health, which serves the board page at /, "other" for another program, or nothing.
   case $(curl -s -o /dev/null --max-time 2 -w '%{http_code}' "$url") in
     000) ;;
     200) curl -s --max-time 2 "$url" | sed -n 's/.*"app": *"agent-hud".*"version": *"\([^"]*\)".*"build": *"\([^"]*\)".*/agent-hud \1 \2/p' | grep . || echo other ;;
+    404) curl -s --max-time 2 "http://127.0.0.1:$port/" | grep -q '<title>agent-hud</title>' && echo old || echo other ;;
     *) echo other ;;
   esac
 }
@@ -29,10 +31,25 @@ fingerprint() {
   find "$server_dir/src" "$server_dir/pyproject.toml" "$server_dir/uv.lock" -type f | LC_ALL=C sort | xargs cat | cksum | cut -d' ' -f1
 }
 
+holder() {
+  # The pid of the process that listens on the port, found by lsof; nothing without lsof or a listener.
+  command -v lsof >/dev/null && lsof -t -i "tcp:$port" -s TCP:LISTEN 2>/dev/null | head -n 1
+}
+
 stop() {
-  # Stop the server that the pid file names, and wait for the port to free.
-  pid=$(cat "$pid_file" 2>/dev/null) && kill "$pid" 2>/dev/null ||
-    fail "an older agent-hud answers on port $port and $pid_file names no process to stop"
+  # Stop the agent-hud server on the port: the process that the pid file names, else the one that holds the port
+  # when it runs agent-hud's server; then wait for the port to free.
+  pid=$(cat "$pid_file" 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    pid=$(holder)
+    [ -n "$pid" ] || fail "an older agent-hud answers on port $port; $pid_file names no process to stop, and lsof finds none: stop it or set AGENT_HUD_PORT to a free port"
+    args=$(ps -o args= -p "$pid" 2>/dev/null)
+    case $args in
+      *agent_hud.web*) ;;
+      *) fail "an older agent-hud answers on port $port, but pid $pid holds the port and is not agent-hud's server: $args; stop it or set AGENT_HUD_PORT to a free port" ;;
+    esac
+  fi
+  kill "$pid" 2>/dev/null || fail "an older agent-hud answers on port $port and pid $pid cannot be stopped"
   n=0
   while [ -n "$(probe)" ]; do
     [ "$n" -lt 20 ] || fail "agent-hud (pid $pid) still answers on port $port 10 s after it was told to stop"
@@ -74,7 +91,7 @@ mkdir -p "$state_dir" || fail "cannot create $state_dir"
 
 case $(probe) in
   "agent-hud $version $build") exit 0 ;;
-  "agent-hud "*) stop ;;
-  other) fail "another program answers on port $port; set AGENT_HUD_PORT to a free port" ;;
+  "agent-hud "* | old) stop ;;
+  other) fail "another program answers on port $port, without agent-hud's /health or page; stop it or set AGENT_HUD_PORT to a free port" ;;
 esac
 start

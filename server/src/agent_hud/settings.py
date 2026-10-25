@@ -36,6 +36,11 @@ class Settings(BaseSettings):
         default=None,
         description="The token that /mcp/ needs as a bearer token and the sockets as a query parameter; none makes one for the sockets only",
     )
+    idle_seconds: float = Field(
+        default=3600,
+        ge=0,
+        description="How long the app runs with no page or monitor connected and no request before it stops; 0 keeps it running",
+    )
 
     @property
     def board_files(self) -> Path:

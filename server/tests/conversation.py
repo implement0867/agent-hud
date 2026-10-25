@@ -118,16 +118,27 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
 
 @asynccontextmanager
 async def serve(
-    hud: Hud, static_dir: Path, state_dir: Path, build: str = "", port: int = 0
+    hud: Hud,
+    static_dir: Path,
+    state_dir: Path,
+    build: str = "",
+    port: int = 0,
+    idle_seconds: float = 0,
+    on_idle: Callable[[], None] = lambda: None,
 ) -> AsyncGenerator[tuple[str, int]]:
-    """Host and port of the app on the hud, with the UI in static_dir, its token in state_dir and the build fingerprint, on the port or a free one, until the context ends."""
+    """
+    Host and port of the app on the hud, with the UI in static_dir, its token in state_dir and the build fingerprint,
+    on the port or a free one, until the context ends; after the idle seconds without a socket or a request, when
+    they are above 0, the app calls on_idle instead of stopping its process.
+    """
     with pytest.MonkeyPatch.context() as env:
         env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
         env.setenv("AGENT_HUD_STATE_DIR", str(state_dir))
         env.setenv("AGENT_HUD_TOKEN", TOKEN)
         env.setenv("AGENT_HUD_BUILD", build)
+        env.setenv("AGENT_HUD_IDLE_SECONDS", str(idle_seconds))
         get_settings.cache_clear()
-        app = create_app(hud)
+        app = create_app(hud, stop=on_idle)
     get_settings.cache_clear()
     # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)

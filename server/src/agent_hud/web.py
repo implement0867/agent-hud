@@ -1,10 +1,13 @@
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+import logging
+import signal
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from secrets import token_urlsafe
+from time import monotonic
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketException, status
@@ -46,6 +49,63 @@ class Bearer:
         await self.app(scope, receive, send)
 
 
+class Activity:
+    """
+    When the app last served a request or closed a socket, how many sockets are open, and an event set on each, for
+    the idle shutdown.
+    """
+
+    def __init__(self) -> None:
+        self.last = monotonic()
+        self.sockets = 0
+        self.changed = asyncio.Event()
+
+    def note(self, sockets: int = 0) -> None:
+        """A request, or a socket that opened (1) or closed (-1), now."""
+        self.last = monotonic()
+        self.sockets += sockets
+        self.changed.set()
+
+    def idle_for(self) -> float:
+        """How long the app has been idle: 0 while a page or a monitor is connected."""
+        return 0 if self.sockets > 0 else monotonic() - self.last
+
+
+class Watched:
+    """The app behind it, with each request and socket noted in the activity."""
+
+    def __init__(self, app: ASGIApp, activity: Activity) -> None:
+        self.app = app
+        self.activity = activity
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "lifespan":
+            await self.app(scope, receive, send)
+            return
+        socket = scope["type"] == "websocket"
+        self.activity.note(1 if socket else 0)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.activity.note(-1 if socket else 0)
+
+
+def stop_process() -> None:
+    """Stop the server as the hook does: uvicorn takes the signal and shuts down, so the boards compact and close."""
+    signal.raise_signal(signal.SIGTERM)
+
+
+async def stop_when_idle(activity: Activity, after: float, stop: Callable[[], None]) -> None:
+    """Call stop once the app has been idle for the seconds: no page or monitor connected, and no request."""
+    while (idle := activity.idle_for()) < after:
+        activity.changed.clear()
+        with suppress(TimeoutError):
+            async with asyncio.timeout(after - idle):
+                await activity.changed.wait()
+    logging.getLogger("agent_hud").info("idle for %.0f s with no page, monitor or request: stopping", after)
+    stop()
+
+
 def keep_token(token: str, state_dir: Path) -> None:
     """Write the token to the state dir, readable by the user only, so that they can open the page without the agent."""
     path = state_dir / "token"
@@ -55,27 +115,37 @@ def keep_token(token: str, state_dir: Path) -> None:
     path.write_text(token)
 
 
-def create_app(hud: Hud | None = None) -> FastAPI:
+def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
     the boards in the settings' directory, with the hud as the shared board when one is given. The agent's requests
     name their board in the X-Agent-Hud-Board header, and the sockets in the board query parameter.
     The sockets and /boards need the token as a query parameter; /mcp/ needs it as a bearer token when the settings give one.
-    RuntimeError when another process holds a board's file, as a second uvicorn worker would.
+    After the settings' idle seconds with no page or monitor connected and no request, the app calls stop, which stops
+    the process unless the caller gives another. RuntimeError when another process holds a board's file, as a second
+    uvicorn worker would.
     """
     settings = get_settings()
     huds = Huds(settings.board_files, shared=hud)
     token = settings.token or token_urlsafe(32)
     keep_token(token, settings.state_dir)
     mcp_app = build(huds, token).http_app(path="/")
+    activity = Activity()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """The MCP session manager while the app runs, and each board's file compacted and let go on shutdown."""
+        """The MCP session manager and the idle watch while the app runs, and each board's file compacted and let go on shutdown."""
+        watch = (
+            asyncio.create_task(stop_when_idle(activity, settings.idle_seconds, stop))
+            if settings.idle_seconds > 0
+            else None
+        )
         try:
             async with mcp_app.lifespan(app):
                 yield
         finally:
+            if watch is not None:
+                watch.cancel()
             huds.compact()
             huds.close()
 
@@ -90,6 +160,7 @@ def create_app(hud: Hud | None = None) -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+    app.add_middleware(Watched, activity=activity)
     with_token = token_dep(token)
 
     @app.get("/health")

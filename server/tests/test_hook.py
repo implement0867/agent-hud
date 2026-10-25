@@ -66,6 +66,25 @@ async def other_program() -> AsyncIterator[int]:
         yield server.sockets[0].getsockname()[1]
 
 
+@pytest_asyncio.fixture(loop_scope="module")
+async def old_agent_hud() -> AsyncIterator[int]:
+    """The port of a server that answers 404 on /health and the board page's title at /, as an agent-hud from before /health does."""
+
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        request = await reader.readuntil(b"\r\n\r\n")
+        if request.startswith(b"GET /health "):
+            writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        else:
+            page = b"<!doctype html><html><head><title>agent-hud</title></head></html>"
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" % (len(page), page))
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    async with server:
+        yield server.sockets[0].getsockname()[1]
+
+
 async def fingerprint() -> str:
     """The fingerprint of the server's sources, as the hook computes it."""
     result = await run_hook(0, Path("/nonexistent"), build=True)
@@ -83,15 +102,30 @@ async def test_hook_exits_at_once_when_this_build_answers(static_dir: Path, tmp_
     assert not (tmp_path / "agent-hud" / "server.pid").exists()
 
 
-async def test_hook_stops_an_app_from_other_sources(address: tuple[str, int], tmp_path: Path) -> None:
-    """Assemble: the app on a port, started with another build fingerprint, and no pid file to stop it with.
+async def test_hook_names_the_process_on_the_port_when_it_is_not_the_server_it_can_stop(
+    address: tuple[str, int], tmp_path: Path
+) -> None:
+    """Assemble: the app on a port, started with another build fingerprint, with no pid file, in this test process.
     Act: run the hook for that port.
-    Assert: exit 1, and the message says an older agent-hud answers and names the pid file."""
+    Assert: exit 1, and the message says an older agent-hud answers, names this process as the port's holder and
+    says it is not agent-hud's server, so that the hook stops nothing it did not start."""
     _, port = address
     result = await run_hook(port, tmp_path)
     assert result.returncode == 1
     assert "an older agent-hud answers" in result.stderr
-    assert "server.pid" in result.stderr
+    assert f"pid {os.getpid()} holds the port" in result.stderr
+    assert "is not agent-hud's server" in result.stderr
+
+
+async def test_hook_takes_an_agent_hud_from_before_health_for_one_to_stop(old_agent_hud: int, tmp_path: Path) -> None:
+    """Assemble: a server that answers 404 on /health and the board page's title at /, in this test process.
+    Act: run the hook for that port.
+    Assert: exit 1, and the message says an older agent-hud answers, not another program, and names this process."""
+    result = await run_hook(old_agent_hud, tmp_path)
+    assert result.returncode == 1
+    assert "an older agent-hud answers" in result.stderr
+    assert "another program" not in result.stderr
+    assert f"pid {os.getpid()}" in result.stderr
 
 
 async def test_hook_fails_when_another_program_answers(other_program: int, tmp_path: Path) -> None:
@@ -100,7 +134,7 @@ async def test_hook_fails_when_another_program_answers(other_program: int, tmp_p
     Assert: exit 1, and the message names the port and the variable to set."""
     result = await run_hook(other_program, tmp_path)
     assert result.returncode == 1
-    assert f"port {other_program}" in result.stderr
+    assert f"another program answers on port {other_program}" in result.stderr
     assert "AGENT_HUD_PORT" in result.stderr
 
 
