@@ -1,6 +1,6 @@
 from typing import NamedTuple, Self
 
-from agent_hud.models.actions import TCardId, TRef
+from agent_hud.models.actions import Comment, Fill, Link, React, TBody, TCardId, TRef, Unreact
 
 
 class Ref(NamedTuple):
@@ -31,3 +31,16 @@ class Ref(NamedTuple):
 def card_of(ref: TRef) -> TCardId:
     """The id of the card that the ref is on."""
     return Ref.parse(ref).card
+
+
+def named_refs(body: TBody) -> list[TRef]:
+    """The parts whose text goes with the action: the part it names, the row of the cell it fills, or the ends of its arrow."""
+    match body:
+        case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref):
+            return [ref]
+        case Fill(ref=ref):
+            return [str(Ref.parse(ref).row)]
+        case Link(src=src, dst=dst):
+            return [src, dst]
+        case _:
+            return []

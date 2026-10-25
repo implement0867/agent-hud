@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import Discriminator, Field, TypeAdapter
 
@@ -77,7 +78,28 @@ type TPageEvent = Annotated[Snapshot | Accepted | Rejected, Discriminator("kind"
 PageEventAdapter = TypeAdapter[TPageEvent](TPageEvent)
 
 
-class Turn(Model):
-    """The changes that the user made from one send to the next, as one line on the agent's monitor."""
+HeardBodyAdapter = TypeAdapter[THeardBody](THeardBody)
 
-    actions: tuple[Heard, ...]
+
+class Turn(Model):
+    """
+    The changes that the user made from one send to the next, as the agent's monitor gets them: the user's actions in
+    order, and the text of each part that an action names, as it was when the user acted.
+    """
+
+    id: TActionId = Field(
+        description="The id of the send or chat message that ended the turn; the same id from two monitors is one turn"
+    )
+    actions: tuple[THeardBody, ...]
+    parts: dict[TRef, str] = Field(
+        description="The text of each part that an action names, as it was when the user acted"
+    )
+
+    @classmethod
+    def of(cls, turn_id: TActionId, heard: Iterable[Heard]) -> Self:
+        """The turn of the actions as the agent hears them, with each part's text as the first action that names it had it."""
+        actions = tuple(heard)
+        parts: dict[TRef, str] = {}
+        for action in actions:
+            parts = {**action.parts, **parts}
+        return cls(id=turn_id, actions=tuple(action.body for action in actions), parts=parts)

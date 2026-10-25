@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import re
 import shlex
 import sys
@@ -7,12 +8,14 @@ from contextlib import AsyncExitStack
 from importlib.metadata import version
 from json import load
 from pathlib import Path
-from typing import Any
+from time import monotonic
+from typing import Any, cast
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import pytest
 import pytest_asyncio
+from fastapi import WebSocket
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from hypothesis import given, settings
@@ -24,14 +27,15 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
 from agent_hud.boards import Huds
+from agent_hud.frames import head_of, turn_of
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import Store
-from agent_hud.web import create_app
-from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, serve
+from agent_hud.web import create_app, send_turns
+from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
 from tests.factories import as_json, put, react, read_board, say, send
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
@@ -235,8 +239,11 @@ async def test_the_turns_command_prints_each_turn_as_a_line(address: tuple[str, 
             await user.notes(lambda snapshot: snapshot.agent is AgentState.waiting)
             assert isinstance(await user.act(say("hello")), Accepted)
             async with asyncio.timeout(5):
-                line = await turns.stdout.readline()
-        assert [heard.body for heard in Turn.model_validate_json(line).actions] == [say("hello")]
+                head = await turns.stdout.readline()
+                lines = [await turns.stdout.readline() for _ in range(head_of(head.decode()).actions)]
+        assert turn_of(["".join([head.decode(), *(line.decode() for line in lines)]).rstrip("\n")]).actions == (
+            say("hello"),
+        )
     finally:
         turns.terminate()
         await turns.wait()
@@ -323,18 +330,17 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     body = data.draw(bodies(st.just(card_id)))
     await agent.call_tool("write", {"actions": as_json(put(card_id, md))})
     before = hud.board
-    pending = [heard.id for heard in hud.snapshot().pending]
+    pending = [heard.body for heard in hud.snapshot().pending]
     match await user.act(body):
-        case Accepted(id=action_id):
+        case Accepted():
             assert await user.sees(hud.board) == hud.board
             if not hud.log.actions[-1].ends_turn:
-                heard = [heard.id for heard in hud.snapshot().pending]
+                heard = [heard.body for heard in hud.snapshot().pending]
                 await user.send()
             else:
-                heard = [*pending, action_id] if body.kind is ActionKind.say else pending
+                heard = [*pending, body] if body.kind is ActionKind.say else pending
             for listener in listeners:
-                turn = Turn.model_validate_json(await asyncio.wait_for(listener.recv(), 5))
-                assert [action.id for action in turn.actions] == heard
+                assert list((await receive_turn(listener)).actions) == heard
         case Rejected():
             assert hud.board == before
 
@@ -378,9 +384,9 @@ async def test_agent_gets_each_message_once_in_order(
         answers = [await user.act(say(text)) for text in batch]
         assert all(isinstance(answer, Accepted) for answer in answers)
         for listener in listeners:
-            turns = [Turn.model_validate_json(await asyncio.wait_for(listener.recv(), 5)) for _ in batch]
-            assert [[(a.id, a.body) for a in turn.actions] for turn in turns] == [
-                [(answer.id, say(text))] for answer, text in zip(answers, batch, strict=True)
+            turns = [await receive_turn(listener) for _ in batch]
+            assert [(turn.id, list(turn.actions)) for turn in turns] == [
+                (answer.id, [say(text)]) for answer, text in zip(answers, batch, strict=True)
             ]
 
 
@@ -391,3 +397,59 @@ async def test_a_message_needs_a_character_that_is_not_white_space(blank: str) -
     Assert: ValidationError."""
     with pytest.raises(ValidationError):
         say(blank)
+
+
+async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir: Path, tmp_path: Path) -> None:
+    """Assemble: an app whose monitor frames hold 300 characters, with a list of eight items on its board.
+    Act: the user reacts to each item and sends.
+    Assert: the monitor gets several frames, each within the size, whose turn is the reactions with each item's text."""
+    hud = Hud()
+    texts = [f"step {n} of the plan, with words that fill the line" for n in range(1, 9)]
+    async with (
+        serve(hud, static_dir, tmp_path, monitor_chars=300) as address,
+        open_agent(address) as agent,
+        open_page(address) as user,
+    ):
+        await agent.write(put("plan", "\n".join(f"- {text}" for text in texts)))
+        reactions = [react(f"plan/{n}", Reaction.approve) for n in range(1, 9)]
+        for body in reactions:
+            assert isinstance(await user.act(body), Accepted)
+        await user.send()
+        frames: list[str] = []
+        async with asyncio.timeout(10):
+            while not frames or (head := head_of(frames[-1])).of is None or head.frame != head.of:
+                frames.append(str(await agent.monitor.recv()))
+    assert len(frames) > 1
+    assert all(len(frame) <= 300 for frame in frames)
+    turn = turn_of(frames)
+    assert (list(turn.actions), turn.parts) == (reactions, {f"plan/{n}": text for n, text in enumerate(texts, 1)})
+
+
+class Recorder:
+    """A websocket that records when each text was sent, for the sender of turns."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[float, str]] = []
+
+    async def send_text(self, text: str) -> None:
+        self.sent.append((monotonic(), text))
+
+
+async def test_the_sender_leaves_the_gap_between_the_frames_of_a_turn_and_none_between_turns() -> None:
+    """Assemble: two turns, of which the first takes three frames of 200 characters and the second one.
+    Act: send them with a gap of 0.2 s.
+    Assert: the frames of the first turn go at least the gap apart, and the second turn's frame follows the last at once."""
+    first = Turn(
+        id="one", actions=tuple(say(f"message {n} of the first turn, long enough") for n in range(6)), parts={}
+    )
+    second = Turn(id="two", actions=(say("hi"),), parts={})
+
+    async def turns() -> AsyncIterator[Turn]:
+        yield first
+        yield second
+
+    recorder = Recorder()
+    await send_turns(cast(WebSocket, recorder), turns(), 200, 0.2)
+    assert [head_of(text).of for _, text in recorder.sent] == [3, 3, 3, None]
+    gaps = [later - earlier for (earlier, _), (later, _) in itertools.pairwise(recorder.sent)]
+    assert all(gap >= 0.19 for gap in gaps[:2]) and gaps[2] < 0.1, gaps

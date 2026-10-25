@@ -30,7 +30,7 @@ from agent_hud.models.actions import (
 )
 from agent_hud.models.base import Model
 from agent_hud.models.columns import Column
-from agent_hud.models.refs import Ref, card_of
+from agent_hud.models.refs import Ref, card_of, named_refs
 from agent_hud.outline import Outline, outline_of
 
 
@@ -145,16 +145,7 @@ class Board(Model):
 
     def part_texts(self, body: TBody) -> dict[TRef, str]:
         """The text of each part that the action names, as the board has it now."""
-        match body:
-            case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref):
-                refs = [ref]
-            case Fill(ref=ref):
-                refs = [str(Ref.parse(ref).row)]
-            case Link(src=src, dst=dst):
-                refs = [src, dst]
-            case _:
-                refs = []
-        return {ref: text for ref in refs if (text := self._text(ref)) is not None}
+        return {ref: text for ref in named_refs(body) if (text := self._text(ref)) is not None}
 
     def _text(self, ref: TRef) -> str | None:
         card_id, part, _ = Ref.parse(ref)

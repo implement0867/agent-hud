@@ -12,6 +12,7 @@ import uvicorn
 from fastmcp import Client
 from websockets.asyncio.client import ClientConnection, connect
 
+from agent_hud.frames import head_of, turn_of
 from agent_hud.hud import Hud
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
@@ -31,6 +32,15 @@ async def listen_url(tools: Client[Any]) -> str:
     return str(listening["url"])
 
 
+async def receive_turn(monitor: ClientConnection) -> Turn:
+    """The next turn that the monitor gets, from all its frames. TimeoutError if it is not whole in five seconds."""
+    async with asyncio.timeout(5):
+        frames = [str(await monitor.recv())]
+        while (head := head_of(frames[-1])).of is not None and head.frame != head.of:
+            frames.append(str(await monitor.recv()))
+    return turn_of(frames)
+
+
 @dataclass
 class Agent:
     """The agent's side of the board: the MCP tools over HTTP, and a monitor on the URL that listen returns."""
@@ -43,12 +53,11 @@ class Agent:
 
     async def turn(self) -> Turn:
         """The next turn of the user that the monitor gets. TimeoutError if none comes in five seconds."""
-        async with asyncio.timeout(5):
-            return Turn.model_validate_json(await self.monitor.recv())
+        return await receive_turn(self.monitor)
 
     async def hear(self) -> list[THeardBody]:
         """The user's actions in the next turn that the monitor gets, in order."""
-        return [heard.body for heard in (await self.turn()).actions]
+        return list((await self.turn()).actions)
 
     @asynccontextmanager
     async def listen(self) -> AsyncGenerator[None]:
@@ -125,11 +134,14 @@ async def serve(
     port: int = 0,
     idle_seconds: float = 0,
     on_idle: Callable[[], None] = lambda: None,
+    monitor_chars: int | None = None,
+    monitor_gap: float = 0,
 ) -> AsyncGenerator[tuple[str, int]]:
     """
     Host and port of the app on the hud, with the UI in static_dir, its token in state_dir and the build fingerprint,
     on the port or a free one, until the context ends; after the idle seconds without a socket or a request, when
-    they are above 0, the app calls on_idle instead of stopping its process.
+    they are above 0, the app calls on_idle instead of stopping its process. The monitor's frames are at most
+    monitor_chars when given, with no gap between the frames of a turn unless one is given.
     """
     with pytest.MonkeyPatch.context() as env:
         env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
@@ -137,6 +149,9 @@ async def serve(
         env.setenv("AGENT_HUD_TOKEN", TOKEN)
         env.setenv("AGENT_HUD_BUILD", build)
         env.setenv("AGENT_HUD_IDLE_SECONDS", str(idle_seconds))
+        env.setenv("AGENT_HUD_MONITOR_GAP", str(monitor_gap))
+        if monitor_chars is not None:
+            env.setenv("AGENT_HUD_MONITOR_CHARS", str(monitor_chars))
         get_settings.cache_clear()
         app = create_app(hud, stop=on_idle)
     get_settings.cache_clear()

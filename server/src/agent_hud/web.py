@@ -20,10 +20,11 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from agent_hud.boards import BoardInfo, Huds, TBoardId
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
+from agent_hud.frames import frames
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.base import Model
-from agent_hud.models.events import Accepted, EventKind, Rejected, Request
+from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 
@@ -32,6 +33,18 @@ async def send_each(websocket: WebSocket, events: AsyncIterator[Model]) -> None:
     """Send each event as JSON text as it comes."""
     async for event in events:
         await websocket.send_text(event.model_dump_json())
+
+
+async def send_turns(websocket: WebSocket, turns: AsyncIterator[Turn], chars: int, gap: float) -> None:
+    """
+    Send each turn as its frames of at most the chars, with the gap in seconds between the frames of one turn, so that
+    the monitor shows each frame as an event of its own.
+    """
+    async for turn in turns:
+        for n, frame in enumerate(frames(turn, chars)):
+            if n:
+                await asyncio.sleep(gap)
+            await websocket.send_text(frame)
 
 
 class Bearer:
@@ -194,11 +207,13 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
 
     @app.websocket("/agent", dependencies=[AgentOriginDep, with_token])
     async def agent(websocket: WebSocket, hud: Annotated[Hud, Depends(require_board)]) -> None:
-        """Send each of the user's turns on the board to this agent's monitor, until it disconnects."""
+        """Send each of the user's turns on the board to this agent's monitor, as frames of lines, until it disconnects."""
         await websocket.accept()
         with hud.monitor():
             async with asyncio.TaskGroup() as tg:
-                sender = tg.create_task(send_each(websocket, hud.user_turns()))
+                sender = tg.create_task(
+                    send_turns(websocket, hud.user_turns(), settings.monitor_chars, settings.monitor_gap)
+                )
                 # The monitor sends nothing, so this returns when it disconnects.
                 await websocket.receive()
                 sender.cancel()
