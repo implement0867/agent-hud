@@ -42,11 +42,11 @@ def agent_kinds() -> list[ActionKind]:
 
 
 class Listening(Model):
-    """Where the user's turns come from: a websocket URL, and a shell command that prints each turn as a line."""
+    """Where the user's turns come from: a websocket URL, and a shell command that prints each turn as its lines."""
 
     url: str = Field(description="The websocket URL of the user's turns, for a monitor that takes a websocket")
     command: str = Field(
-        description="A shell command that prints each turn as a line, for a monitor that takes a command"
+        description="A shell command that prints each turn as its lines, for a monitor that takes a command"
     )
     board: str = Field(description="The id of this session's board, which the URL names")
     monitors: int = Field(
@@ -229,9 +229,10 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
 
     async def listen() -> Listening:
         """
-        Where the user's turns come from: a websocket URL, and a shell command that prints each turn as a line.
+        Where the user's turns come from: a websocket URL, and a shell command that prints each turn as its lines.
         Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
-        Each line is one turn: the changes that the user made up to their send or chat message, with the text of each part that a change names.
+        Each turn is one event of lines: a head with the turn's id and its number of actions, then one line per action, with the text of the parts it names.
+        A turn with more lines than one event shows comes as several events, each with a head that counts them.
         An edit of a card on the board is a diff of its markdown.
         Also the board's id and the monitors already open on it: above 0, another session follows this board, so tell the user before you open one too.
         """

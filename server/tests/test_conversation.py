@@ -257,7 +257,7 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
     """Assemble: a new board, a page and an agent with a monitor.
     Act: the user and the agent take turns; the page sends each of the user's actions alone, and the agent writes each turn in one call.
     Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each turn as the page listed it as pending, with the message that ended it, in order."""
-    taken: list[str] = []
+    taken: list[TBody] = []
     hud = Hud()
     async with (
         serve(hud, static_dir, state_dir) as address,
@@ -268,11 +268,11 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
             match author:
                 case Author.user:
                     for body in batch:
-                        pending = [heard.id for heard in hud.snapshot().pending]
+                        pending = [heard.body for heard in hud.snapshot().pending]
                         answer = await user.act(body)
                         match answer, body.kind:
-                            case Accepted(id=action_id), ActionKind.say:
-                                taken += [*pending, action_id]
+                            case Accepted(), ActionKind.say:
+                                taken += [*pending, body]
                             case Accepted(), ActionKind.send:
                                 taken += pending
                             case _:
@@ -281,9 +281,9 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
                     await agent.tools.call_tool("write", {"actions": as_json(*batch)}, raise_on_error=False)
             board = await read_board(agent.tools, history=True)
             assert await user.sees(board) == board
-        taken += [heard.id for heard in hud.snapshot().pending]
+        taken += [heard.body for heard in hud.snapshot().pending]
         await user.send()
-        heard: list[str] = []
+        heard: list[TBody] = []
         while len(heard) < len(taken):
-            heard += [action.id for action in (await agent.turn()).actions]
+            heard += (await agent.turn()).actions
         assert heard == taken

@@ -274,13 +274,8 @@ async def test_the_user_reviews_a_line_of_code_in_the_browser(page: Page, agent:
     await page.get_by_label("Comment").press("Enter")
     await send(page)
     turn = await agent.turn()
-    assert [heard.body for heard in turn.actions] == [
-        react("code/3", Reaction.reject),
-        comment("code/3", "md is not html"),
-    ]
-    assert {ref: text for heard in turn.actions for ref, text in heard.parts.items()} == {
-        "code/3": "src/render.py:11:     return md"
-    }
+    assert list(turn.actions) == [react("code/3", Reaction.reject), comment("code/3", "md is not html")]
+    assert turn.parts == {"code/3": "src/render.py:11:     return md"}
     await expect(page.get_by_label("reject code/3")).to_have_attribute("aria-pressed", "true")
     await snap(page, tmp_path / "1-line.png")
 
@@ -668,8 +663,7 @@ async def test_headings_and_paragraphs_take_feedback(page: Page, agent: Agent) -
     await page.keyboard.press("a")
     await send(page)
     turn = await agent.turn()
-    assert [heard.body for heard in turn.actions] == [react("doc/2", Reaction.approve)]
-    assert [heard.parts for heard in turn.actions] == [{"doc/2": "Some prose here."}]
+    assert (list(turn.actions), turn.parts) == ([react("doc/2", Reaction.approve)], {"doc/2": "Some prose here."})
 
 
 async def test_a_cell_and_a_header_open_no_feedback_and_c_opens_the_selections(page: Page, agent: Agent) -> None:

@@ -42,6 +42,17 @@ class Settings(BaseSettings):
         description="How long the app runs with no page or monitor connected and no request before it stops; 0 keeps it running",
     )
 
+    monitor_chars: int = Field(
+        default=3000,
+        ge=100,
+        description="How many characters of one event Claude Code's Monitor shows; a turn with more goes to it in as many events as it needs",
+    )
+    monitor_gap: float = Field(
+        default=0.5,
+        ge=0,
+        description="Seconds between the events of one turn, so that the Monitor shows them apart: it joins events closer than 0.2 s",
+    )
+
     @property
     def board_files(self) -> Path:
         return self.boards_dir or self.state_dir / "boards"

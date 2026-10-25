@@ -11,6 +11,8 @@ Two agents used agent-hud at the same time, with no script for what they did, fo
 
 `harness/` has what the run needs: the plugin's own hook starts the server (`hooks/serve.sh` with `AGENT_HUD_PORT`, `AGENT_HUD_TOKEN` and `XDG_STATE_HOME` set), `browser_host.py` keeps one Chromium open on the board with a CDP port, `ui.py` runs one step of Playwright against that page, and `watchdog.py` follows the board's turns as a second monitor and continues the agent session with a turn when the agent went idle (at most 3 times, for an hour). The agent side is `claude --plugin-dir <repo> -p "$(cat agent_brief.md)" --allowedTools "mcp__plugin_agent-hud_board__*,Monitor,Write,Read,Skill"` in the project directory; the user side is a subagent with `user_brief.md`.
 
+The check of the monitor channel from this run, a nested session that gets a turn after the Monitor tool's cap, is `make check-live` at the root of the repository.
+
 ## What happened
 
 | Round | User sent | Agent did | Time to answer |

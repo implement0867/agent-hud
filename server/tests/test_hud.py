@@ -8,10 +8,10 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from agent_hud.hud import Hud
+from agent_hud.hud import Hud, hear
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reaction, TBody
 from agent_hud.models.board import Board
-from agent_hud.models.events import AgentState, Edit, Heard, Turn
+from agent_hud.models.events import AgentState, Edit, THeardBody, Turn
 from agent_hud.store import Store
 from tests.factories import clear, comment, fill, move, place, put, react, resize, say, send, unreact
 from tests.strategies import actions, item_texts, list_md, messages, table_md
@@ -53,7 +53,7 @@ def said(texts: list[str], author: Author) -> list[Action]:
 
 def turns(actions: list[Action]) -> list[Turn]:
     """A turn of each of the actions, as the user's messages make them."""
-    return [Turn(actions=(Heard(**action.model_dump(exclude={"at"}), parts={}),)) for action in actions]
+    return [Turn(id=action.id, actions=(action.body,), parts={}) for action in actions]
 
 
 async def take(hud: Hud, count: int, seconds: float = 1) -> list[Turn]:
@@ -100,17 +100,6 @@ def plain(action: Action) -> bool:
     return action.body.kind not in nets
 
 
-def turn_ids(actions: list[Action]) -> list[list[str]]:
-    """The ids of the user's actions in each turn of the actions, without the sends; the last turn only if it is sent."""
-    turns: list[list[str]] = [[]]
-    for action in actions:
-        if action.author is Author.user and action.body.kind is not ActionKind.send:
-            turns[-1].append(action.id)
-        if action.ends_turn:
-            turns.append([])
-    return turns[:-1]
-
-
 # Each example writes and reads a state file, so its time varies more than the default deadline allows.
 @given(st.lists(actions(st.sampled_from(["a", "b"])).filter(plain)), messages())
 @settings(deadline=None)
@@ -121,16 +110,23 @@ async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: l
     with TemporaryDirectory() as directory:
         state_file = Path(directory) / "board.db"
         hud = Hud(state_file)
+        # The user's actions of each turn as the agent hears them, without the sends; the last turn once it is sent.
+        expected: list[list[THeardBody]] = [[]]
         for action in batch:
+            heard = hear(hud.board, action).body
             with suppress(ValueError):
                 hud.act([action])
+                if action.author is Author.user and action.body.kind is not ActionKind.send:
+                    expected[-1].append(heard)
+                if action.ends_turn:
+                    expected.append([])
         hud.close()
         again = Hud(state_file)
         assert (again.board, again.log.actions) == (hud.board, hud.log.actions)
         again.act(said([text], Author.user))
-        expected = turn_ids([*hud.log.actions, *said([text], Author.user)])
+        expected[-1].append(say(text))
         taken = await take(again, len(expected))
-        assert [[heard.id for heard in turn.actions] for turn in taken] == expected
+        assert [list(turn.actions) for turn in taken] == expected
         again.close()
 
 
@@ -153,7 +149,10 @@ async def test_the_read_position_survives_a_restart() -> None:
         hud.close()
         again = Hud(state_file)
         assert again.snapshot().waiting == 2
-        assert [[heard.id for heard in turn.actions] for turn in await take(again, 2)] == [["one"], ["r", "two"]]
+        assert [list(turn.actions) for turn in await take(again, 2)] == [
+            [say("one")],
+            [react("plan/1", Reaction.approve), say("two")],
+        ]
         assert again.snapshot().waiting == 0
         again.close()
         third = Hud(state_file)
@@ -227,7 +226,7 @@ async def test_a_turn_carries_the_net_of_the_users_actions(before: Reaction, aft
     assert hud.snapshot().unsent == len(expected)
     hud.act([Action(id="e", author=Author.user, body=send())])
     [heard] = await take(hud, 1)
-    assert [action.id for action in heard.actions] == expected
+    assert heard.actions == tuple(action.body for action in turn if action.id in expected)
 
 
 async def test_a_fill_on_a_row_the_agent_put_in_the_turn_counts_against_the_agents_values() -> None:
@@ -250,7 +249,7 @@ async def test_a_fill_on_a_row_the_agent_put_in_the_turn_counts_against_the_agen
         [Action(id="n3", author=Author.user, body=fill("plan/2/1", 6)), Action(id="e", author=Author.user, body=send())]
     )
     [heard] = await take(hud, 1)
-    assert [action.id for action in heard.actions] == ["n3"]
+    assert heard.actions == (fill("plan/2/1", 6),)
 
 
 @given(batch=st.lists(actions(st.sampled_from(["a", "b"]))), on_clear=st.booleans())
@@ -309,12 +308,11 @@ async def test_the_agent_gets_the_users_actions_when_the_user_sends(
     with pytest.raises(TimeoutError):
         await take(hud, 1, seconds=0.01)
     hud.act([Action(id="end", author=Author.user, body=send())])
-    parts = [{"plan/2": texts[1]}, {"plan/1": texts[0]}]
     assert await take(hud, 1) == [
         Turn(
-            actions=tuple(
-                Heard(**a.model_dump(exclude={"at"}), parts=p) for a, p in zip(feedback[:2], parts, strict=True)
-            )
+            id="end",
+            actions=tuple(action.body for action in feedback[:2]),
+            parts={"plan/2": texts[1], "plan/1": texts[0]},
         )
     ]
 
@@ -351,4 +349,4 @@ async def test_the_agent_hears_an_edit_of_a_card_as_a_diff(texts: list[str]) -> 
     hud.act(by(Author.user, put("plan", list_md("1. ", [first, new, third])), put("note", new), send()))
     [turn] = await take(hud, 1)
     diff = "\n".join(["@@ -1,3 +1,3 @@", f" 1. {first}", f"-1. {second}", f"+1. {new}", f" 1. {third}"])
-    assert [heard.body for heard in turn.actions] == [Edit(kind="edit", id="plan", diff=diff), put("note", new)]
+    assert list(turn.actions) == [Edit(kind="edit", id="plan", diff=diff), put("note", new)]

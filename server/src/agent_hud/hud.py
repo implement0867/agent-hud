@@ -176,7 +176,7 @@ class Hud:
         try:
             async for _ in self.log.follow(position[0]):
                 while (end := self._turn_end(position[0])) is not None:
-                    turn = Turn(actions=self._turn(position[0], end))
+                    turn = Turn.of(self.log.actions[end - 1].id, self._turn(position[0], end))
                     position[0] = end
                     if not self.working:
                         self.working = True
