@@ -1114,3 +1114,85 @@ async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
     assert (await read_board(agent.tools)).cards == {}
     await page.get_by_role("button", name="Boards").click()
     await expect(page.get_by_role("menuitem", name="Clear this board")).to_be_disabled()
+
+
+async def test_the_agents_new_version_marks_what_it_changed_until_the_user_looks(
+    page: Page, agent: Agent, tmp_path: Path
+) -> None:
+    """Assemble: the agent's plan of three steps, with the user's approval on step 2.
+    Act: the agent puts a version that rewords step 2, replaces step 3 and comments on step 2; the user clicks step 3.
+    Assert: steps 2 and 3 carry the changed mark and step 1 does not; the card lists the two texts that went, struck
+    through, and its header counts them; the version chip says the history holds feedback; the comment count says the
+    agent commented last; the click clears the marks and the list; a screenshot goes in tmp_path."""
+    await agent.write(put("plan", "1. parse\n2. render\n3. test"))
+    step2 = page.locator('[data-ref="plan/2"]')
+    await step2.hover()
+    await page.get_by_label("approve plan/2").click()
+    await page.mouse.move(700, 700)
+    await expect(step2.get_by_role("img", name="user: approve")).to_be_visible()
+    await expect(page.locator("[data-changed]")).to_have_count(0)
+
+    await agent.write(put("plan", "1. parse\n2. render fast\n3. ship"), comment("plan/2", "faster now"))
+    await expect(page.locator('[data-ref="plan/2"][data-changed]')).to_be_visible()
+    await expect(page.locator('[data-ref="plan/3"][data-changed]')).to_be_visible()
+    await expect(page.locator('[data-ref="plan/1"][data-changed]')).to_have_count(0)
+    card = page.locator('article[data-ref="plan"]')
+    await expect(card.get_by_label("Removed from plan by the agent").locator("li")).to_have_text(["render", "test"])
+    await expect(card.locator("header")).to_contain_text("agent: 2 new, 2 removed")
+    await expect(card.get_by_label("History of plan")).to_have_attribute("title", re.compile("feedback in the history"))
+    await expect(step2.get_by_label("Thread on plan/2, last by the agent")).to_be_visible()
+    await snap(page, tmp_path / "1-changed.png")
+
+    await page.locator('[data-ref="plan/3"]').click()
+    await expect(page.locator("[data-changed]")).to_have_count(0)
+    await expect(card.get_by_label("Removed from plan by the agent")).to_have_count(0)
+    await expect(card.locator("header")).not_to_contain_text("agent:")
+
+
+async def test_the_history_docks_beside_the_board_and_an_arrow_the_agent_removes_shows(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: two cards side by side, and an arrow the user draws between them.
+    Act: the user opens and closes the history; the agent removes the arrow; the user puts it back; the user collapses
+    the chat by its header.
+    Assert: while the history is open the card sits to the right of it, moved by the history's width and gap, and it
+    is back once the history closes; a toast names the removed arrow, and Put it back links it again, after which the
+    toast goes; the chat collapses to its button."""
+    await agent.write(put("a", "1. parse"), put("b", "1. render"), move("a", 0, 0), move("b", 500, 0))
+    card = page.locator('article[data-ref="a"]')
+    await expect(card).to_be_visible()
+    await settled(page)
+    before = await card.bounding_box()
+    assert before is not None
+    await page.keyboard.press("h")
+    drawer = page.get_by_role("complementary", name="History")
+    await expect(drawer).to_be_visible()
+    await settled(page)
+    box = await drawer.bounding_box()
+    moved = await card.bounding_box()
+    assert box is not None and moved is not None
+    assert moved["x"] == before["x"] + box["x"] + box["width"] + 16
+    await page.get_by_label("Close the history").click()
+    await expect(drawer).to_have_count(0)
+    await settled(page)
+    assert await card.bounding_box() == before
+
+    dot = await page.get_by_label("Draw an arrow from a/1").bounding_box()
+    goal = await page.locator('[data-ref="b/1"]').bounding_box()
+    assert dot is not None and goal is not None
+    await page.mouse.move(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2, steps=2)
+    await page.mouse.down()
+    await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=3)
+    await page.mouse.up()
+    arrows = (await read_board(agent.tools)).arrows
+    assert len(arrows) == 1
+    (arrow_id,) = arrows
+    await agent.write(unlink(arrow_id))
+    toast = page.get_by_role("status", name="Arrow removed by the agent")
+    await expect(toast).to_contain_text("The agent removed your arrow a/1 → b/1")
+    await toast.get_by_role("button", name="Put it back").click()
+    await expect(toast).to_have_count(0)
+    assert set((await read_board(agent.tools)).arrows) == {arrow_id}
+
+    await page.get_by_role("button", name="Collapse the chat").click()
+    await expect(page.get_by_label("Open the chat")).to_be_visible()

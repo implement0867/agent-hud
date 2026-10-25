@@ -126,6 +126,15 @@ export const refsWithFeedback = (board: TBoard, card: string): string[] => {
   return [...refs].filter((ref) => cardOf(ref) === card);
 };
 
+/** Whether an earlier version of the card holds reactions or comments, which the board's parts do not show. */
+export const historyHasFeedback = (board: TBoard, card: string) =>
+  (board.history[card] ?? []).some((version) =>
+    Object.values(version.threads).some(
+      (thread) =>
+        thread.comments.length > 0 || Object.keys(thread.reactions).length > 0,
+    ),
+  );
+
 /** An earlier version of a card, numbered from 1; the last version of a card that is not on the board is removed. */
 export type TEarlierVersion = {
   card: string;

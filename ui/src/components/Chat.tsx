@@ -332,6 +332,10 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
       { signal },
     );
   };
+  const collapse = () => {
+    setSeen(fromAgent);
+    setOpen(false);
+  };
   if (!open)
     return (
       <button
@@ -374,17 +378,20 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
         onPointerDown={resize}
       />
       <header className="flex items-center gap-2 border-b border-divider px-4 py-3">
-        <h2 className="text-sm font-semibold text-ink">Chat</h2>
+        <h2 className="text-sm font-semibold text-ink">
+          <button
+            type="button"
+            aria-label="Collapse the chat"
+            title="Collapse the chat to a button"
+            className="rounded px-1 hover:bg-surface-sunken"
+            onClick={collapse}
+          >
+            Chat
+          </button>
+        </h2>
         <Tally />
         <span className="ml-auto">
-          <IconButton
-            variant="close"
-            label="Close the chat"
-            onClick={() => {
-              setSeen(fromAgent);
-              setOpen(false);
-            }}
-          >
+          <IconButton variant="close" label="Close the chat" onClick={collapse}>
             <PanelRightClose className="size-4" />
           </IconButton>
         </span>

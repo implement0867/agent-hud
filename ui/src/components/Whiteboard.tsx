@@ -31,7 +31,7 @@ import type { TCardView } from "~/data/boardModel";
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Reaction } from "~/domain/actions";
 import { newId, refsWithFeedback, threadOf, versionsOf } from "~/domain/board";
-import type { TPoint } from "~/domain/board";
+import type { TArrow, TPoint } from "~/domain/board";
 import { reactionKeys, toggleReaction } from "~/domain/reactions";
 import { cardOf, isCardRef } from "~/domain/ref";
 import { useLayout } from "~/hooks/useLayout";
@@ -40,7 +40,7 @@ import { useSelection } from "~/hooks/useSelection";
 import { RemovedKind, useUndo } from "~/hooks/useUndo";
 import type { TRemoved } from "~/hooks/useUndo";
 import { SelectionKind, WhiteboardContext } from "~/hooks/useWhiteboard";
-import type { TEditing } from "~/hooks/useWhiteboard";
+import type { TEditing, TSelection } from "~/hooks/useWhiteboard";
 import { elementOf, rectOnBoard, textOf } from "~/lib/dom";
 import {
   centreOn,
@@ -169,6 +169,48 @@ const UndoToast = ({ removed, restore }: TUndoToastProps) => (
   </div>
 );
 
+type TLostArrowToastProps = { lost: { id: string; arrow: TArrow } };
+
+/** The toast that says the agent removed one of the user's arrows, with a button that puts it back. */
+const LostArrowToast = ({ lost: { id, arrow } }: TLostArrowToastProps) => {
+  const store = useStore();
+  return (
+    <div
+      role="status"
+      aria-label="Arrow removed by the agent"
+      className="toast bottom-32 gap-3 bg-ink"
+    >
+      The agent removed your arrow{" "}
+      <span className="font-mono">
+        {arrow.src} → {arrow.dst}
+      </span>
+      {arrow.text === "" ? "" : ` “${arrow.text}”`}
+      <TextButton
+        variant="onDark"
+        onClick={() => {
+          const { src, dst, text } = arrow;
+          void store
+            .act({ kind: ActionKind.enum.link, id, src, dst, text })
+            .then((taken) => {
+              if (taken) store.forgetLostArrow(id);
+            });
+        }}
+      >
+        Put it back
+      </TextButton>
+      <TextButton
+        variant="onDark"
+        label="Dismiss"
+        onClick={() => {
+          store.forgetLostArrow(id);
+        }}
+      >
+        OK
+      </TextButton>
+    </div>
+  );
+};
+
 /** A half-written comment on a part, with its card's number of earlier versions when the user last typed. */
 type TCommentDraft = { text: string; versions: number };
 
@@ -188,9 +230,18 @@ export const Whiteboard = () => {
     anchor,
     feedbackOpen,
     setFeedbackOpen,
-    select,
+    select: choose,
     deselectArrow,
   } = useSelection(world);
+  /** Selects; a selection on a card is a look at it, which clears the marks of the agent's last version. */
+  const select = useCallback(
+    (selection: TSelection, feedback?: boolean) => {
+      if (selection?.kind === SelectionKind.enum.ref)
+        store.sawChanges(cardOf(selection.ref));
+      choose(selection, feedback);
+    },
+    [choose, store],
+  );
   const { linking, beginLink } = useLinking(world, store.act, select);
   const linkingFrom = linking?.from ?? null;
   const {
@@ -216,6 +267,19 @@ export const Whiteboard = () => {
   );
   const trackPanel = useCallback(
     (element: HTMLElement) => trackChrome("panel", element),
+    [trackChrome],
+  );
+  /** The history docks at the left: the view moves right by its width while it is open, so that the cards stay in view. */
+  const trackHistory = useCallback(
+    (element: HTMLElement) => {
+      const untrack = trackChrome("history", element);
+      const shift = element.offsetLeft + element.offsetWidth + 16;
+      setView((current) => ({ ...current, x: current.x + shift }));
+      return () => {
+        untrack();
+        setView((current) => ({ ...current, x: current.x - shift }));
+      };
+    },
     [trackChrome],
   );
   const trackToolbar = useCallback(
@@ -254,6 +318,7 @@ export const Whiteboard = () => {
       if (editing?.card === card) return;
       const root = world.current;
       invariant(root !== null, "the canvas renders the world");
+      store.sawChanges(card);
       const { board } = store.read();
       setEditing({
         card,
@@ -503,6 +568,7 @@ export const Whiteboard = () => {
                 close={() => {
                   setHistory(null);
                 }}
+                measure={trackHistory}
               />
             )}
             {chips.map(({ id, at }) => (
@@ -538,6 +604,9 @@ export const Whiteboard = () => {
             ) : null}
             {removed !== null && (
               <UndoToast removed={removed} restore={restore} />
+            )}
+            {model.lostArrows[0] !== undefined && (
+              <LostArrowToast lost={model.lostArrows[0]} />
             )}
             <Toolbar
               scale={view.scale}

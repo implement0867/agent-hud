@@ -57,6 +57,10 @@ export type TBoardStore = {
   place: (id: string, sizes: ReadonlyMap<string, TSize>) => void;
   /** The view showed the cards: they are not fresh any more. */
   saw: (ids: string[]) => void;
+  /** The user looked at the card: the marks of the agent's last version go. */
+  sawChanges: (id: string) => void;
+  /** The user dismissed the loss of the arrow, or put it back. */
+  forgetLostArrow: (id: string) => void;
 };
 
 /** The board as the server last sent it, with the page's own state of its cards, for useSyncExternalStore. */
@@ -98,8 +102,26 @@ export const createBoardStore = (): TBoardStore => {
     publish();
   };
 
-  const act: TAct = (body) =>
-    live && socket !== null ? socket.act(body) : Promise.resolve(false);
+  /** Acts on the board; a put or an unlink by the user is expected, so that the change it brings is no news. */
+  const act: TAct = async (body) => {
+    if (!live || socket === null) return false;
+    const expected =
+      body.kind === ActionKind.enum.put || body.kind === ActionKind.enum.unlink
+        ? body.id
+        : null;
+    if (expected !== null)
+      update((current) => ({
+        ...current,
+        expected: [...current.expected, expected],
+      }));
+    const taken = await socket.act(body);
+    if (!taken && expected !== null)
+      update((current) => ({
+        ...current,
+        expected: current.expected.filter((id) => id !== expected),
+      }));
+    return taken;
+  };
 
   const placeOf = (id: string) =>
     connection.status === ConnectionStatus.enum.connecting
@@ -188,6 +210,19 @@ export const createBoardStore = (): TBoardStore => {
       update((current) => ({
         ...current,
         fresh: current.fresh.filter((id) => !ids.includes(id)),
+      }));
+    },
+    sawChanges: (id) => {
+      if (!Object.hasOwn(local.changed, id)) return;
+      update(({ changed: { [id]: _seen, ...rest }, ...current }) => ({
+        ...current,
+        changed: rest,
+      }));
+    },
+    forgetLostArrow: (id) => {
+      update((current) => ({
+        ...current,
+        lostArrows: current.lostArrows.filter((lost) => lost.id !== id),
       }));
     },
   };

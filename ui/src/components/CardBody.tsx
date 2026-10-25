@@ -65,7 +65,21 @@ type TPart = {
   dataRef: string | undefined;
   tone: TPartTone;
   onClick: ((event: MouseEvent) => void) | undefined;
+  /** New or reworded in the agent's last version, until the user looks at the card. */
+  changed: boolean;
 };
+
+/** The bar on a part that the agent's last version added or changed. */
+const changedTone = "shadow-[inset_3px_0_0_0_var(--color-success)]";
+
+/** The attributes of a changed part, for the page and its tests. */
+const changedMark = (changed: boolean) =>
+  changed
+    ? {
+        "data-changed": "",
+        title: "New or changed in the agent's last version",
+      }
+    : {};
 
 /**
  * The ref of the part that numberParts numbered, its tone, and its click, which selects it. An earlier version's parts
@@ -74,14 +88,23 @@ type TPart = {
 const usePart = (node: ExtraProps["node"]): TPart => {
   const number = partNumberOf(node);
   invariant(number !== null, "numberParts numbers each part");
-  const ref = partRef(useCardId(), number);
+  const id = useCardId();
+  const ref = partRef(id, number);
   const { selection, select, linkingFrom } = useWhiteboard();
   const readOnly = useReadOnly();
+  const { model } = useBoard();
   if (readOnly)
-    return { ref, dataRef: undefined, tone: "idle", onClick: undefined };
+    return {
+      ref,
+      dataRef: undefined,
+      tone: "idle",
+      onClick: undefined,
+      changed: false,
+    };
   return {
     ref,
     dataRef: ref,
+    changed: model.changed[id]?.parts.includes(number) ?? false,
     tone:
       linkingFrom === ref
         ? "linking"
@@ -108,7 +131,8 @@ const Part = ({ node, tag: Tag, children }: TPartProps) => {
   return (
     <Tag
       data-ref={part.dataRef}
-      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-24 transition-colors ${partTones[part.tone]}`}
+      {...changedMark(part.changed)}
+      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-24 transition-colors ${partTones[part.tone]} ${part.changed ? changedTone : ""}`}
       onClick={part.onClick}
     >
       {children}
@@ -147,10 +171,11 @@ const BodyRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => {
   return (
     <tr
       data-ref={part.dataRef}
+      {...changedMark(part.changed)}
       className={`group/part cursor-pointer transition-colors ${partTones[part.tone]}`}
       onClick={part.onClick}
     >
-      <td className="relative w-20">
+      <td className={`relative w-20 ${part.changed ? changedTone : ""}`}>
         <Marks target={part.ref} placement="row" />
       </td>
       {children}
@@ -184,7 +209,8 @@ const CodeLine = ({
   return (
     <span
       data-ref={part.dataRef}
-      className={`group/part relative block min-h-[1lh] cursor-pointer px-4 pr-28 transition-colors ${diff.success ? diffTones[diff.data] : ""} ${lineTones[part.tone]}`}
+      {...changedMark(part.changed)}
+      className={`group/part relative block min-h-[1lh] cursor-pointer px-4 pr-28 transition-colors ${diff.success ? diffTones[diff.data] : ""} ${lineTones[part.tone]} ${part.changed ? changedTone : ""}`}
       onClick={part.onClick}
     >
       {typeof line === "number" && (

@@ -1,6 +1,9 @@
-import type { TBoard, TCard, TPoint } from "~/domain/board";
+import { Author } from "~/domain/actions";
+import type { TArrow, TBoard, TCard, TPoint } from "~/domain/board";
 import { versionsOf } from "~/domain/board";
 import type { TAgentState, THeard, TSnapshot } from "~/domain/events";
+import { changesBetween } from "~/domain/parts";
+import type { TChanges } from "~/domain/parts";
 import { unsentOf } from "~/domain/pending";
 import type { TUnsent } from "~/domain/pending";
 import { invariant } from "~/lib/invariant";
@@ -31,6 +34,12 @@ export type TLocal = {
   dropped: Record<string, TPoint>;
   /** The places that the page gave cards that had none, until the server has them. */
   placed: Record<string, TPoint>;
+  /** What the agent's last version of each card changed, until the user looks at the card. */
+  changed: Record<string, TChanges>;
+  /** The user's arrows that the agent removed, until the user dismisses each or puts it back. */
+  lostArrows: { id: string; arrow: TArrow }[];
+  /** The cards the user put and the arrows the user removed from this page, whose next change is no news. */
+  expected: string[];
 };
 
 export const emptyLocal: TLocal = {
@@ -39,6 +48,9 @@ export const emptyLocal: TLocal = {
   dragging: null,
   dropped: {},
   placed: {},
+  changed: {},
+  lostArrows: [],
+  expected: [],
 };
 
 /** The snapshot in the shape that the page renders. */
@@ -51,14 +63,17 @@ export type TBoardModel = {
   waiting: number;
   cards: TCardView[];
   fresh: string[];
+  changed: Record<string, TChanges>;
+  lostArrows: { id: string; arrow: TArrow }[];
 };
 
-/** The cards that joined, left, got a new version or changed place from one board to the next. */
+/** The cards that joined, left, got a new version or changed place from one board to the next, and the arrows that went. */
 export type TBoardChange = {
   arrived: string[];
   left: string[];
   revised: string[];
   moved: string[];
+  lost: { id: string; arrow: TArrow }[];
 };
 
 const samePoint = (a: TPoint | undefined, b: TPoint) =>
@@ -78,6 +93,9 @@ export const diffBoards = (before: TBoard, after: TBoard): TBoardChange => ({
   moved: Object.entries(after.positions)
     .filter(([id, at]) => !samePoint(before.positions[id], at))
     .map(([id]) => id),
+  lost: Object.entries(before.arrows)
+    .filter(([id]) => !Object.hasOwn(after.arrows, id))
+    .map(([id, arrow]) => ({ id, arrow })),
 });
 
 /** The order with the ids last, in their order. */
@@ -94,10 +112,22 @@ const without = <T>(
     Object.entries(record).filter(([id, value]) => !drop(id, value)),
   );
 
+/** What the card's new version changed against the version before it, or null when it has none or changed no part. */
+const changesOf = (after: TBoard, id: string): TChanges | null => {
+  const previous = after.history[id]?.at(-1);
+  const card = after.cards[id];
+  if (previous === undefined || card === undefined) return null;
+  const changes = changesBetween(previous.card.md, card.md);
+  return changes.parts.length === 0 && changes.removed.length === 0
+    ? null
+    : changes;
+};
+
 /**
  * The page's state after the board changed: an arrival is fresh, and an arrival, a new version or a move puts the card
  * on top, as a touch by the user does. A card that left loses its place and its freshness; a drop the server confirmed
- * and a place the server has are done.
+ * and a place the server has are done. A new version that the user did not put from this page marks what it changed,
+ * and a user's arrow that went without the user's unlink from this page is lost; the expected ones are consumed.
  */
 export const afterChange = (
   local: TLocal,
@@ -105,8 +135,25 @@ export const afterChange = (
   after: TBoard,
 ): TLocal => {
   const left = (id: string) => change.left.includes(id);
+  const news = change.revised.filter((id) => !local.expected.includes(id));
+  const lost = change.lost.filter(
+    ({ id, arrow }) =>
+      arrow.author === Author.enum.user && !local.expected.includes(id),
+  );
+  const consumed = [...change.revised, ...change.lost.map(({ id }) => id)];
   return {
     ...local,
+    changed: {
+      ...without(local.changed, (id) => left(id) || news.includes(id)),
+      ...Object.fromEntries(
+        news.flatMap((id) => {
+          const changes = changesOf(after, id);
+          return changes === null ? [] : [[id, changes]];
+        }),
+      ),
+    },
+    lostArrows: [...local.lostArrows, ...lost],
+    expected: local.expected.filter((id) => !consumed.includes(id)),
     touched: [change.arrived, change.revised, change.moved].reduce(
       raise,
       local.touched.filter((id) => !left(id)),
@@ -140,6 +187,8 @@ export const modelOf = (snapshot: TSnapshot, local: TLocal): TBoardModel => {
     unsent: unsentOf(snapshot.pending),
     waiting: snapshot.waiting,
     fresh: local.fresh,
+    changed: local.changed,
+    lostArrows: local.lostArrows,
     cards: Object.entries(board.cards).map(([id, card]) => ({
       id,
       card,

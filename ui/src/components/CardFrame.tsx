@@ -1,4 +1,4 @@
-import { Bot, Pencil, Trash2, User } from "lucide-react";
+import { Bot, MessageCircle, Pencil, Trash2, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
@@ -9,6 +9,7 @@ import { MarkdownEditor } from "~/components/MarkdownEditor";
 import type { TCardView } from "~/data/boardModel";
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Author } from "~/domain/actions";
+import { historyHasFeedback } from "~/domain/board";
 import type { TPoint } from "~/domain/board";
 import {
   SelectionKind,
@@ -108,6 +109,8 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   );
   const mine = card.author === Author.enum.user;
   const AuthorIcon = mine ? User : Bot;
+  const changes = model.changed[id];
+  const archived = historyHasFeedback(model.board, id);
   /** The width that a resize shows before the server has it, over the width the card had when the resize started. */
   const [resizing, setResizing] = useState<{
     width: number;
@@ -211,12 +214,24 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
             unsent
           </span>
         ) : null}
+        {changes !== undefined && (
+          <span
+            data-changed-by-agent=""
+            title="The agent's last version; a click on the card clears the marks"
+            className="pill bg-success-soft text-success-strong"
+          >
+            agent: {changes.parts.length} new
+            {changes.removed.length > 0
+              ? `, ${String(changes.removed.length)} removed`
+              : ""}
+          </span>
+        )}
         {versions > 0 && (
           <button
             type="button"
             aria-label={`History of ${id}`}
-            title={`Version ${String(versions + 1)}: show the earlier versions and their feedback`}
-            className="pill bg-surface-sunken text-ink-muted hover:bg-accent-soft hover:text-accent-strong"
+            title={`Version ${String(versions + 1)}: show the earlier versions${archived ? ", with feedback in the history" : " and their feedback"}`}
+            className="pill flex items-center gap-0.5 bg-surface-sunken text-ink-muted hover:bg-accent-soft hover:text-accent-strong"
             onPointerDown={(event) => {
               event.stopPropagation();
             }}
@@ -226,6 +241,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
             }}
           >
             v{versions + 1}
+            {archived ? <MessageCircle className="size-2.5" /> : null}
           </button>
         )}
         <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/card:opacity-100">
@@ -261,6 +277,21 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
         {editor === null ? (
           <div key={versions} className="animate-pop">
             <CardBody id={id} md={card.md} />
+            {changes !== undefined && changes.removed.length > 0 ? (
+              <ul
+                aria-label={`Removed from ${id} by the agent`}
+                className="mt-2 border-t border-divider pt-2 text-xs text-ink-muted"
+              >
+                {changes.removed.map((text, index) => (
+                  <li
+                    key={`${String(index)} ${text}`}
+                    className="line-through decoration-danger/60"
+                  >
+                    {text}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : (
           <MarkdownEditor

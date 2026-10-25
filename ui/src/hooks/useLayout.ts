@@ -13,7 +13,7 @@ export type TLayout = {
   cards: Record<string, TSize>;
 };
 
-type TChrome = "viewport" | "chat" | "panel" | "toolbar";
+type TChrome = "viewport" | "chat" | "panel" | "toolbar" | "history";
 
 const sizeOf = (element: HTMLElement): TSize => ({
   width: element.offsetWidth,
@@ -44,11 +44,15 @@ export const useLayout = () => {
     const chat = chrome.current.get("chat");
     const panel = chrome.current.get("panel");
     const toolbar = chrome.current.get("toolbar");
+    const history = chrome.current.get("history");
+    const rectOf = (element: HTMLElement | undefined) =>
+      element === undefined
+        ? null
+        : { x: element.offsetLeft, y: element.offsetTop, ...sizeOf(element) };
     const area = freeArea(
       viewport === undefined ? { width: 0, height: 0 } : sizeOf(viewport),
-      chat === undefined
-        ? null
-        : { x: chat.offsetLeft, y: chat.offsetTop, ...sizeOf(chat) },
+      rectOf(chat),
+      rectOf(history),
     );
     const next = {
       panel: panel === undefined ? null : sizeOf(panel),
@@ -82,7 +86,7 @@ export const useLayout = () => {
     [measure],
   );
 
-  /** Tracks the viewport, the chat, the panel or the toolbar; returns the cleanup. */
+  /** Tracks the viewport, the chat, the panel, the toolbar or the history; returns the cleanup. */
   const trackChrome = useCallback(
     (key: TChrome, element: HTMLElement) =>
       observe(chrome.current, key, element),
