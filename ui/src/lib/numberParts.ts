@@ -1,7 +1,11 @@
 import type { Element, ElementContent, Root, RootContent } from "hast";
+import { z } from "zod";
 
-import { ColumnKind, columnFromHeader } from "~/lib/columns";
-import type { TColumn } from "~/lib/columns";
+import { ColumnKind, InputKind, columnFromHeader } from "~/domain/columns";
+import type { TColumn, TInputKind } from "~/domain/columns";
+
+/** The mark of a line of a diff: added or removed. */
+export const DiffKind = z.enum(["add", "remove"]);
 
 const textOf = (node: Root | RootContent): string =>
   node.type === "text"
@@ -74,7 +78,8 @@ const markLines = (pre: Element, code: Element, lines: Element[]) => {
       line.properties["dataLine"] = start + index;
     const first = textOf(line).charAt(0);
     if (lang === "diff" && (first === "+" || first === "-"))
-      line.properties["dataDiff"] = first === "+" ? "add" : "remove";
+      line.properties["dataDiff"] =
+        first === "+" ? DiffKind.enum.add : DiffKind.enum.remove;
   });
 };
 
@@ -83,7 +88,8 @@ const markLines = (pre: Element, code: Element, lines: Element[]) => {
  * data-part on each heading, paragraph outside a list item, list item, table body row and line of a code block is its
  * number in the document, from 1;
  * a code line has data-line, its number in the file, when its fence has file= or start=, and data-diff in a diff;
- * each header cell shows its title, and each cell of an input column has data-input (row/column), data-kind and data-options.
+ * each header cell shows its title, and each cell of an input column has data-row, data-column, data-kind and data-options,
+ * which inputOf reads back.
  */
 export const numberParts = () => (tree: Root) => {
   let count = 0;
@@ -131,7 +137,8 @@ export const numberParts = () => (tree: Root) => {
         const column = columns[index];
         if (column === undefined || column.kind === ColumnKind.enum.static)
           return;
-        cell.properties["dataInput"] = `${String(count)}/${String(index + 1)}`;
+        cell.properties["dataRow"] = count;
+        cell.properties["dataColumn"] = index + 1;
         cell.properties["dataKind"] = column.kind;
         cell.properties["dataOptions"] = column.options;
       });
@@ -141,4 +148,39 @@ export const numberParts = () => (tree: Root) => {
     }
   };
   visit(tree, tree);
+};
+
+const inputSchema = z.object({
+  dataRow: z.number().int().positive(),
+  dataColumn: z.number().int().positive(),
+  dataKind: InputKind,
+  dataOptions: z.array(z.string()),
+});
+
+/** The number that numberParts gave the part, or null for an element that is not a part. */
+export const partNumberOf = (node: Element | undefined): number | null => {
+  const number = node?.properties["dataPart"];
+  return typeof number === "number" ? number : null;
+};
+
+/** The input of a cell in an input column: the row's part number, the column's number from 1, the kind and the options. */
+export type TInput = {
+  row: number;
+  column: number;
+  kind: TInputKind;
+  options: string[];
+};
+
+/** The input that numberParts gave the cell, or null for a cell of a column of text. */
+export const inputOf = (cell: Element): TInput | null => {
+  if (cell.properties["dataKind"] === undefined) return null;
+  const { dataRow, dataColumn, dataKind, dataOptions } = inputSchema.parse(
+    cell.properties,
+  );
+  return {
+    row: dataRow,
+    column: dataColumn,
+    kind: dataKind,
+    options: dataOptions,
+  };
 };

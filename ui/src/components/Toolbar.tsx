@@ -10,151 +10,78 @@ import {
   SendHorizontal,
   StickyNote,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
 
-import { assertNever } from "~/lib/assertNever";
+import { IconButton } from "~/components/IconButton";
+import { useBoard, useStore } from "~/data/context";
+import { ActionKind } from "~/domain/actions";
+import { describeHeard } from "~/domain/events";
+import { TallyKind, tally } from "~/domain/reactions";
+import type { TTallyKind } from "~/domain/reactions";
+import { useWhiteboard } from "~/hooks/useWhiteboard";
 import { mod } from "~/lib/keys";
-import { reactionIcons, reactionTones, reactionsOf } from "~/lib/reactions";
-import { useTools } from "~/lib/whiteboard";
-import { ActionKind, Reaction } from "~/schemas/actions";
-import type { THeard } from "~/schemas/events";
+import { reactionIcons, reactionTones } from "~/theme";
 
-const ToolButton = ({
-  label,
-  shortcut,
-  pressed,
-  onClick,
-  children,
-}: {
-  label: string;
-  shortcut: string;
-  pressed?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) => (
-  <button
-    type="button"
-    aria-label={label}
-    aria-pressed={pressed}
-    title={`${label} (${shortcut})`}
-    className={`flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-sm transition-colors ${pressed === true ? "bg-sky-100 text-sky-800" : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"}`}
-    onClick={onClick}
-  >
-    {children}
-  </button>
-);
+const tallyLooks: Record<TTallyKind, { Icon: LucideIcon; tone: string }> = {
+  approve: { Icon: reactionIcons.approve, tone: reactionTones.approve },
+  reject: { Icon: reactionIcons.reject, tone: reactionTones.reject },
+  question: { Icon: reactionIcons.question, tone: reactionTones.question },
+  comments: { Icon: MessageCircle, tone: "bg-accent-soft text-accent-strong" },
+};
 
-const Divider = () => <span className="mx-1 h-5 w-px bg-stone-200" />;
+const Divider = () => <span className="mx-1 h-5 w-px bg-outline" />;
 
 /** A chip for each kind of feedback on the board, by either author; a click shows the next part with it. */
-const Tally = ({ show }: { show: (ref: string) => void }) => {
-  const { board } = useTools();
+const Tally = () => {
+  const { model } = useBoard();
+  const { show } = useWhiteboard();
   const [turn, setTurn] = useState(0);
-  const threads = Object.entries(board.threads);
-  const groups = [
-    ...Reaction.options.map((reaction) => ({
-      key: reaction,
-      Icon: reactionIcons[reaction],
-      tone: reactionTones[reaction],
-      refs: threads
-        .filter(([, thread]) =>
-          reactionsOf(thread).some(([, reacted]) => reacted === reaction),
-        )
-        .map(([ref]) => ref),
-    })),
-    {
-      key: "comments",
-      Icon: MessageCircle,
-      tone: "bg-sky-100 text-sky-700",
-      refs: threads
-        .filter(([, thread]) => thread.comments.length > 0)
-        .map(([ref]) => ref),
-    },
-  ].filter(({ refs }) => refs.length > 0);
-  if (groups.length === 0) return null;
+  const refs = tally(model.board.threads);
+  const kinds = TallyKind.options.filter((kind) => refs[kind].length > 0);
+  if (kinds.length === 0) return null;
   return (
     <>
-      {groups.map(({ key, Icon, tone, refs }) => (
-        <button
-          key={key}
-          type="button"
-          title={`Show the next part with ${key}`}
-          className={`flex h-7 items-center gap-1 rounded-full px-2 text-xs font-medium ${tone}`}
-          onClick={() => {
-            const ref = refs[turn % refs.length];
-            if (ref !== undefined) show(ref);
-            setTurn(turn + 1);
-          }}
-        >
-          <Icon className="size-3.5" strokeWidth={2.5} />
-          {refs.length}
-        </button>
-      ))}
+      {kinds.map((kind) => {
+        const { Icon, tone } = tallyLooks[kind];
+        const found = refs[kind];
+        return (
+          <button
+            key={kind}
+            type="button"
+            title={`Show the next part with ${kind}`}
+            className={`flex h-7 items-center gap-1 rounded-full px-2 text-xs font-medium ${tone}`}
+            onClick={() => {
+              const ref = found[turn % found.length];
+              if (ref !== undefined) show(ref);
+              setTurn(turn + 1);
+            }}
+          >
+            <Icon className="size-3.5" strokeWidth={2.5} />
+            {found.length}
+          </button>
+        );
+      })}
       <Divider />
     </>
   );
 };
 
-/** One line for a pending action, as the agent will hear it. */
-const describe = ({ body, parts }: THeard): string => {
-  const text = (ref: string) => {
-    const part = parts[ref];
-    return part === undefined ? ref : `${ref} "${part}"`;
-  };
-  switch (body.kind) {
-    case ActionKind.enum.put:
-      return `new note ${body.id}`;
-    case "edit":
-      return `edit ${body.id}`;
-    case ActionKind.enum.remove:
-      return `remove ${body.id}`;
-    case ActionKind.enum.restore:
-      return `restore ${body.id}`;
-    case ActionKind.enum.react:
-      return `${body.reaction} ${text(body.ref)}`;
-    case ActionKind.enum.unreact:
-      return `no reaction on ${text(body.ref)}`;
-    case ActionKind.enum.comment:
-      return `comment on ${text(body.ref)}: ${body.text}`;
-    case ActionKind.enum.say:
-      return body.text;
-    case ActionKind.enum.fill:
-      return `${body.ref} = ${JSON.stringify(body.value)}`;
-    case ActionKind.enum.link:
-      return `arrow ${body.src} → ${body.dst}${body.text === "" ? "" : ` "${body.text}"`}`;
-    case ActionKind.enum.unlink:
-      return `remove arrow ${body.id}`;
-    case ActionKind.enum.move:
-      return `move ${body.id}`;
-    case ActionKind.enum.resize:
-      return `resize ${body.id}`;
-    case ActionKind.enum.place:
-      return `place ${body.id}`;
-    case ActionKind.enum.clear:
-      return "clear the board";
-    case ActionKind.enum.send:
-      return "send";
-    default:
-      return assertNever(body);
-  }
-};
+const sendTone =
+  "flex h-9 items-center bg-accent text-white transition-colors hover:bg-accent-strong disabled:bg-transparent disabled:text-ink-faint";
 
-/** Sends the user's actions since the last send to the agent, as one turn; the chevron lists them. */
-const SendButton = ({
-  pending,
-  send,
-}: {
-  pending: THeard[];
-  send: () => void;
-}) => {
+type TSendButtonProps = { send: () => void };
+
+/** Sends the user's actions since the last send to the agent, as one turn; the chevron lists them, and Esc or a press outside closes the list. */
+const SendButton = ({ send }: TSendButtonProps) => {
+  const { model } = useBoard();
   const [open, setOpen] = useState(false);
-  const unsent = pending.length;
+  const unsent = model.pending.length;
   const box = useRef<HTMLDivElement>(null);
-  /** Esc, and a press outside the list, close it. */
   useEffect(() => {
     if (!open) return;
-    const controller = new AbortController();
+    const listening = new AbortController();
+    const { signal } = listening;
     document.addEventListener(
       "keydown",
       (event) => {
@@ -162,7 +89,7 @@ const SendButton = ({
         event.stopPropagation();
         setOpen(false);
       },
-      { capture: true, signal: controller.signal },
+      { capture: true, signal },
     );
     document.addEventListener(
       "pointerdown",
@@ -173,10 +100,10 @@ const SendButton = ({
         )
           setOpen(false);
       },
-      { capture: true, signal: controller.signal },
+      { capture: true, signal },
     );
     return () => {
-      controller.abort();
+      listening.abort();
     };
   }, [open]);
   return (
@@ -186,7 +113,7 @@ const SendButton = ({
         aria-label="Send to the agent"
         title={`Send your changes to the agent (${mod}↵)`}
         disabled={unsent === 0}
-        className="flex h-9 items-center gap-1.5 rounded-l-xl bg-sky-600 px-3 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:bg-transparent disabled:text-stone-400"
+        className={`${sendTone} gap-1.5 rounded-l-xl px-3 text-sm font-medium`}
         onClick={send}
       >
         <SendHorizontal className="size-4" />
@@ -206,7 +133,7 @@ const SendButton = ({
         aria-expanded={open}
         title="What goes to the agent on Send"
         disabled={unsent === 0}
-        className="flex h-9 items-center rounded-r-xl bg-sky-600 px-1 text-white transition-colors hover:bg-sky-700 disabled:bg-transparent disabled:text-stone-400"
+        className={`${sendTone} rounded-r-xl px-1`}
         onClick={() => {
           setOpen(!open);
         }}
@@ -218,135 +145,141 @@ const SendButton = ({
       {open && unsent > 0 ? (
         <ul
           aria-label="Pending actions"
-          className="absolute bottom-11 left-0 max-h-64 w-80 overflow-y-auto rounded-xl bg-white p-2 text-xs text-stone-700 shadow-xl ring-1 ring-stone-900/10"
+          className="panel absolute bottom-11 left-0 max-h-64 w-80 overflow-y-auto p-2 text-xs text-ink-soft"
         >
-          {pending.map((heard) => (
-            <li
-              key={heard.id}
-              className="truncate px-2 py-1"
-              title={describe(heard)}
-            >
-              {describe(heard)}
-            </li>
-          ))}
+          {model.pending.map((heard) => {
+            const line = describeHeard(heard);
+            return (
+              <li key={heard.id} className="truncate px-2 py-1" title={line}>
+                {line}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>
   );
 };
 
+type TToolbarProps = {
+  scale: number;
+  /** Zooms in by the steps, or out by negative steps. */
+  zoom: (steps: number) => void;
+  reset: () => void;
+  fit: () => void;
+  note: () => void;
+  send: () => void;
+  history: boolean;
+  toggleHistory: () => void;
+  shortcuts: boolean;
+  toggleShortcuts: () => void;
+  /** Takes the toolbar's element, so that the chat sits above it on a narrow screen; returns what to do when it goes. */
+  measure: (element: HTMLElement) => () => void;
+};
+
+/** The board's tools at the bottom: send, the feedback tally, notes, history, shortcuts, clear and the view. */
 export const Toolbar = ({
   scale,
   zoom,
   reset,
   fit,
   note,
-  clear,
-  pending,
   send,
   history,
   toggleHistory,
   shortcuts,
   toggleShortcuts,
-  onHeight,
-}: {
-  scale: number;
-  zoom: (factor: number) => void;
-  reset: () => void;
-  fit: () => void;
-  note: () => void;
-  clear: () => void;
-  pending: THeard[];
-  send: () => void;
-  history: boolean;
-  toggleHistory: () => void;
-  shortcuts: boolean;
-  toggleShortcuts: () => void;
-  /** Gets the toolbar's height when it changes, so that the chat sits above it on a narrow screen. */
-  onHeight: (height: number) => void;
-}) => {
-  const { board, show } = useTools();
-  const nav = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const element = nav.current;
-    if (element === null) return;
-    const observer = new ResizeObserver(() => {
-      onHeight(element.offsetHeight);
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-    };
-  }, [onHeight]);
+  measure,
+}: TToolbarProps) => {
+  const { model } = useBoard();
+  const store = useStore();
   return (
     <nav
-      ref={nav}
+      ref={measure}
       aria-label="Tools"
-      className="pointer-events-auto absolute bottom-4 left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-0.5 rounded-2xl bg-white p-1 shadow-xl ring-1 ring-stone-900/10"
+      className="panel pointer-events-auto absolute bottom-4 left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-0.5 p-1"
     >
-      <SendButton pending={pending} send={send} />
+      <SendButton send={send} />
       <Divider />
-      <Tally show={show} />
-      <ToolButton label="New note" shortcut="N" onClick={note}>
+      <Tally />
+      <IconButton
+        variant="tool"
+        label="New note"
+        title="New note (N)"
+        onClick={note}
+      >
         <StickyNote className="size-4" />
         Note
-      </ToolButton>
-      <ToolButton
+      </IconButton>
+      <IconButton
+        variant="tool"
         label="History"
-        shortcut="H"
+        title="History (H)"
         pressed={history}
         onClick={toggleHistory}
       >
         <History className="size-4" />
-      </ToolButton>
-      <ToolButton
+      </IconButton>
+      <IconButton
+        variant="tool"
         label="Shortcuts"
-        shortcut="?"
+        title="Shortcuts (?)"
         pressed={shortcuts}
         onClick={toggleShortcuts}
       >
         <Keyboard className="size-4" />
-      </ToolButton>
-      <button
-        type="button"
-        aria-label="Clear the board"
+      </IconButton>
+      <IconButton
+        variant="danger"
+        label="Clear the board"
         title="Clear the board: the cards go to the history"
-        disabled={Object.keys(board.cards).length === 0}
-        className="flex h-9 min-w-9 items-center justify-center rounded-xl px-2 text-stone-600 transition-colors hover:bg-rose-50 hover:text-rose-700 disabled:text-stone-300 disabled:hover:bg-transparent"
+        disabled={model.cards.length === 0}
         onClick={() => {
           if (window.confirm("Clear the board? The cards go to the history."))
-            clear();
+            void store.act({ kind: ActionKind.enum.clear });
         }}
       >
         <Eraser className="size-4" />
-      </button>
+      </IconButton>
       <Divider />
-      <ToolButton
+      <IconButton
+        variant="tool"
         label="Zoom out"
-        shortcut="-"
+        title="Zoom out (-)"
         onClick={() => {
-          zoom(1 / 1.25);
+          zoom(-1);
         }}
       >
         <Minus className="size-4" />
-      </ToolButton>
-      <ToolButton label="Reset zoom" shortcut="0" onClick={reset}>
+      </IconButton>
+      <IconButton
+        variant="tool"
+        label="Reset zoom"
+        title="Reset zoom (0)"
+        onClick={reset}
+      >
         <span className="w-10 text-xs tabular-nums">
           {Math.round(scale * 100)}%
         </span>
-      </ToolButton>
-      <ToolButton
+      </IconButton>
+      <IconButton
+        variant="tool"
         label="Zoom in"
-        shortcut="+"
+        title="Zoom in (+)"
         onClick={() => {
-          zoom(1.25);
+          zoom(1);
         }}
       >
         <Plus className="size-4" />
-      </ToolButton>
-      <ToolButton label="Fit all cards" shortcut="1" onClick={fit}>
+      </IconButton>
+      <IconButton
+        variant="tool"
+        label="Fit all cards"
+        title="Fit all cards (1)"
+        onClick={fit}
+      >
         <Maximize2 className="size-4" />
-      </ToolButton>
+      </IconButton>
     </nav>
   );
 };

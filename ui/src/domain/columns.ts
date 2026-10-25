@@ -2,18 +2,24 @@ import { z } from "zod";
 
 import { invariant } from "~/lib/invariant";
 
-export const ColumnKind = z.enum([
-  "static",
-  "text",
-  "check",
-  "number",
-  "select",
-]);
+export const ColumnKind = z
+  .enum(["static", "text", "check", "number", "select"])
+  .describe(
+    "What a table column's cells hold: the markdown's text, or an input the user fills",
+  );
 
-export type TColumn = {
-  kind: z.infer<typeof ColumnKind>;
-  options: string[];
-};
+/** The kinds of column whose cells are inputs. */
+export const InputKind = ColumnKind.exclude([ColumnKind.enum.static]);
+
+export const columnSchema = z.strictObject({
+  kind: ColumnKind,
+  options: z
+    .array(z.string())
+    .describe("The choices of a select column; empty for the other kinds"),
+});
+
+export type TColumn = z.infer<typeof columnSchema>;
+export type TInputKind = z.infer<typeof InputKind>;
 
 /** The title and column a header cell names, as the server reads them: cost {number}, done {check}, note {text}, size {S, M, L}. */
 export const columnFromHeader = (

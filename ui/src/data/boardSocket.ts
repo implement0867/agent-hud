@@ -1,9 +1,9 @@
 import { assertNever } from "~/lib/assertNever";
 import { invariant } from "~/lib/invariant";
-import { requestSchema } from "~/schemas/actions";
-import type { TBody } from "~/schemas/actions";
-import { EventKind, serverEventSchema } from "~/schemas/events";
-import type { TSnapshot } from "~/schemas/events";
+import { requestSchema } from "~/domain/actions";
+import type { TBody } from "~/domain/actions";
+import { EventKind, serverEventSchema } from "~/domain/events";
+import type { TSnapshot } from "~/domain/events";
 
 export type TBoardSocket = {
   /** Resolves true when the server takes the action, or false when it rejects it or the connection closes first. */

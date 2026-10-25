@@ -1,7 +1,10 @@
-import { BoardView } from "~/components/BoardView";
+import { Whiteboard } from "~/components/Whiteboard";
+import { BoardProvider } from "~/data/BoardProvider";
 
 export const App = () => (
   <main className="flex h-screen flex-col">
-    <BoardView />
+    <BoardProvider>
+      <Whiteboard />
+    </BoardProvider>
   </main>
 );

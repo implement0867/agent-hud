@@ -229,7 +229,6 @@ async def test_a_fast_drag_from_the_dot_draws_an_arrow_and_its_label_selects_it_
         case other:
             pytest.fail(f"the agent heard {other}, not a link from options/2 to questions/1")
 
-    await page.keyboard.press("Escape")
     await page.mouse.click(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2)
     await expect(page.get_by_label("Feedback on options/2")).to_have_count(0)
 
@@ -686,7 +685,7 @@ async def test_a_cell_and_a_header_open_no_feedback_and_c_opens_the_selections(p
     await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
     card = page.locator('article[data-ref="tasks"]')
     await card.locator("header").click(position={"x": 150, "y": 10})
-    await expect(card).to_have_class(re.compile("ring-sky-400"))
+    await expect(card).to_have_class(re.compile("ring-accent-ring"))
     await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
     await page.keyboard.press("c")
     await expect(page.get_by_label("Feedback on tasks")).to_be_visible()

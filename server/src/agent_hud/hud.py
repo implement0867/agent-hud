@@ -18,6 +18,7 @@ from agent_hud.models.actions import (
     Resize,
     Send,
     TActionId,
+    TBody,
     TRef,
     Unreact,
 )
@@ -37,9 +38,15 @@ def hear(board: Board, action: Action) -> Heard:
     return Heard(id=action.id, author=action.author, body=body, parts=board.part_texts(action.body))
 
 
-def last_on(actions: list[Action], ref: TRef, kinds: tuple[type[React | Unreact | Fill], ...]) -> int:
-    """The index of the last action of the kinds on the ref."""
-    return max(n for n, action in enumerate(actions) if isinstance(action.body, kinds) and action.body.ref == ref)
+def setting(body: TBody) -> tuple[str, TRef] | None:
+    """What the action sets, which a later action that sets the same replaces: the reaction on a ref, or a cell's value."""
+    match body:
+        case React(ref=ref) | Unreact(ref=ref):
+            return "reaction", ref
+        case Fill(ref=ref):
+            return "value", ref
+        case _:
+            return None
 
 
 def net(actions: list[Action], board: Board) -> list[Action]:
@@ -47,24 +54,24 @@ def net(actions: list[Action], board: Board) -> list[Action]:
     The actions as a turn carries them, on the board at its start: without the moves, resizes and places, with the last of
     the reactions on a part and the last of the fills of a cell, and without those where the turn ends as it began.
     """
-    kept: list[Action] = []
-    for n, action in enumerate(actions):
+    last = {key: n for n, action in enumerate(actions) if (key := setting(action.body)) is not None}
+
+    def carries(n: int, action: Action) -> bool:
+        if (key := setting(action.body)) is not None and last[key] != n:
+            return False
         match action.body:
             case Move() | Resize() | Place() | Send():
-                continue
-            case React(ref=ref) | Unreact(ref=ref):
-                if n != last_on(actions, ref, (React, Unreact)):
-                    continue
-                reaction = action.body.reaction if isinstance(action.body, React) else None
-                if reaction == board.threads.get(ref, Thread()).reactions.get(action.author):
-                    continue
+                return False
+            case React(ref=ref, reaction=reaction):
+                return reaction != board.threads.get(ref, Thread()).reactions.get(action.author)
+            case Unreact(ref=ref):
+                return action.author in board.threads.get(ref, Thread()).reactions
             case Fill(ref=ref, value=value):
-                if n != last_on(actions, ref, (Fill,)) or value == board.values.get(ref):
-                    continue
+                return value != board.values.get(ref)
             case _:
-                pass
-        kept.append(action)
-    return kept
+                return True
+
+    return [action for n, action in enumerate(actions) if carries(n, action)]
 
 
 class Hud:

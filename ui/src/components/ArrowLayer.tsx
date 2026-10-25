@@ -2,11 +2,15 @@ import { Trash2 } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
 import type { RefObject } from "react";
 
-import { arrowCurve, endOnBoard } from "~/lib/geometry";
-import { SelectionKind, useTools } from "~/lib/whiteboard";
-import { ActionKind, Author } from "~/schemas/actions";
-import type { TArrow, TPoint } from "~/schemas/board";
+import { useBoard, useStore } from "~/data/context";
+import { ActionKind, Author } from "~/domain/actions";
+import type { TArrow, TPoint } from "~/domain/board";
+import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
+import type { TLinking } from "~/hooks/useWhiteboard";
+import { endOnBoard } from "~/lib/dom";
+import { arrowCurve } from "~/lib/geometry";
 
+/** An arrow as measured on the board: its path and the middle of the path, where its label goes. */
 type TDrawn = {
   id: string;
   arrow: TArrow;
@@ -14,18 +18,33 @@ type TDrawn = {
   middle: TPoint;
 };
 
+type TArrowTone = "rest" | "selected" | "drawing";
+
+const strokeTones: Record<TArrowTone, string> = {
+  rest: "stroke-ink-muted",
+  selected: "stroke-accent",
+  drawing: "stroke-draw",
+};
+
+const headTones: Record<TArrowTone, string> = {
+  rest: "fill-ink-muted",
+  selected: "fill-accent",
+  drawing: "fill-draw",
+};
+
+type TArrowLabelProps = { drawn: TDrawn; selected: boolean };
+
+/** The label of an arrow: a button that selects the arrow, or, while it is selected, an input for the text and a remove button. */
 const ArrowLabel = ({
   drawn: { id, arrow, middle },
   selected,
-}: {
-  drawn: TDrawn;
-  selected: boolean;
-}) => {
-  const { act, select, unlink } = useTools();
+}: TArrowLabelProps) => {
+  const store = useStore();
+  const { select, unlink } = useWhiteboard();
   const [text, setText] = useState(arrow.text);
   const relabel = () => {
     if (text !== arrow.text)
-      void act({
+      void store.act({
         kind: ActionKind.enum.link,
         id,
         src: arrow.src,
@@ -38,7 +57,7 @@ const ArrowLabel = ({
       <button
         type="button"
         aria-label={`Arrow ${id}: ${arrow.text}`}
-        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-[calc(100%+4px)] cursor-pointer rounded-full bg-white px-2 py-0.5 text-xs whitespace-nowrap text-stone-600 shadow-sm ring-1 ring-stone-200 hover:ring-sky-300"
+        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-[calc(100%+4px)] cursor-pointer rounded-full bg-surface px-2 py-0.5 text-xs whitespace-nowrap text-ink-soft shadow-sm ring-1 ring-outline hover:ring-accent-ring"
         style={{ left: middle.x, top: middle.y }}
         onPointerDown={(event) => {
           event.stopPropagation();
@@ -53,7 +72,7 @@ const ArrowLabel = ({
     );
   return (
     <span
-      className="pointer-events-auto absolute z-10 flex -translate-x-1/2 -translate-y-[calc(100%+4px)] animate-pop items-center gap-1 rounded-full bg-white py-0.5 pr-0.5 pl-2 shadow-md ring-2 ring-sky-400"
+      className="pointer-events-auto absolute z-10 flex -translate-x-1/2 -translate-y-[calc(100%+4px)] animate-pop items-center gap-1 rounded-full bg-surface py-0.5 pr-0.5 pl-2 shadow-md ring-2 ring-accent-ring"
       style={{ left: middle.x, top: middle.y }}
       onPointerDown={(event) => {
         event.stopPropagation();
@@ -65,9 +84,7 @@ const ArrowLabel = ({
       <input
         aria-label={`Text of arrow ${id}`}
         placeholder="label"
-        ref={(element) => {
-          element?.focus();
-        }}
+        autoFocus
         className="field-sizing-content min-w-12 bg-transparent text-xs outline-none"
         value={text}
         onChange={(event) => {
@@ -86,7 +103,7 @@ const ArrowLabel = ({
       <button
         type="button"
         aria-label={`Remove arrow ${id}`}
-        className="grid size-5 place-items-center rounded-full text-stone-400 hover:bg-rose-50 hover:text-rose-600"
+        className="grid size-5 place-items-center rounded-full text-ink-faint hover:bg-danger-faint hover:text-danger"
         onPointerDown={(event) => {
           event.preventDefault();
         }}
@@ -100,21 +117,21 @@ const ArrowLabel = ({
   );
 };
 
-/**
- * The arrows between parts, measured from the cards after each render of the board, with each label above the middle of its arrow.
- * A click on an arrow or its label selects it, to label or remove it. The arrows and their labels paint under the cards,
- * so that neither covers a card's controls; the selected label paints over them, with its input.
- */
-export const ArrowLayer = ({
-  world,
-  scale,
-  layout,
-}: {
+type TArrowLayerProps = {
   world: RefObject<HTMLDivElement | null>;
-  scale: number;
-  layout: unknown;
-}) => {
-  const { board, selection, select, linking } = useTools();
+  /** The arrow that the user draws, which follows the pointer. */
+  linking: TLinking | null;
+};
+
+/**
+ * The arrows between parts, measured from the cards whenever the board or a card's size changes, with each label above
+ * the middle of its arrow. A click on an arrow or its label selects it, to label or remove it. The arrows and their
+ * labels paint under the cards, so that neither covers a card's controls; the selected label paints over them, with
+ * its input.
+ */
+export const ArrowLayer = ({ world, linking }: TArrowLayerProps) => {
+  const { model } = useBoard();
+  const { selection, select } = useWhiteboard();
   const [drawn, setDrawn] = useState<TDrawn[]>([]);
 
   useLayoutEffect(() => {
@@ -122,9 +139,9 @@ export const ArrowLayer = ({
     if (root === null) return;
     const measure = () => {
       setDrawn(
-        Object.entries(board.arrows).flatMap(([id, arrow]) => {
-          const from = endOnBoard(root, arrow.src, scale);
-          const to = endOnBoard(root, arrow.dst, scale);
+        Object.entries(model.board.arrows).flatMap(([id, arrow]) => {
+          const from = endOnBoard(root, arrow.src);
+          const to = endOnBoard(root, arrow.dst);
           return from === null || to === null
             ? []
             : [{ id, arrow, ...arrowCurve(from, to) }];
@@ -137,7 +154,7 @@ export const ArrowLayer = ({
     return () => {
       observer.disconnect();
     };
-  }, [board, world, scale, layout]);
+  }, [model, world]);
 
   const band =
     linking === null
@@ -156,7 +173,7 @@ export const ArrowLayer = ({
         aria-hidden="true"
       >
         <defs>
-          {["stone", "sky", "violet"].map((tone) => (
+          {Object.entries(headTones).map(([tone, fill]) => (
             <marker
               key={tone}
               id={`head-${tone}`}
@@ -167,21 +184,12 @@ export const ArrowLayer = ({
               markerHeight="7"
               orient="auto-start-reverse"
             >
-              <path
-                d="M 0 1 L 9 5 L 0 9 z"
-                className={
-                  tone === "sky"
-                    ? "fill-sky-500"
-                    : tone === "violet"
-                      ? "fill-violet-500"
-                      : "fill-stone-500"
-                }
-              />
+              <path d="M 0 1 L 9 5 L 0 9 z" className={fill} />
             </marker>
           ))}
         </defs>
         {drawn.map(({ id, arrow, path }) => {
-          const selected = id === selectedId;
+          const tone: TArrowTone = id === selectedId ? "selected" : "rest";
           return (
             <g key={id}>
               <path
@@ -198,13 +206,13 @@ export const ArrowLayer = ({
               />
               <path
                 d={path}
-                className={`fill-none ${selected ? "stroke-sky-500" : "stroke-stone-500"}`}
-                strokeWidth={selected ? 2.5 : 1.75}
+                className={`fill-none ${strokeTones[tone]}`}
+                strokeWidth={tone === "selected" ? 2.5 : 1.75}
                 strokeDasharray={
                   arrow.author === Author.enum.agent ? "6 5" : undefined
                 }
                 strokeLinecap="round"
-                markerEnd={`url(#head-${selected ? "sky" : "stone"})`}
+                markerEnd={`url(#head-${tone})`}
               />
             </g>
           );
@@ -212,10 +220,10 @@ export const ArrowLayer = ({
         {band !== null && (
           <path
             d={band}
-            className="fill-none stroke-violet-500"
+            className={`fill-none ${strokeTones.drawing}`}
             strokeWidth={2}
             strokeDasharray="4 4"
-            markerEnd="url(#head-violet)"
+            markerEnd="url(#head-drawing)"
           />
         )}
       </svg>
