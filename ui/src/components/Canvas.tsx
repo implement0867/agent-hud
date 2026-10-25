@@ -7,9 +7,24 @@ import type {
   SetStateAction,
 } from "react";
 
+import type { TPoint } from "~/domain/board";
 import { toBoard, zoomAt } from "~/lib/geometry";
 import type { TView } from "~/lib/geometry";
-import type { TPoint } from "~/schemas/board";
+
+type TCanvasProps = {
+  view: TView;
+  setView: Dispatch<SetStateAction<TView>>;
+  viewport: RefObject<HTMLDivElement | null>;
+  world: RefObject<HTMLDivElement | null>;
+  /** Ends the selection, on a click on empty space. */
+  clear: () => void;
+  /** Starts a note at the point, on a double click on empty space. */
+  create: (at: TPoint) => void;
+  /** Greys the board, while the server is away. */
+  dimmed: boolean;
+  overlay: ReactNode;
+  children: ReactNode;
+};
 
 /**
  * The board under a view that pans and zooms. A drag on empty space, a drag with Space held, or a scroll pans;
@@ -22,21 +37,10 @@ export const Canvas = ({
   world,
   clear,
   create,
-  dimmed = false,
+  dimmed,
   overlay,
   children,
-}: {
-  view: TView;
-  setView: Dispatch<SetStateAction<TView>>;
-  viewport: RefObject<HTMLDivElement | null>;
-  world: RefObject<HTMLDivElement | null>;
-  clear: () => void;
-  create: (at: TPoint) => void;
-  /** Greys the board, while the server is away. */
-  dimmed?: boolean;
-  overlay: ReactNode;
-  children: ReactNode;
-}) => {
+}: TCanvasProps) => {
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const [space, setSpace] = useState(false);
 
@@ -108,7 +112,7 @@ export const Canvas = ({
       ref={viewport}
       role="application"
       aria-label="Board"
-      className={`relative flex-1 touch-none overflow-clip bg-stone-100 select-none ${space ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`relative flex-1 touch-none overflow-clip bg-canvas select-none ${space ? "cursor-grab active:cursor-grabbing" : ""}`}
       style={{
         backgroundImage:
           "radial-gradient(circle, rgb(168 162 158 / 0.55) 1px, transparent 1.2px)",

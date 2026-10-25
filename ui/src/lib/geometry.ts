@@ -1,4 +1,4 @@
-import type { TPoint } from "~/schemas/board";
+import type { TPoint } from "~/domain/board";
 
 export type TView = TPoint & { scale: number };
 export type TSize = { width: number; height: number };
@@ -176,6 +176,13 @@ export const gap = 48;
 /** The width of a column of the grid that the page places cards on: the widest card, which has code. */
 export const columnWidth = 640;
 
+/** The least width of a card, which a narrow card's content takes too. */
+export const leastCardWidth = 256;
+
+/** The width a resize gives a card: from the least width to two columns. */
+export const clampCardWidth = (width: number) =>
+  Math.min(2 * columnWidth, Math.max(leastCardWidth, width));
+
 /** The top of the lowest free space in three columns of the grid, below the rects that cross each column. */
 export const freePlace = (rects: TRect[]): TPoint => {
   return [0, 1, 2]
@@ -187,22 +194,6 @@ export const freePlace = (rects: TRect[]): TPoint => {
       return { x, y: Math.max(0, ...below) };
     })
     .reduce((best, place) => (place.y < best.y ? place : best));
-};
-
-/** The rect of the element in board coordinates, from its rect in the viewport. */
-export const rectOnBoard = (
-  element: Element,
-  world: Element,
-  scale: number,
-): TRect => {
-  const rect = element.getBoundingClientRect();
-  const origin = world.getBoundingClientRect();
-  return {
-    x: (rect.left - origin.left) / scale,
-    y: (rect.top - origin.top) / scale,
-    width: rect.width / scale,
-    height: rect.height / scale,
-  };
 };
 
 const pointAt = (t: number, points: [TPoint, TPoint, TPoint, TPoint]) => {
@@ -250,22 +241,5 @@ export const arrowCurve = (
   return {
     path: `M ${String(a.x)} ${String(a.y)} C ${String(b.x)} ${String(b.y)}, ${String(c.x)} ${String(c.y)}, ${String(d.x)} ${String(d.y)}`,
     middle: pointAt(0.5, points),
-  };
-};
-
-/** The card of the ref, and the height of the middle of the ref's first line, in board coordinates. */
-export const endOnBoard = (
-  world: Element,
-  ref: string,
-  scale: number,
-): { card: TRect; y: number } | null => {
-  const [cardId = ""] = ref.split("/");
-  const card = world.querySelector(`article[data-ref="${CSS.escape(cardId)}"]`);
-  const part = world.querySelector(`[data-ref="${CSS.escape(ref)}"]`);
-  if (card === null || part === null) return null;
-  const rect = rectOnBoard(part, world, scale);
-  return {
-    card: rectOnBoard(card, world, scale),
-    y: rect.y + Math.min(14, rect.height / 2),
   };
 };

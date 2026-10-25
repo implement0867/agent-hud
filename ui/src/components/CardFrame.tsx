@@ -1,203 +1,48 @@
 import { Bot, Pencil, Trash2, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import type { PointerEvent, ReactNode } from "react";
+import type { PointerEvent } from "react";
 
 import { CardBody } from "~/components/CardBody";
+import { IconButton } from "~/components/IconButton";
 import { Connector, Marks } from "~/components/Marks";
-import { mod } from "~/lib/keys";
-import { SelectionKind, isSelected, useTools } from "~/lib/whiteboard";
-import { ActionKind, Author } from "~/schemas/actions";
-import type { TBoard, TCard, TPoint } from "~/schemas/board";
+import { MarkdownEditor } from "~/components/MarkdownEditor";
+import type { TCardView } from "~/data/boardModel";
+import { useBoard } from "~/data/useBoard";
+import { ActionKind, Author } from "~/domain/actions";
+import type { TPoint } from "~/domain/board";
+import {
+  SelectionKind,
+  isSelected,
+  useWhiteboard,
+} from "~/hooks/useWhiteboard";
+import { clampCardWidth, columnWidth, leastCardWidth } from "~/lib/geometry";
+import { invariant } from "~/lib/invariant";
 
-const SmallButton = ({
-  onClick,
-  children,
-}: {
-  onClick: () => void;
-  children: ReactNode;
-}) => (
-  <button
-    type="button"
-    className="font-semibold text-sky-700 hover:underline"
-    // The press keeps the focus in the editor's textarea, so that its blur does not change the editor under the click.
-    onPointerDown={(event) => {
-      event.preventDefault();
-    }}
-    onClick={onClick}
-  >
-    {children}
-  </button>
-);
-
-/** The text with its whitespace collapsed, for a loose match of a part's text in markdown. */
-const loose = (text: string) => text.replaceAll(/\s+/g, " ").trim();
-
-/** The lines of the markdown as parts read them: without list markers, heading marks, quote marks and table pipes. */
-const partLines = (md: string) =>
-  md.split("\n").map((line) =>
-    loose(
-      line
-        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
-        .replace(/^\s*#{1,6}\s+/, "")
-        .replace(/^\s*>\s?/, "")
-        .replaceAll("|", " "),
-    ),
-  );
-
-/**
- * A markdown editor with Save and Cancel; Cmd or Ctrl with Enter saves too. Esc and a click outside close the editor
- * while the text is as it was; with changes, a click outside keeps the editor open and asks to save or discard, or saves
- * when the editor saves on blur, as a note's does, and Esc asks for a second Esc. When the text of a part that has
- * feedback is gone from the new text, the save asks once and says how many parts lose their feedback to the history.
- * When the card got a new version since the editor opened, the editor says so and offers to save over it.
- */
-export const Editor = ({
-  md,
-  label,
-  feedback = [],
-  changed = false,
-  blurSaves = false,
-  save,
-  cancel,
-}: {
-  md: string;
-  label: string;
-  /** The text of each part that has feedback, values or arrows, which a change of the part moves to the history. */
-  feedback?: string[];
-  /** Whether the card got a new version since the editor opened. */
-  changed?: boolean;
-  /** Whether a click outside saves the changes, as for a note, rather than asks. */
-  blurSaves?: boolean;
-  /** Saves the text; over is true to replace a newer version of the card. */
-  save: (md: string, over: boolean) => void;
-  cancel: () => void;
-}) => {
-  const [text, setText] = useState(md);
-  const [asking, setAsking] = useState<"save" | "discard" | "moving" | null>(
-    null,
-  );
-  const dirty = text.trim() !== "" && text !== md;
-  const lines = partLines(text);
-  const moving = feedback.filter(
-    (part) => part === "" || !lines.includes(loose(part)),
-  ).length;
-  const done = () => {
-    if (!dirty) cancel();
-    else if (changed) return;
-    else if (moving > 0 && asking !== "moving") setAsking("moving");
-    else save(text, false);
-  };
-  return (
-    <div
-      onPointerDown={(event) => {
-        event.stopPropagation();
-      }}
-    >
-      <textarea
-        aria-label={label}
-        ref={(element) => {
-          element?.focus();
-        }}
-        className="field-sizing-content min-h-24 w-full resize-none bg-transparent font-mono text-[13px] leading-relaxed text-stone-800 outline-none"
-        value={text}
-        onChange={(event) => {
-          setText(event.target.value);
-        }}
-        onBlur={() => {
-          if (!dirty) cancel();
-          else if (blurSaves) done();
-          else setAsking("save");
-        }}
-        onKeyDown={(event) => {
-          event.stopPropagation();
-          if (event.key === "Escape") {
-            if (!dirty || asking === "discard") cancel();
-            else setAsking("discard");
-          }
-          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) done();
-        }}
-      />
-      {changed ? (
-        <div
-          role="alert"
-          className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900"
-        >
-          The agent put a new version of this card while you edited; a save
-          would replace it.
-          <span className="mt-1 flex gap-3">
-            <SmallButton
-              onClick={() => {
-                save(text, true);
-              }}
-            >
-              Save over it
-            </SmallButton>
-            <SmallButton onClick={cancel}>Discard mine</SmallButton>
-          </span>
-        </div>
-      ) : asking === "moving" ? (
-        <div
-          role="alert"
-          className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900"
-        >
-          Saving moves the feedback on {moving}{" "}
-          {moving === 1 ? "part" : "parts"} you changed to the history.
-          <span className="mt-1 flex gap-3">
-            <SmallButton
-              onClick={() => {
-                save(text, false);
-              }}
-            >
-              Save anyway
-            </SmallButton>
-            <SmallButton
-              onClick={() => {
-                setAsking(null);
-              }}
-            >
-              Keep editing
-            </SmallButton>
-          </span>
-        </div>
-      ) : (
-        <p className="mt-1 flex items-center gap-3 text-[11px] text-stone-500">
-          <SmallButton onClick={done}>Save</SmallButton>
-          <SmallButton onClick={cancel}>Cancel</SmallButton>
-          <span className="text-stone-400">
-            {asking === "save"
-              ? "unsaved changes"
-              : asking === "discard"
-                ? "esc again discards your changes"
-                : `${mod}↵ saves`}
-          </span>
-        </p>
-      )}
-    </div>
-  );
-};
-
-const usePointerDrag = ({
-  scale,
-  at,
-  move,
-  drop,
-  click,
-}: {
+type TPointerDragArgs = {
   scale: number;
-  /** Where the drag starts from, or how to find out when the button goes down, as for a width the page measures. */
-  at: TPoint | (() => TPoint);
+  /** Where the drag starts from, found when the button goes down. */
+  from: () => TPoint;
   move: (to: TPoint) => void;
   drop: (to: TPoint) => void;
   click: () => void;
-}) => {
+};
+
+/** The pointer handlers of a drag in board units, which counts as a click until the pointer moves more than 3 pixels. */
+const usePointerDrag = ({
+  scale,
+  from,
+  move,
+  drop,
+  click,
+}: TPointerDragArgs) => {
   const start = useRef<{ x: number; y: number; at: TPoint } | null>(null);
   const moved = useRef(false);
   const target = (
     event: PointerEvent,
-    from: { x: number; y: number; at: TPoint },
+    origin: { x: number; y: number; at: TPoint },
   ) => ({
-    x: from.at.x + (event.clientX - from.x) / scale,
-    y: from.at.y + (event.clientY - from.y) / scale,
+    x: origin.at.x + (event.clientX - origin.x) / scale,
+    y: origin.at.y + (event.clientY - origin.y) / scale,
   });
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
@@ -208,183 +53,129 @@ const usePointerDrag = ({
       if (document.activeElement instanceof HTMLElement)
         document.activeElement.blur();
       event.currentTarget.setPointerCapture(event.pointerId);
-      start.current = {
-        x: event.clientX,
-        y: event.clientY,
-        at: typeof at === "function" ? at() : at,
-      };
+      start.current = { x: event.clientX, y: event.clientY, at: from() };
       moved.current = false;
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) => {
-      const from = start.current;
-      if (from === null) return;
+      const origin = start.current;
+      if (origin === null) return;
       moved.current ||=
-        Math.hypot(event.clientX - from.x, event.clientY - from.y) > 3;
-      if (moved.current) move(target(event, from));
+        Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 3;
+      if (moved.current) move(target(event, origin));
     },
     onPointerUp: (event: PointerEvent<HTMLElement>) => {
-      const from = start.current;
+      const origin = start.current;
       start.current = null;
-      if (from === null) return;
-      if (moved.current) drop(target(event, from));
+      if (origin === null) return;
+      if (moved.current) drop(target(event, origin));
       else click();
     },
   };
 };
 
-/** The text on the page of each part of the card that has feedback, values or arrows, and "" for the card's own feedback. */
-const partsWithFeedback = (id: string, board: TBoard): string[] => {
-  const marked = new Set(
-    [
-      ...Object.entries(board.threads)
-        .filter(
-          ([, thread]) =>
-            thread.comments.length > 0 ||
-            Object.keys(thread.reactions).length > 0,
-        )
-        .map(([ref]) => ref),
-      ...Object.keys(board.values).map((ref) =>
-        ref.slice(0, ref.lastIndexOf("/")),
-      ),
-      ...Object.values(board.arrows).flatMap((arrow) => [arrow.src, arrow.dst]),
-    ].filter((ref) => ref === id || ref.startsWith(`${id}/`)),
-  );
-  return [...marked].map((ref) =>
-    ref === id
-      ? ""
-      : (document.querySelector(`[data-ref="${CSS.escape(ref)}"]`)
-          ?.textContent ?? ""),
-  );
+type TCardFrameProps = {
+  view: TCardView;
+  scale: number;
+  /** Takes the card's element when it mounts; returns what to do when it goes. */
+  mount: (id: string, element: HTMLElement) => () => void;
 };
-
-/** The widths a card can have: as wide as its content needs by default, between the least and a column of the grid. */
-const leastWidth = 256;
-const columnWidth = 640;
-
-const clampWidth = (width: number) =>
-  Math.min(1280, Math.max(leastWidth, width));
 
 /**
  * A card at its place on the board, as wide as its content needs up to a column of the grid unless someone set its width,
- * which looks the same for each author but for the icon. A drag on the card's header
- * moves it, a drag on its bottom right corner sets its width, a click selects it, and a double click on its text edits the
- * markdown. Cards may cross after their first place; a touch puts the card on top of the others.
+ * which looks the same for each author but for the icon. A drag on the card's header moves it, a drag on its bottom
+ * right corner sets its width, a click selects it, and a double click on its text edits the markdown. Cards may cross
+ * after their first place; a touch puts the card on top of the others. A card without a place is hidden until the
+ * page gives it one, which needs its size.
  */
-export const CardFrame = ({
-  id,
-  card,
-  at,
-  scale,
-  placed,
-  z,
-  raise,
-  editing,
-  edit,
-  move,
-  drop,
-  measure,
-}: {
-  id: string;
-  card: TCard;
-  at: TPoint;
-  scale: number;
-  placed: boolean;
-  /** The card's layer: a higher one shows over the cards it crosses. */
-  z: number;
-  /** Puts the card on top, on a touch. */
-  raise: () => void;
-  editing: boolean;
-  edit: (editing: boolean) => void;
-  move: (to: TPoint) => void;
-  drop: (to: TPoint) => void;
-  /** Gets the card's element by id when it mounts, and null when it goes. */
-  measure: (id: string, element: HTMLElement | null) => void;
-}) => {
-  const { board, act, selection, select, openHistory, remove } = useTools();
+export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
+  const { id, card, at, versions, layer } = view;
+  const { store } = useBoard();
+  const { selection, select, editing, edit, openHistory, remove } =
+    useWhiteboard();
   const frame = useRef<HTMLElement | null>(null);
-  const measured = useCallback(
-    (element: HTMLElement | null) => {
+  const article = useCallback(
+    (element: HTMLElement) => {
       frame.current = element;
-      measure(id, element);
+      const unmount = mount(id, element);
+      return () => {
+        frame.current = null;
+        unmount();
+      };
     },
-    [id, measure],
+    [id, mount],
   );
-  const versions = board.history[id]?.length ?? 0;
-  /** The number of earlier versions when the editor opened, so that a save does not replace a newer version. */
-  const [opened, setOpened] = useState<number | null>(null);
-  if (editing && opened === null) setOpened(versions);
-  if (!editing && opened !== null) setOpened(null);
-  const changed = editing && opened !== null && opened !== versions;
-  const selected = isSelected(selection, id);
   const mine = card.author === Author.enum.user;
   const AuthorIcon = mine ? User : Bot;
-  const stored = board.widths[id];
-  const [stretch, setStretch] = useState<number | null>(null);
-  const [storedSeen, setStoredSeen] = useState(stored);
-  if (storedSeen !== stored) {
-    setStoredSeen(stored);
-    setStretch(null);
-  }
-  /** The width the user or the agent set, or none: then the card is as wide as its content needs, up to a column. */
-  const width = stretch ?? stored;
+  /** The width that a resize shows before the server has it, over the width the card had when the resize started. */
+  const [resizing, setResizing] = useState<{
+    width: number;
+    over: number | null;
+  } | null>(null);
+  const width =
+    resizing !== null && resizing.over === view.width
+      ? resizing.width
+      : view.width;
   const resize = usePointerDrag({
     scale,
-    at: () => ({ x: width ?? frame.current?.offsetWidth ?? leastWidth, y: 0 }),
+    from: () => {
+      invariant(frame.current !== null, "the handle is in the card");
+      return { x: width ?? frame.current.offsetWidth, y: 0 };
+    },
     move: (to) => {
-      setStretch(clampWidth(to.x));
+      setResizing({ width: clampCardWidth(to.x), over: view.width });
     },
     drop: (to) => {
-      const next = clampWidth(to.x);
-      setStretch(next);
-      void act({ kind: ActionKind.enum.resize, id, width: next }).then(
-        (taken) => {
-          if (!taken) setStretch(null);
-        },
-      );
+      const next = clampCardWidth(to.x);
+      setResizing({ width: next, over: view.width });
+      void store
+        .act({ kind: ActionKind.enum.resize, id, width: next })
+        .then((taken) => {
+          if (!taken) setResizing(null);
+        });
     },
     click: () => undefined,
   });
   const drag = usePointerDrag({
     scale,
-    at,
-    move,
-    drop,
+    from: () => {
+      invariant(at !== null, "only a placed card shows and takes a drag");
+      return at;
+    },
+    move: (to) => {
+      store.drag(id, to);
+    },
+    drop: (to) => {
+      store.drop(id, to);
+    },
     // A click on the header selects the card alone; its feedback opens from its marks, or with C.
     click: () => {
       select({ kind: SelectionKind.enum.ref, ref: id }, false);
     },
   });
-  /**
-   * The text of each part of the card that has feedback, values or arrows, read from the page as the editor opens,
-   * so that the editor can say how many of them a change moves to the history; the card's own feedback moves on any
-   * change, so it has no text to find.
-   */
-  const [feedback, setFeedback] = useState<string[]>([]);
-  const [editSeen, setEditSeen] = useState(false);
-  if (editing !== editSeen) {
-    setEditSeen(editing);
-    if (editing) setFeedback(partsWithFeedback(id, board));
-  }
+  const editor = editing?.card === id ? editing : null;
   const save = async (md: string, over: boolean) => {
-    const version = over ? {} : { version: opened ?? versions };
-    if (await act({ kind: ActionKind.enum.put, id, md, ...version }))
-      edit(false);
+    invariant(editor !== null, "the editor saves while it is open");
+    const version = over ? {} : { version: editor.versions };
+    if (await store.act({ kind: ActionKind.enum.put, id, md, ...version }))
+      edit(null);
   };
   return (
     <article
-      ref={measured}
+      ref={article}
       data-ref={id}
       style={{
-        left: at.x,
-        top: at.y,
+        left: at?.x ?? 0,
+        top: at?.y ?? 0,
         width: width ?? "max-content",
-        minWidth: leastWidth,
-        maxWidth: width === undefined ? columnWidth : undefined,
-        zIndex: z,
-        visibility: placed ? "visible" : "hidden",
+        minWidth: leastCardWidth,
+        maxWidth: width === null ? columnWidth : undefined,
+        zIndex: layer,
+        visibility: at === null ? "hidden" : "visible",
       }}
-      className={`group/card pointer-events-auto absolute flex animate-rise flex-col rounded-xl bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06),0_10px_30px_-12px_rgba(0,0,0,0.18)] transition-shadow ${selected ? "ring-2 ring-sky-400" : "ring-1 ring-stone-900/5"}`}
-      onPointerDownCapture={raise}
+      className={`group/card card pointer-events-auto absolute flex animate-rise flex-col transition-shadow ${isSelected(selection, id) ? "ring-2 ring-accent-ring" : "ring-1 ring-edge-faint"}`}
+      onPointerDownCapture={() => {
+        store.touch(id);
+      }}
       onClick={(event) => {
         event.stopPropagation();
       }}
@@ -397,15 +188,15 @@ export const CardFrame = ({
           role="img"
           aria-label={mine ? "By you" : "By the agent"}
           title={mine ? "you" : "agent"}
-          className={`grid size-5 shrink-0 place-items-center rounded-full text-white ${mine ? "bg-sky-600" : "bg-stone-800"}`}
+          className={`grid size-5 shrink-0 place-items-center rounded-full text-white ${mine ? "bg-accent" : "bg-ink"}`}
         >
           <AuthorIcon className="size-3" />
         </span>
-        <span className="truncate font-mono text-[11px] tracking-wide text-stone-400">
+        <span className="truncate font-mono text-[11px] tracking-wide text-ink-faint">
           {id}
         </span>
         {card.edited ? (
-          <span className="rounded-full bg-sky-50 px-1.5 py-px font-mono text-[10px] text-sky-700">
+          <span className="pill bg-accent-faint text-accent-strong">
             {mine ? "edited by the agent" : "edited by you"}
           </span>
         ) : null}
@@ -414,7 +205,7 @@ export const CardFrame = ({
             type="button"
             aria-label={`History of ${id}`}
             title={`Version ${String(versions + 1)}: show the earlier versions and their feedback`}
-            className="rounded-full bg-stone-100 px-1.5 py-px font-mono text-[10px] text-stone-500 hover:bg-sky-100 hover:text-sky-700"
+            className="pill bg-surface-sunken text-ink-muted hover:bg-accent-soft hover:text-accent-strong"
             onPointerDown={(event) => {
               event.stopPropagation();
             }}
@@ -428,14 +219,16 @@ export const CardFrame = ({
         )}
         <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/card:opacity-100">
           <IconButton
+            variant="ghost"
             label={`Edit ${id}`}
             onClick={() => {
-              edit(true);
+              edit(id);
             }}
           >
             <Pencil className="size-3.5" />
           </IconButton>
           <IconButton
+            variant="ghost"
             label={`Remove ${id}`}
             onClick={() => {
               remove(id);
@@ -444,41 +237,41 @@ export const CardFrame = ({
             <Trash2 className="size-3.5" />
           </IconButton>
         </span>
-        <Marks target={id} place="shrink-0" />
+        <Marks target={id} placement="header" />
         <Connector target={id} />
       </header>
       <div
         className="px-4 pb-4"
         onDoubleClick={(event) => {
           event.stopPropagation();
-          edit(true);
+          edit(id);
         }}
       >
-        {editing ? (
-          <Editor
+        {editor === null ? (
+          <div key={versions} className="animate-pop">
+            <CardBody id={id} md={card.md} />
+          </div>
+        ) : (
+          <MarkdownEditor
             md={card.md}
             label={`Markdown of ${id}`}
-            feedback={feedback}
-            changed={changed}
+            marked={editor.marked}
+            changed={editor.versions !== versions}
             save={(md, over) => {
               void save(md, over);
             }}
             cancel={() => {
-              edit(false);
+              edit(null);
             }}
           />
-        ) : (
-          <div key={versions} className="animate-pop">
-            <CardBody id={id} md={card.md} />
-          </div>
         )}
       </div>
       <span
         role="separator"
         aria-orientation="vertical"
         aria-label={`Width of ${id}`}
-        aria-valuenow={width === undefined ? undefined : Math.round(width)}
-        className="absolute right-0 bottom-0 size-4 cursor-ew-resize rounded-br-xl text-stone-300 hover:text-stone-500"
+        aria-valuenow={width === null ? undefined : Math.round(width)}
+        className="absolute right-0 bottom-0 size-4 cursor-ew-resize rounded-br-xl text-ink-ghost hover:text-ink-muted"
         {...resize}
       >
         <svg viewBox="0 0 16 16" className="size-full" aria-hidden>
@@ -493,29 +286,3 @@ export const CardFrame = ({
     </article>
   );
 };
-
-export const IconButton = ({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) => (
-  <button
-    type="button"
-    aria-label={label}
-    title={label}
-    className="grid size-6 place-items-center rounded-md text-stone-400 hover:bg-stone-900/5 hover:text-stone-700"
-    onPointerDown={(event) => {
-      event.stopPropagation();
-    }}
-    onClick={(event) => {
-      event.stopPropagation();
-      onClick();
-    }}
-  >
-    {children}
-  </button>
-);

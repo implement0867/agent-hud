@@ -1,7 +1,58 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* The page's colours by role. Components use these names, never the palette's. */
+@theme inline {
+  --color-canvas: var(--color-stone-100);
+  --color-surface: var(--color-white);
+  --color-surface-sunken: var(--color-stone-100);
+
+  --color-edge: color-mix(in oklab, var(--color-stone-900) 10%, transparent);
+  --color-edge-faint: color-mix(
+    in oklab,
+    var(--color-stone-900) 5%,
+    transparent
+  );
+  --color-divider: var(--color-stone-100);
+  --color-outline: var(--color-stone-200);
+
+  --color-ink: var(--color-stone-900);
+  --color-ink-soft: var(--color-stone-700);
+  --color-ink-muted: var(--color-stone-500);
+  --color-ink-faint: var(--color-stone-400);
+  --color-ink-ghost: var(--color-stone-300);
+
+  --color-accent: var(--color-sky-600);
+  --color-accent-strong: var(--color-sky-700);
+  --color-accent-muted: var(--color-sky-200);
+  --color-accent-soft: var(--color-sky-100);
+  --color-accent-faint: var(--color-sky-50);
+  --color-accent-ring: var(--color-sky-400);
+  --color-accent-on-dark: var(--color-sky-300);
+
+  --color-success: var(--color-emerald-500);
+  --color-success-soft: var(--color-emerald-100);
+  --color-success-strong: var(--color-emerald-700);
+
+  --color-danger: var(--color-rose-600);
+  --color-danger-soft: var(--color-rose-100);
+  --color-danger-faint: var(--color-rose-50);
+  --color-danger-strong: var(--color-rose-700);
+
+  --color-warning: var(--color-amber-500);
+  --color-warning-soft: var(--color-amber-100);
+  --color-warning-faint: var(--color-amber-50);
+  --color-warning-strong: var(--color-amber-800);
+
+  /* The arrow that the user draws, and the part it starts at. */
+  --color-draw: var(--color-violet-500);
+  --color-draw-soft: var(--color-violet-50);
+}
+
 @theme {
+  --shadow-card:
+    0 1px 2px rgb(0 0 0 / 0.06), 0 10px 30px -12px rgb(0 0 0 / 0.18);
+
   --animate-rise: rise 240ms ease-out;
   --animate-pop: pop 140ms ease-out;
 
@@ -20,8 +71,37 @@
   }
 }
 
+/* A surface that floats over the board: the toolbar, the chat, the drawers and the panels. */
+@utility panel {
+  @apply rounded-2xl bg-surface shadow-xl ring-1 ring-edge;
+}
+
+/* A card on the board, and a note that the user is writing. */
+@utility card {
+  @apply rounded-xl bg-surface shadow-card;
+}
+
+/* A message across the top or the bottom of the board. */
+@utility toast {
+  @apply pointer-events-auto absolute left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full px-4 py-1.5 text-sm text-white shadow-lg;
+}
+
+/* A card's markdown: compact prose, code blocks that wrap and have room for the marks of their lines, inline code on a tint. */
+@utility markdown {
+  @apply prose prose-sm prose-stone max-w-none prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight prose-p:my-1.5 prose-ol:my-1 prose-ul:my-1 prose-li:my-0.5 prose-table:my-2 prose-th:font-medium prose-th:text-ink-muted prose-code:font-normal prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-visible prose-pre:px-0 prose-pre:text-[13px] prose-pre:leading-relaxed prose-pre:break-words prose-pre:whitespace-pre-wrap;
+
+  & :not(pre) > code {
+    @apply rounded bg-surface-sunken px-1 py-0.5;
+  }
+}
+
+/* A small label in a line: a card's version, a ref, an author's reaction. */
+@utility pill {
+  @apply rounded-full px-1.5 py-px font-mono text-[10px];
+}
+
 @layer base {
   body {
-    @apply bg-stone-100 text-stone-900 antialiased;
+    @apply bg-canvas text-ink antialiased;
   }
 }

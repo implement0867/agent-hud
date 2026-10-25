@@ -1,10 +1,11 @@
 import { MessagesSquare, PanelRightClose } from "lucide-react";
 import { useState } from "react";
-import type { CSSProperties, PointerEvent } from "react";
+import type { PointerEvent } from "react";
 
 import { Bubble, Composer } from "~/components/FeedbackPanel";
-import { useTools } from "~/lib/whiteboard";
-import { ActionKind, Author } from "~/schemas/actions";
+import { IconButton } from "~/components/IconButton";
+import { useBoard } from "~/data/useBoard";
+import { ActionKind, Author } from "~/domain/actions";
 
 const widthKey = "agent-hud:chat-width";
 const narrowest = 280;
@@ -23,12 +24,24 @@ const storedWidth = () => {
   }
 };
 
+/** Keeps the width in this browser; where storage is blocked, the chat keeps it for this page alone. */
 const storeWidth = (width: number) => {
   try {
     localStorage.setItem(widthKey, String(width));
   } catch {
-    // The chat keeps the width for this page alone.
+    return;
   }
+};
+
+/** The chat's place: above the toolbar on a screen narrower than 1280 px, at the bottom right on a wider one. */
+const place =
+  "pointer-events-auto absolute right-4 bottom-[calc(var(--toolbar)+2rem)] xl:bottom-4";
+
+type TChatProps = {
+  /** The height of the toolbar, which the chat sits above on a narrow screen. */
+  above: number;
+  /** Takes the open chat's element, for the board to keep clear of it; returns what to do when it goes. */
+  measure: (element: HTMLElement) => () => void;
 };
 
 /**
@@ -36,50 +49,40 @@ const storeWidth = (width: number) => {
  * A closed chat counts the agent's new messages and comments. A message also sends the user's unsent actions.
  * A drag on the chat's left edge sets its width, which the browser keeps.
  */
-export const Chat = ({
-  unsent,
-  above,
-  measure,
-}: {
-  unsent: number;
-  /** The height of the toolbar, which the chat sits above on a screen narrower than 1280 px. */
-  above: number;
-  /** Gets the open chat's element, and null when it closes, for the board to keep clear of it. */
-  measure: (element: HTMLElement | null) => void;
-}) => {
-  const { board, act } = useTools();
+export const Chat = ({ above, measure }: TChatProps) => {
+  const { model, store } = useBoard();
   const [width, setWidth] = useState(storedWidth);
-  const lift = {
-    "--toolbar": `${String(above)}px`,
-    width,
-  } as CSSProperties;
+  const [message, setMessage] = useState("");
   const [open, setOpen] = useState(true);
-  const fromAgent = board.messages.filter(
+  const fromAgent = model.board.messages.filter(
     (said) => said.author === Author.enum.agent,
   ).length;
   const [seen, setSeen] = useState(fromAgent);
   const unread = open ? 0 : fromAgent - seen;
+  const unsent = model.pending.length;
+  const style = { "--toolbar": `${String(above)}px`, width };
   const resize = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     const from = { x: event.clientX, width };
-    const controller = new AbortController();
+    const listening = new AbortController();
+    const { signal } = listening;
     window.addEventListener(
       "pointermove",
       (move) => {
         setWidth(clampWidth(from.width + from.x - move.clientX));
       },
-      { signal: controller.signal },
+      { signal },
     );
     window.addEventListener(
       "pointerup",
       (up) => {
-        controller.abort();
+        listening.abort();
         const settled = clampWidth(from.width + from.x - up.clientX);
         setWidth(settled);
         storeWidth(settled);
       },
-      { signal: controller.signal },
+      { signal },
     );
   };
   if (!open)
@@ -87,15 +90,15 @@ export const Chat = ({
       <button
         type="button"
         aria-label="Open the chat"
-        style={lift}
-        className="pointer-events-auto absolute right-4 bottom-[calc(var(--toolbar)+2rem)] grid size-11 place-items-center rounded-full bg-white text-stone-600 shadow-lg ring-1 ring-stone-900/10 hover:text-stone-900 xl:bottom-4"
+        style={style}
+        className={`${place} grid size-11 place-items-center rounded-full bg-surface text-ink-soft shadow-lg ring-1 ring-edge hover:text-ink`}
         onClick={() => {
           setOpen(true);
         }}
       >
         <MessagesSquare className="size-5" />
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-sky-600 text-[11px] font-semibold text-white">
+          <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-accent text-[11px] font-semibold text-white">
             {unread}
           </span>
         )}
@@ -105,8 +108,8 @@ export const Chat = ({
     <aside
       ref={measure}
       aria-label="Chat with the agent"
-      style={lift}
-      className="pointer-events-auto absolute right-4 bottom-[calc(var(--toolbar)+2rem)] flex max-h-[70%] max-w-[calc(100%-2rem)] animate-pop flex-col rounded-2xl bg-white shadow-xl ring-1 ring-stone-900/10 select-text xl:bottom-4"
+      style={style}
+      className={`${place} panel flex max-h-[70%] max-w-[calc(100%-2rem)] animate-pop flex-col select-text`}
     >
       <div
         role="separator"
@@ -115,25 +118,24 @@ export const Chat = ({
         aria-valuenow={width}
         aria-valuemin={narrowest}
         aria-valuemax={widest}
-        className="absolute inset-y-3 -left-1.5 w-3 cursor-col-resize rounded-full hover:bg-sky-200/60"
+        className="absolute inset-y-3 -left-1.5 w-3 cursor-col-resize rounded-full hover:bg-accent-muted/60"
         onPointerDown={resize}
       />
-      <header className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
-        <h2 className="text-sm font-semibold text-stone-800">Chat</h2>
-        <button
-          type="button"
-          aria-label="Close the chat"
-          className="rounded p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+      <header className="flex items-center justify-between border-b border-divider px-4 py-3">
+        <h2 className="text-sm font-semibold text-ink">Chat</h2>
+        <IconButton
+          variant="close"
+          label="Close the chat"
           onClick={() => {
             setSeen(fromAgent);
             setOpen(false);
           }}
         >
           <PanelRightClose className="size-4" />
-        </button>
+        </IconButton>
       </header>
       <ul className="flex min-h-24 flex-col-reverse gap-2 overflow-y-auto px-3 py-3">
-        {board.messages.toReversed().map((said) => (
+        {model.board.messages.toReversed().map((said) => (
           <Bubble key={said.id} said={said} withRef />
         ))}
       </ul>
@@ -141,10 +143,11 @@ export const Chat = ({
         <Composer
           label="Message the agent"
           id="message-box"
-          send={(text) => act({ kind: ActionKind.enum.say, text })}
+          send={(text) => store.act({ kind: ActionKind.enum.say, text })}
+          draft={{ text: message, set: setMessage }}
         />
         {unsent > 0 && (
-          <p className="mt-1.5 px-2 text-[11px] text-stone-400">
+          <p className="mt-1.5 px-2 text-[11px] text-ink-faint">
             Your message also sends {unsent}{" "}
             {unsent === 1 ? "change" : "changes"}.
           </p>
