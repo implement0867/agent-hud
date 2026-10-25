@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-import { ActionKind, Author, bodySchema } from "~/domain/actions";
+import { Author, bodySchema } from "~/domain/actions";
 import { boardSchema } from "~/domain/board";
-import { assertNever } from "~/lib/assertNever";
 
 export const EventKind = z
   .enum(["snapshot", "accepted", "rejected"])
@@ -91,47 +90,3 @@ export type TAgentState = z.infer<typeof AgentState>;
 export type THeard = z.infer<typeof heardSchema>;
 export type TSnapshot = z.infer<typeof snapshotSchema>;
 export type TBoardList = z.infer<typeof boardListSchema>;
-
-/** One line for a pending action, as the agent will hear it. */
-export const describeHeard = ({ body, parts }: THeard): string => {
-  const text = (ref: string) => {
-    const part = parts[ref];
-    return part === undefined ? ref : `${ref} "${part}"`;
-  };
-  switch (body.kind) {
-    case ActionKind.enum.put:
-      return `new note ${body.id}`;
-    case "edit":
-      return `edit ${body.id}`;
-    case ActionKind.enum.remove:
-      return `remove ${body.id}`;
-    case ActionKind.enum.restore:
-      return `restore ${body.id}`;
-    case ActionKind.enum.react:
-      return `${body.reaction} ${text(body.ref)}`;
-    case ActionKind.enum.unreact:
-      return `no reaction on ${text(body.ref)}`;
-    case ActionKind.enum.comment:
-      return `comment on ${text(body.ref)}: ${body.text}`;
-    case ActionKind.enum.say:
-      return body.text;
-    case ActionKind.enum.fill:
-      return `${body.ref} = ${JSON.stringify(body.value)}`;
-    case ActionKind.enum.link:
-      return `arrow ${body.src} → ${body.dst}${body.text === "" ? "" : ` "${body.text}"`}`;
-    case ActionKind.enum.unlink:
-      return `remove arrow ${body.id}`;
-    case ActionKind.enum.move:
-      return `move ${body.id}`;
-    case ActionKind.enum.resize:
-      return `resize ${body.id}`;
-    case ActionKind.enum.place:
-      return `place ${body.id}`;
-    case ActionKind.enum.clear:
-      return "clear the board";
-    case ActionKind.enum.send:
-      return "send";
-    default:
-      return assertNever(body);
-  }
-};

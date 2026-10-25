@@ -1,6 +1,6 @@
 import { MessageCircle } from "lucide-react";
 
-import { useReadOnly, useStore, useThread } from "~/data/context";
+import { useBoard, useReadOnly, useStore, useThread } from "~/data/context";
 import { Author } from "~/domain/actions";
 import {
   quickReactions,
@@ -9,7 +9,7 @@ import {
   userReaction,
 } from "~/domain/reactions";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
-import { reactionIcons, reactionTones } from "~/theme";
+import { reactionIcons, reactionTones, unsentTone } from "~/theme";
 
 /** Where the marks sit: at the top right of a part, before a table row, at the end of a code line, or in line in a card's header. */
 export type TMarksPlacement = "part" | "row" | "line" | "header";
@@ -34,8 +34,13 @@ export const Marks = ({ target, placement }: TMarksProps) => {
   const { select } = useWhiteboard();
   const thread = useThread(target);
   const readOnly = useReadOnly();
+  const { unsent } = useBoard().model;
   const reaction = userReaction(thread);
   const comments = thread.comments.length;
+  const commentUnsent =
+    !readOnly && thread.comments.some(({ id }) => unsent.ids.has(id));
+  const reactionUnsent =
+    !readOnly && reaction !== null && unsent.refs.has(target);
   return (
     <span
       data-chrome
@@ -69,9 +74,11 @@ export const Marks = ({ target, placement }: TMarksProps) => {
       {comments > 0 && (
         <button
           type="button"
-          aria-label={`Thread on ${target}`}
+          aria-label={`Thread on ${target}${commentUnsent ? ", unsent" : ""}`}
+          title={commentUnsent ? "A comment not sent yet" : undefined}
+          data-unsent={commentUnsent ? "" : undefined}
           disabled={readOnly}
-          className="flex items-center gap-0.5 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent-strong enabled:hover:bg-accent-muted"
+          className={`flex items-center gap-0.5 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent-strong enabled:hover:bg-accent-muted ${commentUnsent ? `${unsentTone} outline-offset-1` : ""}`}
           onClick={(event) => {
             event.stopPropagation();
             select({ kind: SelectionKind.enum.ref, ref: target });
@@ -83,12 +90,15 @@ export const Marks = ({ target, placement }: TMarksProps) => {
       )}
       {reactionsOf(thread).map(([author, reacted]) => {
         const Icon = reactionIcons[reacted];
+        const pending = author === Author.enum.user && reactionUnsent;
         return (
           <span
             key={author}
             role="img"
-            aria-label={`${author}: ${reacted}`}
-            className={`grid size-5 place-items-center rounded-full ${reactionTones[reacted]} ${author === Author.enum.agent ? "ring-2 ring-current ring-inset" : ""} ${author === Author.enum.user && !readOnly ? "group-hover/part:hidden" : ""}`}
+            aria-label={`${author}: ${reacted}${pending ? ", unsent" : ""}`}
+            title={pending ? "Not sent yet" : undefined}
+            data-unsent={pending ? "" : undefined}
+            className={`grid size-5 place-items-center rounded-full ${reactionTones[reacted]} ${author === Author.enum.agent ? "ring-2 ring-current ring-inset" : ""} ${author === Author.enum.user && !readOnly ? "group-hover/part:hidden" : ""} ${pending ? `${unsentTone} outline-offset-1` : ""}`}
           >
             <Icon className="size-3.5" strokeWidth={3} />
           </span>
