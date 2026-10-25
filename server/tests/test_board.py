@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from agent_hud.models.actions import Action, Author, Reaction, TBody, TValue
 from agent_hud.models.base import Model
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Thread, Version
-from agent_hud.models.columns import Column, ColumnKind
+from agent_hud.models.columns import Column, ColumnKind, Table
 from agent_hud.outline import Outline
 from tests.factories import (
     clear,
@@ -644,3 +644,18 @@ def test_a_part_on_a_card_with_no_parts_raises_so() -> None:
         act(act(Board(), put("a", "---")), react("a/1", Reaction.approve))
     with pytest.raises(ValueError, match=r"^no card 'a': the board has no cards$"):
         act(Board(), remove("a"))
+
+
+@given(st.lists(item_texts(), min_size=1), tables(), tables())
+def test_outline_lists_each_table_with_its_rows_and_input_columns(
+    texts: list[str], first: list[list[str]], second: list[list[str]]
+) -> None:
+    """Assemble: a list, a table whose first column is a number input, and a plain table.
+    Act: outline them.
+    Assert: two tables, each with the part numbers of its rows after the list, the first with its column 1 as the input and the second with none."""
+    md = "\n\n".join([list_md("1. ", texts), table_md(first, [" {number}"]), table_md(second)])
+    rows = list(range(len(texts) + 1, len(texts) + len(first) + len(second) + 1))
+    assert Outline(md).tables == [
+        Table(rows=[str(n) for n in rows[: len(first)]], columns={"1": Column(kind=ColumnKind.number, name="h")}),
+        Table(rows=[str(n) for n in rows[len(first) :]], columns={}),
+    ]

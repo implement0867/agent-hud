@@ -3,7 +3,7 @@ from functools import lru_cache
 from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 
-from agent_hud.models.columns import Column, ColumnKind
+from agent_hud.models.columns import Column, ColumnKind, Table
 from agent_hud.models.refs import Ref
 
 
@@ -24,6 +24,8 @@ class Outline:
         self.texts: dict[str, str] = {}
         self.rows: dict[str, dict[str, Column]] = {}
         """The input columns of each table body row by column number, such as {"3": {"2": Column(...)}}."""
+        self.tables: list[Table] = []
+        """Each table, with the numbers of its body rows and its input columns."""
         columns: list[Column] = []
         for node in SyntaxTreeNode(MarkdownIt("commonmark").enable("table").parse(md)).walk():
             match node.type, node.parent:
@@ -37,15 +39,19 @@ class Outline:
                     self._add(node.children[0].content)
                 case "tr", SyntaxTreeNode(type="thead"):
                     columns = [Column.from_header(cell.children[0].content) for cell in node.children]
-                case "tr", SyntaxTreeNode(type="tbody"):
-                    row = self._add(
-                        " | ".join("".join(inline.content for inline in cell.children) for cell in node.children)
-                    )
-                    self.rows[row] = {
+                    inputs = {
                         str(n): column
                         for n, column in enumerate(columns, start=1)
                         if column.kind is not ColumnKind.static
                     }
+                    self.tables.append(Table(rows=[], columns=inputs))
+                case "tr", SyntaxTreeNode(type="tbody"):
+                    row = self._add(
+                        " | ".join("".join(inline.content for inline in cell.children) for cell in node.children)
+                    )
+                    table = self.tables[-1]
+                    self.rows[row] = table.columns
+                    self.tables[-1] = table.model_copy(update={"rows": [*table.rows, row]})
                 case "fence" | "code_block", _:
                     options = fence_options(node.info)
                     start = int(first) if (first := options.get("start", "")).isdigit() else 1
