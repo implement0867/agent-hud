@@ -197,9 +197,11 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
         >
           <AuthorIcon className="size-3" />
         </span>
-        <span className="truncate font-mono text-[11px] tracking-wide text-ink-faint">
-          {id}
-        </span>
+        {mine ? null : (
+          <span className="truncate font-mono text-[11px] tracking-wide text-ink-faint">
+            {id}
+          </span>
+        )}
         {card.edited ? (
           <span className="pill bg-accent-faint text-accent-strong">
             {mine ? "edited by the agent" : "edited by you"}

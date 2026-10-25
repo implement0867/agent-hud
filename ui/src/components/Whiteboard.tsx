@@ -31,6 +31,7 @@ import type { TCardView } from "~/data/boardModel";
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Reaction } from "~/domain/actions";
 import { newId, refsWithFeedback, threadOf, versionsOf } from "~/domain/board";
+import { cardTitle, nameOf } from "~/domain/parts";
 import type { TArrow, TPoint } from "~/domain/board";
 import { reactionKeys, toggleReaction } from "~/domain/reactions";
 import { cardOf, isCardRef } from "~/domain/ref";
@@ -90,6 +91,7 @@ type TNewCardChipProps = {
 
 /** A chip at the edge of the view nearest to a card that arrived out of view; a click shows the card. */
 const NewCardChip = ({ id, at, show }: TNewCardChipProps) => {
+  const { model } = useBoard();
   const Arrow = chipArrows[at.direction];
   return (
     <button
@@ -102,9 +104,7 @@ const NewCardChip = ({ id, at, show }: TNewCardChipProps) => {
       }}
     >
       <Arrow className="size-4 shrink-0" />
-      <span className="truncate">
-        new: <span className="font-mono">{id}</span>
-      </span>
+      <span className="truncate">new: {nameOf(model.board, id)}</span>
     </button>
   );
 };
@@ -151,40 +151,43 @@ type TUndoToastProps = {
   restore: (removed: TRemoved) => void;
 };
 
-/** The toast that offers the last removed card or arrow back. */
-const UndoToast = ({ removed, restore }: TUndoToastProps) => (
-  <div role="status" className="toast bottom-20 gap-3 bg-ink">
-    Removed{" "}
-    <span className="font-mono">
-      {removed.kind === RemovedKind.enum.arrow ? "the arrow" : removed.id}
-    </span>
-    <TextButton
-      variant="onDark"
-      onClick={() => {
-        restore(removed);
-      }}
-    >
-      Undo
-    </TextButton>
-  </div>
-);
+/** The toast that offers the last removed card or arrow back; a removed card is named by the title of its last version. */
+const UndoToast = ({ removed, restore }: TUndoToastProps) => {
+  const { model } = useBoard();
+  const last = model.board.history[removed.id]?.at(-1);
+  return (
+    <div role="status" className="toast bottom-20 gap-3 bg-ink">
+      Removed{" "}
+      {removed.kind === RemovedKind.enum.arrow
+        ? "the arrow"
+        : `“${last === undefined ? removed.id : cardTitle(last.card.md)}”`}
+      <TextButton
+        variant="onDark"
+        onClick={() => {
+          restore(removed);
+        }}
+      >
+        Undo
+      </TextButton>
+    </div>
+  );
+};
 
 type TLostArrowToastProps = { lost: { id: string; arrow: TArrow } };
 
 /** The toast that says the agent removed one of the user's arrows, with a button that puts it back. */
 const LostArrowToast = ({ lost: { id, arrow } }: TLostArrowToastProps) => {
   const store = useStore();
+  const { model } = useBoard();
   return (
     <div
       role="status"
       aria-label="Arrow removed by the agent"
       className="toast bottom-32 gap-3 bg-ink"
     >
-      The agent removed your arrow{" "}
-      <span className="font-mono">
-        {arrow.src} → {arrow.dst}
-      </span>
-      {arrow.text === "" ? "" : ` “${arrow.text}”`}
+      The agent removed your arrow from “{nameOf(model.board, arrow.src)}” to “
+      {nameOf(model.board, arrow.dst)}”
+      {arrow.text === "" ? "" : `, “${arrow.text}”`}
       <TextButton
         variant="onDark"
         onClick={() => {
