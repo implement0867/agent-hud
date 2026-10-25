@@ -65,9 +65,7 @@ const ArrowLabel = ({
       <input
         aria-label={`Text of arrow ${id}`}
         placeholder="label"
-        ref={(element) => {
-          element?.focus();
-        }}
+        autoFocus
         className="field-sizing-content min-w-12 bg-transparent text-xs outline-none"
         value={text}
         onChange={(event) => {

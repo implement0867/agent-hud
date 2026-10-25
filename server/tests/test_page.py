@@ -229,7 +229,6 @@ async def test_a_fast_drag_from_the_dot_draws_an_arrow_and_its_label_selects_it_
         case other:
             pytest.fail(f"the agent heard {other}, not a link from options/2 to questions/1")
 
-    await page.keyboard.press("Escape")
     await page.mouse.click(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2)
     await expect(page.get_by_label("Feedback on options/2")).to_have_count(0)
 
