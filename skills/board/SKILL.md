@@ -50,6 +50,8 @@ A table header with a spec makes an input column that the user fills:
 | render | | |
 ```
 
+Write the options and the text as the user reads them: an owner column names the user as they name themselves, or "you", not `user`, and a column of numbers names its unit in its title, such as `Hours {number}`, which the page shows as the cell's placeholder. The page names a part to the user by its text, not its ref, so the ref is for you.
+
 ## Read feedback
 
 - `read` returns the board: the cards and the parts of each by number, the threads by ref, each with the reaction of each author and the comments, the values by cell ref, the arrows, the chat messages and comments, and the card positions and widths. `read` with `history` true also returns the earlier versions of each card with their feedback. `read` with `cards` returns those cards alone, with what is on them, and with `since` the messages after the message or comment with that id: use them to read less when the board is large. Cards with the author `user` are notes from the user; a card with `edited` true has its latest version from the other author, so the user edited your card or you edited the user's note. Cards that the user placed near each other belong together for the user.

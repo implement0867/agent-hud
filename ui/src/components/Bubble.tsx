@@ -3,6 +3,7 @@ import { Bot, User } from "lucide-react";
 import { useBoard } from "~/data/context";
 import { Author } from "~/domain/actions";
 import type { TSaid } from "~/domain/board";
+import { nameOf } from "~/domain/parts";
 import { splitRefs } from "~/domain/ref";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
 
@@ -20,6 +21,7 @@ const RefText = ({ text }: TRefTextProps) => {
         <button
           key={at}
           type="button"
+          title={nameOf(model.board, ref)}
           className="font-mono underline decoration-dotted underline-offset-2"
           onClick={() => {
             show(ref);
@@ -48,6 +50,7 @@ const bubbleTone = (mine: boolean, unsent: boolean) => {
 export const Bubble = ({ said, withRef = false }: TBubbleProps) => {
   const { model } = useBoard();
   const { show } = useWhiteboard();
+  const name = said.ref === null ? "" : nameOf(model.board, said.ref);
   const mine = said.author === Author.enum.user;
   const unsent = mine && model.unsent.ids.has(said.id);
   const Icon = mine ? User : Bot;
@@ -76,12 +79,13 @@ export const Bubble = ({ said, withRef = false }: TBubbleProps) => {
           <button
             type="button"
             aria-label={`Show ${ref}`}
-            className="mr-1.5 rounded bg-black/10 px-1 font-mono text-[11px]"
+            title={ref}
+            className="mr-1.5 inline-block max-w-48 truncate rounded bg-black/10 px-1 align-bottom text-[11px]"
             onClick={() => {
               show(ref);
             }}
           >
-            {ref}
+            “{name}”
           </button>
         )}
         <RefText text={said.text} />

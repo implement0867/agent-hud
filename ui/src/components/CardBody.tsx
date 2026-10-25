@@ -323,7 +323,7 @@ const CellInput = ({ target, input }: TCellInputProps) => {
           aria-label={label}
           disabled={readOnly}
           {...mark}
-          placeholder="…"
+          placeholder={input.title}
           className={`border-b bg-transparent px-0.5 text-sm outline-none placeholder:text-ink-ghost focus:border-solid focus:border-accent ${pending ? "border-solid border-warning bg-warning-faint" : "border-dashed border-ink-ghost"} ${input.kind === ColumnKind.enum.number ? "w-16" : "w-40"}`}
           defaultValue={value === null ? "" : String(value)}
           onClick={stop}

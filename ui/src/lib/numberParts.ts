@@ -93,7 +93,7 @@ const markLines = (pre: Element, code: Element, lines: Element[]) => {
  */
 export const numberParts = () => (tree: Root) => {
   let count = 0;
-  let columns: TColumn[] = [];
+  let columns: { title: string; column: TColumn }[] = [];
   const visit = (node: Root | RootContent, parent: Root | Element) => {
     if (
       node.type === "element" &&
@@ -107,7 +107,7 @@ export const numberParts = () => (tree: Root) => {
     }
     if (node.type === "element" && node.tagName === "th") {
       const { title, column } = columnFromHeader(textOf(node).trim());
-      columns.push(column);
+      columns.push({ title, column });
       node.children = [{ type: "text", value: title }];
     }
     if (node.type === "element" && node.tagName === "thead") columns = [];
@@ -134,13 +134,14 @@ export const numberParts = () => (tree: Root) => {
       count += 1;
       node.properties["dataPart"] = count;
       elements(node.children).forEach((cell, index) => {
-        const column = columns[index];
-        if (column === undefined || column.kind === ColumnKind.enum.static)
+        const found = columns[index];
+        if (found === undefined || found.column.kind === ColumnKind.enum.static)
           return;
         cell.properties["dataRow"] = count;
         cell.properties["dataColumn"] = index + 1;
-        cell.properties["dataKind"] = column.kind;
-        cell.properties["dataOptions"] = column.options;
+        cell.properties["dataTitle"] = found.title;
+        cell.properties["dataKind"] = found.column.kind;
+        cell.properties["dataOptions"] = found.column.options;
       });
     }
     if ("children" in node) {
@@ -153,6 +154,7 @@ export const numberParts = () => (tree: Root) => {
 const inputSchema = z.object({
   dataRow: z.number().int().positive(),
   dataColumn: z.number().int().positive(),
+  dataTitle: z.string(),
   dataKind: InputKind,
   dataOptions: z.array(z.string()),
 });
@@ -163,10 +165,11 @@ export const partNumberOf = (node: Element | undefined): number | null => {
   return typeof number === "number" ? number : null;
 };
 
-/** The input of a cell in an input column: the row's part number, the column's number from 1, the kind and the options. */
+/** The input of a cell in an input column: the row's part number, the column's number from 1 and its title, the kind and the options. */
 export type TInput = {
   row: number;
   column: number;
+  title: string;
   kind: TInputKind;
   options: string[];
 };
@@ -174,12 +177,12 @@ export type TInput = {
 /** The input that numberParts gave the cell, or null for a cell of a column of text. */
 export const inputOf = (cell: Element): TInput | null => {
   if (cell.properties["dataKind"] === undefined) return null;
-  const { dataRow, dataColumn, dataKind, dataOptions } = inputSchema.parse(
-    cell.properties,
-  );
+  const { dataRow, dataColumn, dataTitle, dataKind, dataOptions } =
+    inputSchema.parse(cell.properties);
   return {
     row: dataRow,
     column: dataColumn,
+    title: dataTitle,
     kind: dataKind,
     options: dataOptions,
   };

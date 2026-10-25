@@ -1,8 +1,8 @@
 import { ActionKind } from "~/domain/actions";
 import type { TValue } from "~/domain/actions";
 import type { TBoard } from "~/domain/board";
-import { columnFromHeader } from "~/domain/columns";
 import type { THeard } from "~/domain/events";
+import { cardTitle, columnsOf, firstLine, rowName } from "~/domain/parts";
 import { cardOf, rowOf } from "~/domain/ref";
 import { assertNever } from "~/lib/assertNever";
 
@@ -64,22 +64,6 @@ export type TGroup = {
   lines: TLine[];
 };
 
-const firstLine = (text: string) =>
-  text
-    .split("\n")
-    .find((line) => line.trim() !== "")
-    ?.trim() ?? "";
-
-/** The first line of the markdown without its markers: the first cell of a table's header, or the heading's text. */
-const titleOf = (md: string): string => {
-  const first = firstLine(md);
-  if (first.startsWith("|")) {
-    const cell = first.split("|").find((piece) => piece.trim() !== "") ?? "";
-    return columnFromHeader(cell.trim()).title;
-  }
-  return first.replace(/^[\s#>*+-]+|^\s*\d+[.)]\s*/g, "").trim();
-};
-
 const nameOfValue = (value: TValue): string => {
   switch (value) {
     case null:
@@ -92,20 +76,6 @@ const nameOfValue = (value: TValue): string => {
       return String(value);
   }
 };
-
-/** The titles of a table card's columns, from its header row; empty for a card without a table. */
-const columnsOf = (md: string): string[] => {
-  const header = md.split("\n").find((line) => line.trim().startsWith("|"));
-  return header === undefined
-    ? []
-    : header
-        .split("|")
-        .slice(1, -1)
-        .map((cell) => columnFromHeader(cell.trim()).title);
-};
-
-/** The first cell of a table row's text, as the server joins the cells with " | ". */
-const rowName = (text: string) => text.split(" | ")[0]?.trim() ?? text;
 
 const describe = (heard: THeard, board: TBoard): Omit<TLine, "id"> => {
   const { body, parts } = heard;
@@ -187,8 +157,8 @@ const groupOf = (
       md === undefined
         ? id
         : heard.body.kind === ActionKind.enum.put
-          ? titleOf(heard.body.md)
-          : titleOf(md),
+          ? cardTitle(heard.body.md)
+          : cardTitle(md),
   };
 };
 

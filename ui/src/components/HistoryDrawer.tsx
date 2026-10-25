@@ -12,21 +12,33 @@ import {
 import { ActionKind } from "~/domain/actions";
 import { earlierVersions } from "~/domain/board";
 import type { TThread } from "~/domain/board";
+import { partTexts, rowName } from "~/domain/parts";
+import { isCardRef } from "~/domain/ref";
 import { reactionsOf } from "~/domain/reactions";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
 import { reactionTones } from "~/theme";
 
-type TThreadsProps = { threads: Record<string, TThread> };
+type TThreadsProps = { md: string; threads: Record<string, TThread> };
 
-/** The reaction of each author and the comments of each part of an earlier version. */
-const Threads = ({ threads }: TThreadsProps) => {
+/** The name of the ref in the version's markdown: the card, or the part's text. */
+const nameIn = (texts: string[], ref: string) => {
+  if (isCardRef(ref)) return "the card";
+  const text = texts[Number(ref.slice(ref.lastIndexOf("/") + 1)) - 1];
+  return text === undefined ? ref : `“${rowName(text)}”`;
+};
+
+/** The reaction of each author and the comments of each part of an earlier version, named by the part's text. */
+const Threads = ({ md, threads }: TThreadsProps) => {
   const entries = Object.entries(threads);
   if (entries.length === 0) return null;
+  const texts = partTexts(md);
   return (
     <ul className="mt-2 flex flex-col gap-1.5 border-t border-divider pt-2 text-xs">
       {entries.map(([ref, thread]) => (
         <li key={ref}>
-          <span className="font-mono text-ink-muted">{ref}</span>
+          <span title={ref} className="text-ink-muted">
+            {nameIn(texts, ref)}
+          </span>
           {reactionsOf(thread).map(([author, reaction]) => (
             <span
               key={author}
@@ -128,7 +140,7 @@ export const HistoryDrawer = ({
                   <CardBody id={id} md={version.card.md} />
                 </FeedbackContext>
               </ReadOnlyContext>
-              <Threads threads={version.threads} />
+              <Threads md={version.card.md} threads={version.threads} />
             </section>
           ),
         )}

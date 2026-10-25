@@ -130,7 +130,7 @@ async def test_the_user_fills_a_table_in_the_browser(page: Page, agent: Agent, t
             "| Task | Size {S, M, L} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n| render | | | |",
         )
     )
-    await expect(page.get_by_label("Input tasks/2/3")).to_have_attribute("placeholder", "…")
+    await expect(page.get_by_label("Input tasks/2/3")).to_have_attribute("placeholder", "Hours")
     await page.get_by_label("Input tasks/1/2").select_option("M")
     await page.get_by_label("Input tasks/1/3").fill("4")
     await page.get_by_label("Input tasks/1/3").press("Enter")
@@ -302,7 +302,7 @@ async def test_each_card_shows_its_author_and_id_and_the_user_sets_its_width(
 ) -> None:
     """Assemble: the agent puts a plan, and the user writes a note.
     Act: the user drags the bottom right corner of the plan 200 pixels to the right, and reloads the page.
-    Assert: each card shows its id and the icon of its author on the same background; the plan is 200 pixels wider after
+    Assert: the agent's card shows its id, the user's note none, and each the icon of its author on the same background; the plan is 200 pixels wider after
     the reload, the agent reads its width, and the user's turn does not carry the resize; a screenshot goes in tmp_path."""
     await agent.write(put("plan", "1. parse\n2. render"), move("plan", 0, 0))
     await page.mouse.dblclick(300, 600)
@@ -312,7 +312,7 @@ async def test_each_card_shows_its_author_and_id_and_the_user_sets_its_width(
     await expect(note.get_by_role("img", name="By you")).to_be_visible()
     note_id = await note.get_attribute("data-ref")
     assert note_id is not None
-    await expect(note.locator("header")).to_contain_text(note_id)
+    await expect(note.locator("header")).not_to_contain_text(note_id)
     plan = page.locator('article[data-ref="plan"]')
     await expect(plan.get_by_role("img", name="By the agent")).to_be_visible()
     await expect(plan.locator("header")).to_contain_text("plan")
@@ -510,7 +510,7 @@ async def test_a_removed_card_comes_back_with_undo_or_from_the_history(page: Pag
     before = await boxes(page, "a")
     await page.locator('article[data-ref="a"] header').click()
     await page.keyboard.press("Delete")
-    toast = page.locator('[role="status"]', has_text="Removed a")
+    toast = page.locator('[role="status"]', has_text="Removed “first”")
     await expect(toast).to_be_visible()
     await toast.get_by_role("button", name="Undo").click()
     await expect(page.locator('article[data-ref="a"]')).to_be_visible()
@@ -1031,7 +1031,7 @@ async def test_one_send_in_the_chat_lists_the_changes_by_card_and_marks_them_uns
     await expect(page.get_by_label("Input checklist/2/3")).to_have_attribute("data-unsent", "")
     await expect(step.get_by_role("img", name="user: approve, unsent")).to_be_visible()
     await expect(step.get_by_label("Thread on plan/2, unsent")).to_be_visible()
-    await expect(chat.locator("li[data-unsent]")).to_have_text("plan/2fast, pleaseunsent")
+    await expect(chat.locator("li[data-unsent]")).to_have_text("“parse”fast, pleaseunsent")
     assert await toolbar.bounding_box() == before
 
     await page.get_by_label("Close the chat").click()
@@ -1189,10 +1189,45 @@ async def test_the_history_docks_beside_the_board_and_an_arrow_the_agent_removes
     (arrow_id,) = arrows
     await agent.write(unlink(arrow_id))
     toast = page.get_by_role("status", name="Arrow removed by the agent")
-    await expect(toast).to_contain_text("The agent removed your arrow a/1 → b/1")
+    await expect(toast).to_contain_text("The agent removed your arrow from “parse” to “render”")
     await toast.get_by_role("button", name="Put it back").click()
     await expect(toast).to_have_count(0)
     assert set((await read_board(agent.tools)).arrows) == {arrow_id}
 
     await page.get_by_role("button", name="Collapse the chat").click()
     await expect(page.get_by_label("Open the chat")).to_be_visible()
+
+
+async def test_the_page_names_parts_by_their_text_and_keeps_the_refs_for_the_agent(
+    page: Page, agent: Agent, tmp_path: Path
+) -> None:
+    """Assemble: a Risks card with a heading and two bullets, a table with an Hours column, and a message from the
+    agent that names the second bullet by its ref.
+    Act: the user clicks the second bullet and comments on it; removes the Risks card with Delete.
+    Assert: the feedback panel names the bullet by its text and its card by its title, with the ref in its title
+    attribute; the chat's chip on the comment says the text and keeps the ref as its label; the agent's ref link keeps
+    the ref as its text and has the part's text as its title; the Hours cell's placeholder is Hours; the undo toast
+    names the card by its title; a screenshot goes in tmp_path."""
+    await agent.write(
+        put("risks", "# Risks\n\n- the cache is shared\n- the parser is slow"),
+        put("tasks", "| Task | Hours {number} |\n|---|---|\n| parse | |"),
+        say("Look at risks/3 first"),
+    )
+    bullet = page.locator('[data-ref="risks/3"]')
+    await bullet.click()
+    panel = page.get_by_label("Feedback on risks/3")
+    await expect(panel.locator("header")).to_contain_text("“the parser is slow” in Risks")
+    await expect(panel.locator("header [title='risks/3']")).to_have_count(1)
+    await page.get_by_label("Comment").fill("how slow?")
+    await page.get_by_label("Comment").press("Enter")
+    chat = page.get_by_label("Chat with the agent")
+    await expect(chat.get_by_label("Show risks/3")).to_have_text("“the parser is slow”")
+    link = chat.get_by_role("button", name="risks/3", exact=True)
+    await expect(link).to_have_attribute("title", "the parser is slow")
+    await expect(page.get_by_label("Input tasks/1/2")).to_have_attribute("placeholder", "Hours")
+    await snap(page, tmp_path / "1-names.png")
+
+    await page.keyboard.press("Escape")
+    await page.locator('article[data-ref="risks"] header').click(position={"x": 150, "y": 10})
+    await page.keyboard.press("Delete")
+    await expect(page.locator('[role="status"]', has_text="Removed “Risks”")).to_be_visible()

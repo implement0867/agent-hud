@@ -4,8 +4,10 @@ import { Bubble } from "~/components/Bubble";
 import { Composer } from "~/components/Composer";
 import type { TDraft } from "~/components/Composer";
 import { IconButton } from "~/components/IconButton";
-import { useStore, useThread } from "~/data/context";
+import { useBoard, useStore, useThread } from "~/data/context";
 import { ActionKind, Reaction } from "~/domain/actions";
+import { nameOf } from "~/domain/parts";
+import { cardOf, isCardRef } from "~/domain/ref";
 import { reactionKeys, toggleReaction, userReaction } from "~/domain/reactions";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
 import { reactionIcons, reactionTones } from "~/theme";
@@ -30,8 +32,11 @@ export const FeedbackPanel = ({
   measure,
 }: TFeedbackPanelProps) => {
   const store = useStore();
+  const { model } = useBoard();
   const { select } = useWhiteboard();
   const thread = useThread(target);
+  const name = nameOf(model.board, target);
+  const card = isCardRef(target) ? null : nameOf(model.board, cardOf(target));
   const reaction = userReaction(thread);
   const agents = thread.reactions.agent;
   return (
@@ -54,8 +59,14 @@ export const FeedbackPanel = ({
       }}
     >
       <header className="mb-2 flex shrink-0 items-center justify-between">
-        <span className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-xs text-ink-muted">
-          {target}
+        <span
+          title={target}
+          className="min-w-0 truncate text-xs text-ink-muted"
+        >
+          <span className="font-medium text-ink">
+            {card === null ? name : `“${name}”`}
+          </span>
+          {card !== null && <span> in {card}</span>}
         </span>
         <IconButton
           variant="close"
