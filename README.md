@@ -27,12 +27,16 @@ the page's pill names the board it shows and lists the others, and a click opens
 
 The hook asks `GET /health` on the port, which the app answers with its name, its version and the build
 fingerprint it was started with, a checksum of the server's sources that the hook computes. The same build
-answering means nothing to do. An app from other sources is stopped and the new one started. Another
-program on the port is an error, and the hook says so. The hook waits up to 15 s for the app to answer,
-then exits 1 with a message if it does not, and `uv` missing from PATH is a message too. The first start
+answering means nothing to do. An app from other sources, or an agent-hud from before `/health`, which
+serves the board page at `/`, is stopped and the new one started: the hook stops the process that
+`server.pid` names, or the one that `lsof` finds on the port when it runs agent-hud's server, and says
+what it found when it can stop neither. Another program on the port, with neither agent-hud's `/health`
+nor its page, is an error, and the hook says so. The hook waits up to 15 s for the app to answer, then
+exits 1 with a message if it does not, and `uv` missing from PATH is a message too. The first start
 installs the dependencies, which takes longer. The app logs to `$XDG_STATE_HOME/agent-hud/server.log`
 and records its pid in `server.pid` next to it, with `~/.local/state` as the default; to stop it, `kill`
-that pid.
+that pid. The app stops by itself after an hour with no page or monitor connected and no request, and
+the next session's hook starts it again.
 
 | Variable | Does |
 |---|---|
@@ -41,6 +45,7 @@ that pid.
 | `AGENT_HUD_STATE_DIR` | the directory of the token file and, by default, of the boards; `$XDG_STATE_HOME/agent-hud` by default, with `~/.local/state` for the XDG state home |
 | `AGENT_HUD_BOARDS_DIR` | the directory of the SQLite file of each board, named by the board's id, which the app appends each action to and replays on start; `boards` in the state dir by default. On a clear and on shutdown the app compacts each: its checkpoint takes the board at the start of the user's turn, and the actions from there alone stay. One process holds the files, so a second one on the same state dir, such as a second uvicorn worker, does not start |
 | `AGENT_HUD_STATIC_DIR` | the directory of the built UI; the one in the package by default |
+| `AGENT_HUD_IDLE_SECONDS` | how long the app runs with no page or monitor connected and no request before it stops, 3600 by default; 0 keeps it running |
 
 The hook of the first session of the day starts the app, so these must be set in the environment that
 starts that session, such as the shell profile.
