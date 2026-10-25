@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from shlex import quote
@@ -28,6 +27,7 @@ from agent_hud.models.actions import (
 )
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
+from agent_hud.models.refs import card_of
 from agent_hud.schema import compact
 
 type TActions = Annotated[list[TAgentBody], Field(min_length=1)]
@@ -91,10 +91,6 @@ class Reading(Board):
     parts: TParts = Field(description="The text of each part of each card, by card id and part number")
 
 
-def on_cards(ref: TRef, cards: set[TCardId]) -> bool:
-    return ref.partition("/")[0] in cards
-
-
 def selected(board: Board, cards: list[TCardId] | None, since: TActionId | None) -> Board:
     """
     The board with the given cards only, if given, with everything keyed by card or by a ref on it kept for those cards;
@@ -109,9 +105,9 @@ def selected(board: Board, cards: list[TCardId] | None, since: TActionId | None)
     return board.model_copy(
         update={
             "cards": {k: v for k, v in board.cards.items() if k in kept},
-            "threads": {k: v for k, v in board.threads.items() if on_cards(k, kept)},
-            "values": {k: v for k, v in board.values.items() if on_cards(k, kept)},
-            "arrows": {k: v for k, v in board.arrows.items() if on_cards(v.src, kept) or on_cards(v.dst, kept)},
+            "threads": {k: v for k, v in board.threads.items() if card_of(k) in kept},
+            "values": {k: v for k, v in board.values.items() if card_of(k) in kept},
+            "arrows": {k: v for k, v in board.arrows.items() if card_of(v.src) in kept or card_of(v.dst) in kept},
             "messages": chat,
             "positions": {k: v for k, v in board.positions.items() if k in kept},
             "widths": {k: v for k, v in board.widths.items() if k in kept},
@@ -120,24 +116,10 @@ def selected(board: Board, cards: list[TCardId] | None, since: TActionId | None)
     )
 
 
-def put_ids(bodies: list[TAgentBody]) -> Iterator[TCardId]:
-    """The id of each card that the actions put."""
-    for body in bodies:
-        match body:
-            case Put(id=card_id):
-                yield card_id
-            case _:
-                pass
-
-
-def unlinked(bodies: list[TAgentBody]) -> set[TCardId]:
-    """The id of each arrow that the actions unlink."""
-    return {body.id for body in bodies if isinstance(body, Unlink)}
-
-
 def written(before: Board, after: Board, bodies: list[TAgentBody]) -> Written:
     """What the actions made of the board and moved aside, from the board before them and after."""
-    put = list(put_ids(bodies))
+    put = [body.id for body in bodies if isinstance(body, Put)]
+    unlinked = {body.id for body in bodies if isinstance(body, Unlink)}
     return Written(
         added=[card_id for card_id in put if card_id not in before.cards],
         replaced=[card_id for card_id in put if card_id in before.cards],
@@ -147,7 +129,7 @@ def written(before: Board, after: Board, bodies: list[TAgentBody]) -> Written:
             for version in versions[len(before.history.get(card_id, ())) :]
             for ref in version.threads
         ],
-        dropped=[arrow_id for arrow_id in before.arrows if arrow_id not in {*after.arrows, *unlinked(bodies)}],
+        dropped=[arrow_id for arrow_id in before.arrows if arrow_id not in {*after.arrows, *unlinked}],
         parts={card_id: after.texts_of(card_id) for card_id in put},
     )
 
