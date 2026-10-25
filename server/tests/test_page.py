@@ -164,6 +164,7 @@ async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser
         move("questions", 1140, 0),
     )
     await expect(page.locator('[data-ref="code"] pre.shiki')).to_be_visible()
+    await settled(page)
 
     await page.locator('[data-ref="options/2"]').hover()
     dot = await page.get_by_label("Draw an arrow from options/2").bounding_box()
@@ -210,6 +211,7 @@ async def test_a_fast_drag_from_the_dot_draws_an_arrow_and_its_label_selects_it_
     )
     card = page.locator('article[data-ref="options"]')
     await expect(card).to_be_visible()
+    await settled(page)
     before = await boxes(page, "options")
     dot = await page.get_by_label("Draw an arrow from options/2").bounding_box()
     goal = await page.locator('[data-ref="questions/1"]').bounding_box()
@@ -333,6 +335,29 @@ async def test_each_card_shows_its_author_and_id_and_the_user_sets_its_width(
     assert after is not None and after["width"] == before["width"] + 200
     await expect(page.get_by_label("1 unsent")).to_be_visible()
     await snap(page, tmp_path / "1-width.png")
+
+
+async def test_a_card_is_as_wide_as_its_content_up_to_a_column(page: Page, agent: Agent) -> None:
+    """Assemble: a short note, a table with three input columns and a long step, and a long paragraph.
+    Assert: the note is narrower than 300 pixels; the table's row is one line tall, with its step text on one line and
+    wider than 200 pixels; the paragraph's card is a column wide, 640 pixels."""
+    step = "Bump the version in the plugin and the server"
+    await agent.write(
+        put("note", "ok"),
+        put(
+            "tasks",
+            f"| Step | Owner {{agent, user}} | Hours {{number}} | Done {{check}} |\n|---|---|---|---|\n| {step} | | | |",
+        ),
+        put("prose", " ".join(f"word{n}" for n in range(80))),
+    )
+    shown = await boxes(page, "note", "tasks", "prose")
+    assert shown["note"][2] < 300
+    assert shown["prose"][2] == 640
+    row = await page.locator('[data-ref="tasks/1"]').bounding_box()
+    text = await page.locator('[data-ref="tasks/1"] td').nth(1).bounding_box()
+    assert row is not None and text is not None
+    assert row["height"] < 48, "the step is on one line"
+    assert text["width"] > 200
 
 
 async def on_top(page: Page, x: float, y: float) -> str | None:
@@ -893,6 +918,8 @@ async def test_the_marks_of_a_table_row_sit_before_its_text(page: Page, agent: A
     Act: the user hovers the first row.
     Assert: the quick buttons sit before the row's text, and the row's checkbox is clear of them by more than their width."""
     await agent.write(put("tasks", "| Task | Done {check} |\n|---|---|\n| parse | |\n| render | |"))
+    await positions_once(agent, {"tasks"}.issubset)
+    await settled(page)
     row = page.locator('[data-ref="tasks/1"]')
     await row.hover()
     quick = page.get_by_label("approve tasks/1")
