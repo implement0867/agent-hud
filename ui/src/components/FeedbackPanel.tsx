@@ -7,7 +7,7 @@ import {
   reactionTones,
   userReaction,
 } from "~/lib/reactions";
-import { splitRefs, useTools } from "~/lib/whiteboard";
+import { SelectionKind, splitRefs, useTools } from "~/lib/whiteboard";
 import { ActionKind, Author, Reaction, messageSchema } from "~/schemas/actions";
 import type { TSaid } from "~/schemas/board";
 
@@ -172,6 +172,12 @@ export const FeedbackPanel = ({
       }}
       onClick={(event) => {
         event.stopPropagation();
+      }}
+      // Esc anywhere in the panel, the comment box too, closes the panel and keeps the part selected.
+      onKeyDownCapture={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        select({ kind: SelectionKind.enum.ref, ref: target }, false);
       }}
     >
       <header className="mb-2 flex shrink-0 items-center justify-between">

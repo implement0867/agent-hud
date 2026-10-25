@@ -150,8 +150,37 @@ const SendButton = ({
 }) => {
   const [open, setOpen] = useState(false);
   const unsent = pending.length;
+  const box = useRef<HTMLDivElement>(null);
+  /** Esc, and a press outside the list, close it. */
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        setOpen(false);
+      },
+      { capture: true, signal: controller.signal },
+    );
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (
+          !(event.target instanceof Node) ||
+          !box.current?.contains(event.target)
+        )
+          setOpen(false);
+      },
+      { capture: true, signal: controller.signal },
+    );
+    return () => {
+      controller.abort();
+    };
+  }, [open]);
   return (
-    <div className="relative flex items-center">
+    <div ref={box} className="relative flex items-center">
       <button
         type="button"
         aria-label="Send to the agent"

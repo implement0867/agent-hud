@@ -203,6 +203,9 @@ const usePointerDrag = ({
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      // The press takes the focus from an input, as a click elsewhere does, so that the keys act on the selection.
+      if (document.activeElement instanceof HTMLElement)
+        document.activeElement.blur();
       event.currentTarget.setPointerCapture(event.pointerId);
       start.current = { x: event.clientX, y: event.clientY, at };
       moved.current = false;
@@ -335,8 +338,9 @@ export const CardFrame = ({
     at,
     move,
     drop,
+    // A click on the header selects the card alone; its feedback opens from its marks, or with C.
     click: () => {
-      select({ kind: SelectionKind.enum.ref, ref: id });
+      select({ kind: SelectionKind.enum.ref, ref: id }, false);
     },
   });
   /**
