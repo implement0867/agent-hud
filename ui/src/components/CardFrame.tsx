@@ -7,7 +7,7 @@ import { IconButton } from "~/components/IconButton";
 import { Connector, Marks } from "~/components/Marks";
 import { MarkdownEditor } from "~/components/MarkdownEditor";
 import type { TCardView } from "~/data/boardModel";
-import { useStore } from "~/data/context";
+import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Author } from "~/domain/actions";
 import type { TPoint } from "~/domain/board";
 import {
@@ -17,6 +17,7 @@ import {
 } from "~/hooks/useWhiteboard";
 import { clampCardWidth, columnWidth, leastCardWidth } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
+import { unsentTone } from "~/theme";
 
 type TPointerDragArgs = {
   scale: number;
@@ -90,6 +91,7 @@ type TCardFrameProps = {
 export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   const { id, card, at, versions, layer } = view;
   const store = useStore();
+  const { model } = useBoard();
   const { selection, select, editing, edit, openHistory, remove } =
     useWhiteboard();
   const frame = useRef<HTMLElement | null>(null);
@@ -198,6 +200,15 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
         {card.edited ? (
           <span className="pill bg-accent-faint text-accent-strong">
             {mine ? "edited by the agent" : "edited by you"}
+          </span>
+        ) : null}
+        {model.unsent.refs.has(id) ? (
+          <span
+            title="The agent does not have this card yet: Send"
+            data-unsent=""
+            className={`pill text-warning-strong ${unsentTone} -outline-offset-1`}
+          >
+            unsent
           </span>
         ) : null}
         {versions > 0 && (

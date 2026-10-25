@@ -990,3 +990,74 @@ async def test_new_cards_of_any_size_land_clear_of_each_other(page: Page, agent:
         assert set(written) <= set(placed), "every card has a place"
         shown = await boxes(page, *written)
         assert crossing(shown) == [], f"after {batch}: {shown}"
+
+
+async def test_one_send_in_the_chat_lists_the_changes_by_card_and_marks_them_unsent_until_sent(
+    page: Page, agent: Agent, tmp_path: Path
+) -> None:
+    """Assemble: a checklist table with an owner, hours and done column, and a plan.
+    Act: the user fills two cells of a row, approves a step and comments on it; closes and opens the chat; opens the list
+    of what Send carries; sends.
+    Assert: the toolbar has no Send and keeps its size through all of it; the chat's Send counts 4, and the closed chat
+    says so; the cells, the step's reaction, its comment count and the comment's bubble are marked unsent; the list has
+    one line per action, with the row's name, the column's title and the value under the table's title, and the step's
+    text under the plan's title; after Send nothing is marked unsent, Send has no count, and the agent hears the four
+    actions; a screenshot goes in tmp_path."""
+    await agent.write(
+        put(
+            "checklist",
+            "| Task | Owner {text} | Hours {number} | Done {check} |\n|---|---|---|---|\n| Build the UI | | | |\n| Run make check | | | |",
+        ),
+        put("plan", "# The plan\n\n1. parse\n2. render"),
+    )
+    toolbar = page.get_by_role("navigation", name="Tools")
+    await expect(toolbar).to_be_visible()
+    await expect(toolbar.get_by_label("Send to the agent")).to_have_count(0)
+    before = await toolbar.bounding_box()
+    await page.get_by_label("Input checklist/2/2").fill("agent")
+    await page.get_by_label("Input checklist/2/2").press("Enter")
+    await page.get_by_label("Input checklist/2/3").fill("1")
+    await page.get_by_label("Input checklist/2/3").press("Enter")
+    step = page.locator('[data-ref="plan/2"]')
+    await step.hover()
+    await page.get_by_label("approve plan/2").click()
+    await step.click()
+    await page.get_by_label("Comment").fill("fast, please")
+    await page.get_by_label("Comment").press("Enter")
+    await page.mouse.move(700, 850)
+    chat = page.get_by_label("Chat with the agent")
+    await expect(chat.get_by_label("4 unsent")).to_be_visible()
+    await expect(page.get_by_label("Input checklist/2/2")).to_have_attribute("title", "Not sent yet")
+    await expect(page.get_by_label("Input checklist/2/3")).to_have_attribute("data-unsent", "")
+    await expect(step.get_by_role("img", name="user: approve, unsent")).to_be_visible()
+    await expect(step.get_by_label("Thread on plan/2, unsent")).to_be_visible()
+    await expect(chat.locator("li[data-unsent]")).to_have_text("plan/2fast, pleaseunsent")
+    assert await toolbar.bounding_box() == before
+
+    await page.get_by_label("Close the chat").click()
+    await expect(page.get_by_label("Open the chat")).to_contain_text("4 to send")
+    await page.get_by_label("Open the chat").click()
+    await page.get_by_label("What goes to the agent").click()
+    pending = page.get_by_label("Pending actions")
+    await expect(pending.locator("li")).to_have_count(4)
+    table = pending.get_by_label("Task")
+    await expect(table.locator("li").nth(0)).to_have_text("Run make checkOwner: agent")
+    await expect(table.locator("li").nth(1)).to_have_text("Run make checkHours: 1")
+    plan = pending.get_by_label("The plan")
+    await expect(plan.locator("li").nth(0)).to_have_text("parseapprove")
+    await expect(plan.locator("li").nth(1)).to_have_text("parse“fast, please”")
+    await snap(page, tmp_path / "1-pending.png")
+
+    await send(page)
+    assert await agent.hear() == [
+        fill("checklist/2/2", "agent"),
+        fill("checklist/2/3", 1),
+        react("plan/2", Reaction.approve),
+        comment("plan/2", "fast, please"),
+    ]
+    await expect(page.locator("[data-unsent]")).to_have_count(0)
+    await expect(page.locator('[aria-label$=" unsent"]')).to_have_count(0)
+    await expect(chat.get_by_label("Send to the agent")).to_be_disabled()
+    await expect(step.get_by_role("img", name="user: approve")).to_be_visible()
+    assert await toolbar.bounding_box() == before
+    await snap(page, tmp_path / "2-sent.png")

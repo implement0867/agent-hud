@@ -547,7 +547,6 @@ export const Whiteboard = () => {
               }}
               fit={fit}
               note={note}
-              send={send}
               history={history !== null}
               toggleHistory={toggleHistory}
               shortcuts={sheet}
@@ -556,7 +555,7 @@ export const Whiteboard = () => {
               }}
               measure={trackToolbar}
             />
-            <Chat above={layout.toolbar} measure={trackChat} />
+            <Chat send={send} above={layout.toolbar} measure={trackChat} />
           </>
         }
       >

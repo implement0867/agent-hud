@@ -1,6 +1,8 @@
 import type { TBoard, TCard, TPoint } from "~/domain/board";
 import { versionsOf } from "~/domain/board";
 import type { TAgentState, THeard, TSnapshot } from "~/domain/events";
+import { unsentOf } from "~/domain/pending";
+import type { TUnsent } from "~/domain/pending";
 import { invariant } from "~/lib/invariant";
 
 /** One card as its frame renders it. */
@@ -44,6 +46,8 @@ export type TBoardModel = {
   board: TBoard;
   agent: TAgentState;
   pending: THeard[];
+  /** The refs and the action ids that the pending actions are on, which the page marks as unsent until the send. */
+  unsent: TUnsent;
   waiting: number;
   cards: TCardView[];
   fresh: string[];
@@ -133,6 +137,7 @@ export const modelOf = (snapshot: TSnapshot, local: TLocal): TBoardModel => {
     board,
     agent: snapshot.agent,
     pending: snapshot.pending,
+    unsent: unsentOf(snapshot.pending),
     waiting: snapshot.waiting,
     fresh: local.fresh,
     cards: Object.entries(board.cards).map(([id, card]) => ({

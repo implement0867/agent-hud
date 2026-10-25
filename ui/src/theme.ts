@@ -24,3 +24,6 @@ export const agentDots: Record<TAgentState, string> = {
   working: "bg-warning",
   waiting: "bg-success",
 };
+
+/** The dashed outline of a cell, a reaction, a comment count or a card that the agent does not have yet. */
+export const unsentTone = "outline-1 outline-warning outline-dashed";

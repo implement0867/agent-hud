@@ -1,4 +1,4 @@
-import { SendHorizontal } from "lucide-react";
+import { CornerDownLeft } from "lucide-react";
 import { useState } from "react";
 
 import { messageSchema } from "~/domain/actions";
@@ -13,7 +13,7 @@ type TComposerProps = {
   draft: TDraft;
 };
 
-/** Enter sends and Shift+Enter starts a new line; the text stays until the server takes it. */
+/** The comment box: Enter posts the comment and Shift+Enter starts a new line; the text stays until the server takes it. The comment is pending until Send, in the chat. */
 export const Composer = ({ label, id, send, draft }: TComposerProps) => {
   const [sending, setSending] = useState(false);
   const ready = !sending && messageSchema.safeParse(draft.text).success;
@@ -46,14 +46,15 @@ export const Composer = ({ label, id, send, draft }: TComposerProps) => {
       />
       <button
         type="button"
-        aria-label="Send"
+        aria-label="Post it"
+        title="Post the comment (Enter); Send, in the chat, sends it"
         disabled={!ready}
         className="grid size-8 place-items-center rounded-full bg-accent text-white transition-opacity disabled:opacity-30"
         onClick={() => {
           void submit();
         }}
       >
-        <SendHorizontal className="size-4" />
+        <CornerDownLeft className="size-4" />
       </button>
     </div>
   );

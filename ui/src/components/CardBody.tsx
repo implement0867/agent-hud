@@ -13,6 +13,7 @@ import { z } from "zod";
 import { Connector, Marks } from "~/components/Marks";
 import {
   CardContext,
+  useBoard,
   useCardId,
   useCellValue,
   useReadOnly,
@@ -37,6 +38,7 @@ import {
   partNumberOf,
 } from "~/lib/numberParts";
 import type { TInput } from "~/lib/numberParts";
+import { unsentTone } from "~/theme";
 
 type TPartTone = "idle" | "selected" | "linking";
 
@@ -238,11 +240,19 @@ const CellInput = ({ target, input }: TCellInputProps) => {
   const store = useStore();
   const value = useCellValue(target);
   const readOnly = useReadOnly();
+  const { unsent } = useBoard().model;
   const fill = (next: TValue) => {
     if (next !== value)
       void store.act({ kind: ActionKind.enum.fill, ref: target, value: next });
   };
   const label = `Input ${target}`;
+  /** A value the agent does not have yet has a dashed outline, until Send. */
+  const pending = !readOnly && unsent.refs.has(target);
+  const mark = {
+    title: pending ? "Not sent yet" : undefined,
+    "data-unsent": pending ? "" : undefined,
+  };
+  const dashed = pending ? `${unsentTone} outline-offset-2` : "";
   switch (input.kind) {
     case ColumnKind.enum.check:
       return (
@@ -250,7 +260,8 @@ const CellInput = ({ target, input }: TCellInputProps) => {
           type="checkbox"
           aria-label={label}
           disabled={readOnly}
-          className="size-4 cursor-pointer accent-success"
+          {...mark}
+          className={`size-4 cursor-pointer accent-success ${dashed}`}
           checked={value === true}
           onClick={stop}
           onChange={(event) => {
@@ -263,7 +274,8 @@ const CellInput = ({ target, input }: TCellInputProps) => {
         <select
           aria-label={label}
           disabled={readOnly}
-          className={`cursor-pointer rounded-full border-0 px-2 py-0.5 text-xs font-medium outline-none focus:ring-2 focus:ring-accent-ring ${value === null ? "bg-surface-sunken text-ink-faint" : "bg-accent-soft text-accent-strong"}`}
+          {...mark}
+          className={`cursor-pointer rounded-full border-0 px-2 py-0.5 text-xs font-medium focus:ring-2 focus:ring-accent-ring ${value === null ? "bg-surface-sunken text-ink-faint" : "bg-accent-soft text-accent-strong"} ${pending ? dashed : "outline-none"}`}
           value={typeof value === "string" ? value : ""}
           onClick={stop}
           onChange={(event) => {
@@ -284,8 +296,9 @@ const CellInput = ({ target, input }: TCellInputProps) => {
           type={input.kind}
           aria-label={label}
           disabled={readOnly}
+          {...mark}
           placeholder="…"
-          className={`border-b border-dashed border-ink-ghost bg-transparent px-0.5 text-sm outline-none placeholder:text-ink-ghost focus:border-solid focus:border-accent ${input.kind === ColumnKind.enum.number ? "w-16" : "w-40"}`}
+          className={`border-b bg-transparent px-0.5 text-sm outline-none placeholder:text-ink-ghost focus:border-solid focus:border-accent ${pending ? "border-solid border-warning bg-warning-faint" : "border-dashed border-ink-ghost"} ${input.kind === ColumnKind.enum.number ? "w-16" : "w-40"}`}
           defaultValue={value === null ? "" : String(value)}
           onClick={stop}
           onKeyDown={(event) => {
@@ -356,31 +369,45 @@ const highlightPlugins = [highlight, numberParts];
 
 type TCardBodyProps = { id: string; md: string };
 
+/** Whether the markdown has a fenced code block, which the colouring loads the highlighter for. */
+const hasFence = (md: string) => /^\s*(```|~~~)/m.test(md);
+
 const CardMarkdown = ({ id, md }: TCardBodyProps) => (
   <div className="markdown">
     <CardContext value={id}>
-      <MarkdownHooks
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={highlightPlugins}
-        components={components}
-        fallback={
-          <Markdown
-            remarkPlugins={remarkPlugins}
-            rehypePlugins={plainPlugins}
-            components={components}
-          >
-            {md}
-          </Markdown>
-        }
-      >
-        {md}
-      </MarkdownHooks>
+      {hasFence(md) ? (
+        <MarkdownHooks
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={highlightPlugins}
+          components={components}
+          fallback={
+            <Markdown
+              remarkPlugins={remarkPlugins}
+              rehypePlugins={plainPlugins}
+              components={components}
+            >
+              {md}
+            </Markdown>
+          }
+        >
+          {md}
+        </MarkdownHooks>
+      ) : (
+        <Markdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={plainPlugins}
+          components={components}
+        >
+          {md}
+        </Markdown>
+      )}
     </CardContext>
   </div>
 );
 
 /**
  * The card's markdown, with each heading, paragraph, list item, table body row and code line as a part that takes
- * feedback and arrows, and code blocks in colour once the highlighter loads.
+ * feedback and arrows. A card without a code block renders at once and stays as it is, so that a value typed in a
+ * cell is not lost; one with a code block shows plain until the highlighter loads, and its inputs mount again then.
  */
 export const CardBody = memo(CardMarkdown);
