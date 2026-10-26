@@ -6,25 +6,19 @@ from agent_hud.models.actions import (
     ActionKind,
     Clear,
     Comment,
-    Fill,
     Link,
     Move,
     Place,
     Put,
-    React,
-    Reaction,
     Remove,
     Resize,
     Restore,
     Say,
     Send,
     TBody,
-    TValue,
     Unlink,
-    Unreact,
 )
 from agent_hud.models.board import Board
-from agent_hud.server import Reading
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:
@@ -39,28 +33,16 @@ def restore(card_id: str) -> Restore:
     return Restore(kind=ActionKind.restore, id=card_id)
 
 
-def react(ref: str, reaction: Reaction) -> React:
-    return React(kind=ActionKind.react, ref=ref, reaction=reaction)
-
-
-def unreact(ref: str) -> Unreact:
-    return Unreact(kind=ActionKind.unreact, ref=ref)
-
-
-def comment(ref: str, text: str) -> Comment:
-    return Comment(kind=ActionKind.comment, ref=ref, text=text)
+def comment(card_id: str, text: str, quote: str = "", occurrence: int | None = None) -> Comment:
+    return Comment(kind=ActionKind.comment, card=card_id, quote=quote, occurrence=occurrence, text=text)
 
 
 def say(text: str) -> Say:
     return Say(kind=ActionKind.say, text=text)
 
 
-def fill(ref: str, value: TValue) -> Fill:
-    return Fill(kind=ActionKind.fill, ref=ref, value=value)
-
-
-def link(arrow_id: str, src: str, dst: str, text: str = "") -> Link:
-    return Link(kind=ActionKind.link, id=arrow_id, src=src, dst=dst, text=text)
+def link(arrow_id: str, card_id: str, dst: str, text: str = "", quote: str = "", occurrence: int | None = None) -> Link:
+    return Link(kind=ActionKind.link, id=arrow_id, card=card_id, quote=quote, occurrence=occurrence, dst=dst, text=text)
 
 
 def unlink(arrow_id: str) -> Unlink:
@@ -71,8 +53,8 @@ def move(card_id: str, x: float, y: float) -> Move:
     return Move(kind=ActionKind.move, id=card_id, x=x, y=y)
 
 
-def resize(card_id: str, width: float) -> Resize:
-    return Resize(kind=ActionKind.resize, id=card_id, width=width)
+def resize(card_id: str, width: float | None = None, height: float | None = None) -> Resize:
+    return Resize(kind=ActionKind.resize, id=card_id, width=width, height=height)
 
 
 def place(card_id: str, x: float, y: float) -> Place:
@@ -92,13 +74,10 @@ def as_json(*bodies: TBody) -> list[dict[str, Any]]:
     return [body.model_dump(mode="json") for body in bodies]
 
 
-async def read(client: Client[Any], *, history: bool = False) -> Reading:
-    return Reading.model_validate((await client.call_tool("read", {"history": history})).structured_content)
+async def read(client: Client[Any], *, history: bool = False) -> Board:
+    return Board.model_validate((await client.call_tool("read", {"history": history})).structured_content)
 
 
 async def read_board(client: Client[Any], *, history: bool = False, **params: Any) -> Board:
-    """The board that read returns, without the parts, to compare with the hud's board."""
-    reading = Reading.model_validate(
-        (await client.call_tool("read", {"history": history, **params})).structured_content
-    )
-    return Board.model_validate(reading.model_dump(exclude={"parts"}))
+    """The board that read returns."""
+    return Board.model_validate((await client.call_tool("read", {"history": history, **params})).structured_content)

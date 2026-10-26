@@ -1,148 +1,196 @@
-import { MessageCircle } from "lucide-react";
+import { useEffect, useEffectEvent, useState } from "react";
+import type { RefObject } from "react";
 
-import { useBoard, useReadOnly, useStore, useThread } from "~/data/context";
-import { Author } from "~/domain/actions";
-import {
-  quickReactions,
-  reactionsOf,
-  toggleReaction,
-  userReaction,
-} from "~/domain/reactions";
+import { useBoard } from "~/data/context";
+import type { TThread } from "~/domain/board";
+import { threadsOn } from "~/domain/board";
+import { short } from "~/domain/text";
+import { unreadOf } from "~/domain/threads";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
-import { reactionIcons, reactionTones, unsentTone } from "~/theme";
+import { rangeOf } from "~/lib/anchor";
+import { markRanges } from "~/lib/highlights";
 
-/** Where the marks sit: at the top right of a part, before a table row, at the end of a code line, or in line in a card's header. */
-export type TMarksPlacement = "part" | "row" | "line" | "header";
+/** A speech bubble's outline, in a 24 unit box. */
+const bubblePath =
+  "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z";
 
-const placements: Record<TMarksPlacement, string> = {
-  part: "absolute top-0.5 right-1",
-  row: "absolute top-1/2 left-0 -translate-y-1/2",
-  line: "absolute top-1/2 right-1 -translate-y-1/2",
-  header: "shrink-0",
+type TBubbleMarkProps = {
+  id: string;
+  thread: TThread;
+  unread: number;
+  unsent: boolean;
+  at: { x: number; y: number };
 };
 
-type TMarksProps = { target: string; placement: TMarksPlacement };
-
 /**
- * The marks of the ref: the reaction of each author and the comment count, and, while the pointer is on the part, a
- * button for approve and for reject before them, so that the marks stay where they are and a click on the comment
- * count opens the thread. The user's own reaction shows as the pressed button meanwhile. The agent's reaction has a
- * ring. A question is a comment with its mark, in the thread.
+ * The bubble of a thread: filled with the accent and the count of the agent's new comments inside it, or an outline
+ * when nothing is new; a comment that the agent does not have yet gives it a dashed outline. A click opens the thread.
  */
-export const Marks = ({ target, placement }: TMarksProps) => {
-  const store = useStore();
+const BubbleMark = ({ id, thread, unread, unsent, at }: TBubbleMarkProps) => {
   const { select } = useWhiteboard();
-  const thread = useThread(target);
-  const readOnly = useReadOnly();
-  const { unsent } = useBoard().model;
-  const reaction = userReaction(thread);
-  const comments = thread.comments.length;
-  const commentUnsent =
-    !readOnly && thread.comments.some(({ id }) => unsent.ids.has(id));
-  const reactionUnsent =
-    !readOnly && reaction !== null && unsent.refs.has(target);
-  const agentLast = thread.comments.at(-1)?.author === Author.enum.agent;
+  const words = thread.quote === "" ? "the card" : `“${short(thread.quote)}”`;
   return (
-    <span
-      data-chrome
-      className={`not-prose flex items-center gap-1 text-xs select-none ${placements[placement]}`}
-    >
-      {!readOnly && (
-        <span className="-my-0.5 hidden items-center gap-0.5 rounded-full bg-surface/90 p-0.5 shadow-sm ring-1 ring-outline group-hover/part:flex">
-          {quickReactions.map((option) => {
-            const Icon = reactionIcons[option];
-            const on = reaction === option;
-            return (
-              <button
-                key={option}
-                type="button"
-                aria-label={`${option} ${target}`}
-                aria-pressed={on}
-                // The buttons are for the pointer; the keys A and R react to the selection, so Tab passes them.
-                tabIndex={-1}
-                className={`grid size-5 place-items-center rounded-full transition-colors ${on ? reactionTones[option] : "text-ink-faint hover:bg-surface-sunken hover:text-ink-soft"}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void store.act(toggleReaction(thread, target, option));
-                }}
-              >
-                <Icon className="size-3.5" strokeWidth={2.5} />
-              </button>
-            );
-          })}
-        </span>
-      )}
-      {comments > 0 && (
-        <button
-          type="button"
-          aria-label={`Thread on ${target}${commentUnsent ? ", unsent" : ""}${agentLast ? ", last by the agent" : ""}`}
-          title={
-            commentUnsent
-              ? "A comment not sent yet"
-              : agentLast
-                ? "The agent commented last"
-                : undefined
-          }
-          data-unsent={commentUnsent ? "" : undefined}
-          disabled={readOnly}
-          className={`flex items-center gap-0.5 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent-strong enabled:hover:bg-accent-muted ${commentUnsent ? `${unsentTone} outline-offset-1` : ""} ${agentLast ? "ring-2 ring-current ring-inset" : ""}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            select({ kind: SelectionKind.enum.ref, ref: target });
-          }}
-        >
-          <MessageCircle className="size-3" />
-          {comments}
-        </button>
-      )}
-      {reactionsOf(thread).map(([author, reacted]) => {
-        const Icon = reactionIcons[reacted];
-        const pending = author === Author.enum.user && reactionUnsent;
-        return (
-          <span
-            key={author}
-            role="img"
-            aria-label={`${author}: ${reacted}${pending ? ", unsent" : ""}`}
-            title={pending ? "Not sent yet" : undefined}
-            data-unsent={pending ? "" : undefined}
-            className={`grid size-5 place-items-center rounded-full ${reactionTones[reacted]} ${author === Author.enum.agent ? "ring-2 ring-current ring-inset" : ""} ${author === Author.enum.user && !readOnly ? "group-hover/part:hidden" : ""} ${pending ? `${unsentTone} outline-offset-1` : ""}`}
-          >
-            <Icon className="size-3.5" strokeWidth={3} />
-          </span>
-        );
-      })}
-    </span>
-  );
-};
-
-type TConnectorProps = { target: string };
-
-/**
- * A dot beside the right edge of a part or card; a drag from it draws an arrow. The dot sits in a strip that joins the
- * part's edge, so that the pointer stays on the part on its way to the dot. The strip is there, unseen, while the part
- * is not hovered, so that a pointer that jumps onto it from outside finds it and the dot shows. A click on the dot
- * draws nothing and selects nothing. An earlier version's parts have none.
- */
-export const Connector = ({ target }: TConnectorProps) => {
-  const { beginLink } = useWhiteboard();
-  const readOnly = useReadOnly();
-  if (readOnly) return null;
-  return (
-    <span
-      role="button"
-      tabIndex={-1}
-      aria-label={`Draw an arrow from ${target}`}
-      className="group/dot absolute inset-y-0 left-full flex w-[1.4rem] cursor-crosshair items-center justify-end opacity-0 group-hover/part:opacity-100"
+    <button
+      type="button"
+      data-thread={id}
+      data-unsent={unsent ? "" : undefined}
+      aria-label={`Thread on ${words}${unread > 0 ? `, ${String(unread)} new from the agent` : ""}${unsent ? ", unsent" : ""}`}
+      title={unsent ? "A comment not sent yet" : undefined}
+      className={`pointer-events-auto absolute grid size-5 place-items-center rounded-full ${unread > 0 ? "" : "text-ink-faint hover:text-ink-soft"} ${unsent ? "outline-1 outline-offset-1 outline-warning outline-dashed" : ""}`}
+      style={{ left: at.x, top: at.y }}
       onPointerDown={(event) => {
-        event.preventDefault();
         event.stopPropagation();
-        beginLink(target, event);
       }}
       onClick={(event) => {
         event.stopPropagation();
+        select({ kind: SelectionKind.enum.thread, id });
       }}
     >
-      <span className="size-3 rounded-full border-2 border-draw bg-surface shadow transition-transform group-hover/dot:scale-125 group-hover/dot:bg-draw" />
-    </span>
+      {unread > 0 ? (
+        <svg viewBox="0 0 24 24" aria-hidden className="block size-5">
+          <path d={bubblePath} className="fill-accent" />
+          <text
+            x="12"
+            y="10.2"
+            textAnchor="middle"
+            dominantBaseline="central"
+            className="fill-on-accent font-sans text-[11px] font-semibold"
+          >
+            {unread}
+          </text>
+        </svg>
+      ) : (
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden
+          className="block size-3.5 fill-none stroke-current stroke-2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d={bubblePath} />
+        </svg>
+      )}
+    </button>
   );
+};
+
+type TPlaced = { id: string; thread: TThread; x: number; y: number };
+
+type TThreadMarksProps = {
+  card: string;
+  /** The element that scrolls the card's text, which the bubbles sit in. */
+  body: RefObject<HTMLElement | null>;
+  /** What the marks measure again on: the card's text and size. */
+  version: string;
+};
+
+/**
+ * The marks of the card's threads and arrows: a highlight on the words of each, and the bubble of each thread level
+ * with its first line, in the card's right margin, side by side when two share a line, or just after its words when
+ * the look puts the marks in line. A thread on the card as a whole has its bubble at the top.
+ */
+export const ThreadMarks = ({ card, body, version }: TThreadMarksProps) => {
+  const { model } = useBoard();
+  const { seen, look } = useWhiteboard();
+  const [placed, setPlaced] = useState<TPlaced[]>([]);
+  const threads = threadsOn(model.board.threads, card);
+  const arrows = Object.values(model.board.arrows).filter(
+    (arrow) => arrow.card === card,
+  );
+  const key = JSON.stringify([
+    version,
+    look.marks,
+    threads.map(([id, t]) => [id, t.quote, t.occurrence]),
+    arrows.map((a) => [a.quote, a.occurrence]),
+  ]);
+
+  /** Measures the words of each thread and arrow, marks them, and places the bubbles. */
+  const measure = useEffectEvent((scroller: HTMLElement, root: Element) => {
+    const box = scroller.getBoundingClientRect();
+    const scale = box.width / scroller.offsetWidth || 1;
+    const local = (rect: DOMRect) => ({
+      x: (rect.left - box.left) / scale + scroller.scrollLeft,
+      y: (rect.top - box.top) / scale + scroller.scrollTop,
+      right: (rect.right - box.left) / scale + scroller.scrollLeft,
+    });
+    const ranges: Range[] = [];
+    const lines = new Map<number, number>();
+    const next = threads.flatMap(([id, thread]) => {
+      const range =
+        thread.quote === ""
+          ? null
+          : rangeOf(root, thread.quote, thread.occurrence);
+      if (thread.quote !== "" && range === null) return [];
+      if (range !== null) ranges.push(range);
+      const rects = range === null ? [] : [...range.getClientRects()];
+      const first = rects[0];
+      const last = rects.at(-1);
+      const top =
+        first === undefined
+          ? 4
+          : local(first).y + (first.height / scale - 20) / 2;
+      if (look.marks === "inline" && last !== undefined) {
+        const end = local(last);
+        return [{ id, thread, x: end.right + 2, y: end.y - 10 }];
+      }
+      const line = Math.round(top / 8);
+      const count = lines.get(line) ?? 0;
+      lines.set(line, count + 1);
+      return [
+        {
+          id,
+          thread,
+          x: scroller.scrollWidth - 40 + count * 20,
+          y: top,
+        },
+      ];
+    });
+    markRanges("thread", card, ranges);
+    markRanges(
+      "arrow",
+      card,
+      arrows.flatMap((arrow) => {
+        const range =
+          arrow.quote === ""
+            ? null
+            : rangeOf(root, arrow.quote, arrow.occurrence);
+        return range === null ? [] : [range];
+      }),
+    );
+    setPlaced(next);
+  });
+
+  // The key holds what the marks depend on: the card's text and size, the look, and the words of each thread and arrow.
+  useEffect(() => {
+    const scroller = body.current;
+    const root = scroller?.querySelector("[data-text-root]");
+    if (scroller == null || root == null) return;
+    const remeasure = () => {
+      measure(scroller, root);
+    };
+    remeasure();
+    const observer = new ResizeObserver(remeasure);
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      markRanges("thread", card, []);
+      markRanges("arrow", card, []);
+    };
+  }, [key, body, card]);
+
+  return placed.map(({ id, thread, x, y }) => {
+    const live = model.board.threads[id] ?? thread;
+    return (
+      <BubbleMark
+        key={id}
+        id={id}
+        thread={live}
+        unread={unreadOf(live, seen[id])}
+        unsent={live.comments.some(({ id: said }) =>
+          model.unsent.ids.has(said),
+        )}
+        at={{ x, y }}
+      />
+    );
+  });
 };

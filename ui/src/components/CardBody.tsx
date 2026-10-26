@@ -1,370 +1,213 @@
-import { memo } from "react";
-import type {
-  ComponentProps,
-  MouseEvent,
-  ReactNode,
-  SyntheticEvent,
-} from "react";
+import type { Element, Root } from "hast";
+import { createContext, memo, useContext } from "react";
+import type { ComponentProps, ReactNode, SyntheticEvent } from "react";
 import Markdown, { MarkdownHooks } from "react-markdown";
 import type { ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { z } from "zod";
+import type { Pluggable, PluggableList } from "unified";
 
-import { Connector, Marks } from "~/components/Marks";
-import {
-  CardContext,
-  useBoard,
-  useCardId,
-  useCellValue,
-  useReadOnly,
-  useStore,
-} from "~/data/context";
-import { ActionKind } from "~/domain/actions";
-import type { TValue } from "~/domain/actions";
-import { ColumnKind } from "~/domain/columns";
-import { cellRef, partRef } from "~/domain/ref";
-import {
-  SelectionKind,
-  isSelected,
-  useWhiteboard,
-} from "~/hooks/useWhiteboard";
-import { assertNever } from "~/lib/assertNever";
+import { isBoxCell } from "~/domain/text";
+import { showChanges } from "~/lib/changes";
+import type { TDiffStyle } from "~/lib/changes";
+import { DiffKind, markCodeLines } from "~/lib/codeLines";
 import { highlight } from "~/lib/highlight";
-import { invariant } from "~/lib/invariant";
-import {
-  DiffKind,
-  inputOf,
-  numberParts,
-  partNumberOf,
-} from "~/lib/numberParts";
-import type { TInput } from "~/lib/numberParts";
-import { unsentTone } from "~/theme";
 
-type TPartTone = "idle" | "selected" | "linking";
+/** Flips the box of a task item or a table cell, whose markdown runs from start to end; none for an earlier version. */
+type TToggle = ((start: number, end: number) => void) | null;
 
-const partTones: Record<TPartTone, string> = {
-  idle: "hover:bg-surface-sunken/80",
-  selected: "bg-accent-faint ring-1 ring-accent-ring",
-  linking: "bg-draw-soft ring-2 ring-draw",
-};
-
-/** The tones of a code line, on the dark of the code block. */
-const lineTones: Record<TPartTone, string> = {
-  idle: "hover:bg-white/10",
-  selected: "bg-accent-ring/20 ring-1 ring-accent-ring",
-  linking: "bg-draw/25 ring-2 ring-draw",
-};
-
-const diffTones: Record<z.infer<typeof DiffKind>, string> = {
-  add: "bg-success/15",
-  remove: "bg-danger/15",
-};
-
-type TPart = {
-  ref: string;
-  dataRef: string | undefined;
-  tone: TPartTone;
-  onClick: ((event: MouseEvent) => void) | undefined;
-  /** New or reworded in the agent's last version, until the user looks at the card. */
-  changed: boolean;
-};
-
-/** The bar on a part that the agent's last version added or changed. */
-const changedTone = "shadow-[inset_3px_0_0_0_var(--color-success)]";
-
-/** The attributes of a changed part, for the page and its tests. */
-const changedMark = (changed: boolean) =>
-  changed
-    ? {
-        "data-changed": "",
-        title: "New or changed in the agent's last version",
-      }
-    : {};
-
-/**
- * The ref of the part that numberParts numbered, its tone, and its click, which selects it. An earlier version's parts
- * have no data-ref, so that the board finds only the parts of the cards on it, and no click.
- */
-const usePart = (node: ExtraProps["node"]): TPart => {
-  const number = partNumberOf(node);
-  invariant(number !== null, "numberParts numbers each part");
-  const id = useCardId();
-  const ref = partRef(id, number);
-  const { selection, select, linkingFrom } = useWhiteboard();
-  const readOnly = useReadOnly();
-  const { model } = useBoard();
-  if (readOnly)
-    return {
-      ref,
-      dataRef: undefined,
-      tone: "idle",
-      onClick: undefined,
-      changed: false,
-    };
-  return {
-    ref,
-    dataRef: ref,
-    changed: model.changed[id]?.parts.includes(number) ?? false,
-    tone:
-      linkingFrom === ref
-        ? "linking"
-        : isSelected(selection, ref)
-          ? "selected"
-          : "idle",
-    onClick: (event) => {
-      event.stopPropagation();
-      select({ kind: SelectionKind.enum.ref, ref });
-    },
-  };
-};
-
-const HeadingTag = z.enum(["h1", "h2", "h3", "h4", "h5", "h6"]);
-
-type TPartProps = ExtraProps & {
-  tag: "p" | "li" | z.infer<typeof HeadingTag>;
-  children?: ReactNode;
-};
-
-/** A heading, paragraph or list item as a part: a click selects it, and does not reach the parts around it. */
-const Part = ({ node, tag: Tag, children }: TPartProps) => {
-  const part = usePart(node);
-  return (
-    <Tag
-      data-ref={part.dataRef}
-      {...changedMark(part.changed)}
-      className={`group/part relative -mx-2 cursor-pointer rounded-md px-2 pr-24 transition-colors ${partTones[part.tone]} ${part.changed ? changedTone : ""}`}
-      onClick={part.onClick}
-    >
-      {children}
-      <Marks target={part.ref} placement="part" />
-      <Connector target={part.ref} />
-    </Tag>
-  );
-};
-
-/** A paragraph outside a list item is a part; one in a list item is text of the item. */
-const Paragraph = ({ node, children }: ComponentProps<"p"> & ExtraProps) =>
-  partNumberOf(node) === null ? (
-    <p>{children}</p>
-  ) : (
-    <Part node={node} tag="p">
-      {children}
-    </Part>
-  );
-
-/** A heading is a part under its own tag. */
-const Heading = ({ node, children }: ComponentProps<"h1"> & ExtraProps) => (
-  <Part node={node} tag={HeadingTag.parse(node?.tagName)}>
-    {children}
-  </Part>
-);
-
-const ListItem = ({ node, children }: ComponentProps<"li"> & ExtraProps) => (
-  <Part node={node} tag="li">
-    {children}
-  </Part>
-);
-
-/** A table body row as a part, with its marks in a cell before the row's text, clear of its inputs. */
-const BodyRow = ({ node, children }: ComponentProps<"tr"> & ExtraProps) => {
-  const part = usePart(node);
-  return (
-    <tr
-      data-ref={part.dataRef}
-      {...changedMark(part.changed)}
-      className={`group/part cursor-pointer transition-colors ${partTones[part.tone]}`}
-      onClick={part.onClick}
-    >
-      <td className={`relative w-20 ${part.changed ? changedTone : ""}`}>
-        <Marks target={part.ref} placement="row" />
-      </td>
-      {children}
-      <td className="relative w-0 p-0">
-        <Connector target={part.ref} />
-      </td>
-    </tr>
-  );
-};
-
-/** Header rows get an empty cell above the marks of the body rows. */
-const TableRow = (props: ComponentProps<"tr"> & ExtraProps) =>
-  partNumberOf(props.node) === null ? (
-    <tr>
-      <th />
-      {props.children}
-      <th className="p-0" />
-    </tr>
-  ) : (
-    <BodyRow {...props} />
-  );
-
-/** A line of code: its number in the file when the fence gives a file or a first line, and a tint for an added or removed line of a diff. */
-const CodeLine = ({
-  node,
-  children,
-}: ExtraProps & { children?: ReactNode }) => {
-  const part = usePart(node);
-  const line = node?.properties["dataLine"];
-  const diff = DiffKind.safeParse(node?.properties["dataDiff"]);
-  return (
-    <span
-      data-ref={part.dataRef}
-      {...changedMark(part.changed)}
-      className={`group/part relative block min-h-[1lh] cursor-pointer px-4 pr-28 transition-colors ${diff.success ? diffTones[diff.data] : ""} ${lineTones[part.tone]} ${part.changed ? changedTone : ""}`}
-      onClick={part.onClick}
-    >
-      {typeof line === "number" && (
-        <span
-          data-chrome
-          className="mr-4 inline-block w-8 text-right text-ink-muted select-none"
-        >
-          {line}
-        </span>
-      )}
-      {children}
-      <Marks target={part.ref} placement="line" />
-      <Connector target={part.ref} />
-    </span>
-  );
-};
-
-/** The lines of code blocks are parts; Shiki's other spans colour the code. */
-const Span = ({ node, ...props }: ComponentProps<"span"> & ExtraProps) =>
-  partNumberOf(node) === null ? (
-    <span {...props} />
-  ) : (
-    <CodeLine node={node}>{props.children}</CodeLine>
-  );
-
-/** A code block whose fence gives a file shows the file's name above the code. */
-const Pre = ({
-  node,
-  className,
-  ...props
-}: ComponentProps<"pre"> & ExtraProps) => {
-  const file = node?.properties["dataFile"];
-  return typeof file === "string" ? (
-    <figure className="my-3">
-      <figcaption className="mt-0 rounded-t-md bg-ink-soft px-4 py-1 font-mono text-[11px] text-ink-ghost">
-        {file}
-      </figcaption>
-      <pre {...props} className={`${className ?? ""} mt-0 rounded-t-none`} />
-    </figure>
-  ) : (
-    <pre {...props} className={className} />
-  );
-};
+const ToggleContext = createContext<TToggle>(null);
 
 const stop = (event: SyntheticEvent) => {
   event.stopPropagation();
 };
 
-type TCellInputProps = { target: string; input: TInput };
-
-/** Text and number cells fill when they lose focus or on Enter, checks and choices on each change; empty clears. */
-const CellInput = ({ target, input }: TCellInputProps) => {
-  const store = useStore();
-  const value = useCellValue(target);
-  const readOnly = useReadOnly();
-  const { unsent } = useBoard().model;
-  const fill = (next: TValue) => {
-    if (next !== value)
-      void store.act({ kind: ActionKind.enum.fill, ref: target, value: next });
+/**
+ * A rehype plugin, before the colouring, while the elements have their places in the markdown: a task item's box and
+ * a table cell of a box alone get the range of their markdown, for a click to flip the box.
+ */
+const markBoxes = () => (tree: Root) => {
+  const visit = (node: Root | Element) => {
+    for (const child of node.children) {
+      if (child.type !== "element") continue;
+      const place = child.position;
+      if (place?.start.offset !== undefined && place.end.offset !== undefined) {
+        const range = {
+          dataStart: place.start.offset,
+          dataEnd: place.end.offset,
+        };
+        if (isBoxCell(child))
+          Object.assign(child.properties, range, { dataBox: "" });
+        if (child.tagName === "li")
+          for (const box of child.children)
+            if (box.type === "element" && box.tagName === "input")
+              Object.assign(box.properties, range);
+        if (child.tagName === "li")
+          for (const p of child.children)
+            if (p.type === "element" && p.tagName === "p")
+              for (const box of p.children)
+                if (box.type === "element" && box.tagName === "input")
+                  Object.assign(box.properties, range);
+      }
+      visit(child);
+    }
   };
-  const label = `Input ${target}`;
-  /** A value the agent does not have yet has a dashed outline, until Send. */
-  const pending = !readOnly && unsent.refs.has(target);
-  const mark = {
-    title: pending ? "Not sent yet" : undefined,
-    "data-unsent": pending ? "" : undefined,
-  };
-  const dashed = pending ? `${unsentTone} outline-offset-2` : "";
-  switch (input.kind) {
-    case ColumnKind.enum.check:
-      return (
-        <input
-          type="checkbox"
-          aria-label={label}
-          disabled={readOnly}
-          {...mark}
-          className={`size-4 cursor-pointer accent-success ${dashed}`}
-          checked={value === true}
-          onClick={stop}
-          onChange={(event) => {
-            fill(event.target.checked);
-          }}
-        />
-      );
-    case ColumnKind.enum.select:
-      return (
-        <select
-          aria-label={label}
-          disabled={readOnly}
-          {...mark}
-          className={`cursor-pointer rounded-full border-0 px-2 py-0.5 text-xs font-medium focus:ring-2 focus:ring-accent-ring ${value === null ? "bg-surface-sunken text-ink-faint" : "bg-accent-soft text-accent-strong"} ${pending ? dashed : "outline-none"}`}
-          value={typeof value === "string" ? value : ""}
-          onClick={stop}
-          onChange={(event) => {
-            fill(event.target.value === "" ? null : event.target.value);
-          }}
-        >
-          <option value="">choose</option>
-          {input.options.map((option) => (
-            <option key={option}>{option}</option>
-          ))}
-        </select>
-      );
-    case ColumnKind.enum.text:
-    case ColumnKind.enum.number:
-      return (
-        <input
-          key={String(value)}
-          type={input.kind}
-          aria-label={label}
-          disabled={readOnly}
-          {...mark}
-          placeholder={input.title}
-          className={`border-b bg-transparent px-0.5 text-sm outline-none placeholder:text-ink-ghost focus:border-solid focus:border-accent ${pending ? "border-solid border-warning bg-warning-faint" : "border-dashed border-ink-ghost"} ${input.kind === ColumnKind.enum.number ? "w-16" : "w-40"}`}
-          defaultValue={value === null ? "" : String(value)}
-          onClick={stop}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-          }}
-          onBlur={(event) => {
-            const text = event.target.value;
-            fill(
-              text === ""
-                ? null
-                : input.kind === ColumnKind.enum.number
-                  ? Number(text)
-                  : text,
-            );
-          }}
-        />
-      );
-    default:
-      return assertNever(input.kind);
-  }
+  visit(tree);
 };
 
-const TableCell = ({ node, children }: ComponentProps<"td"> & ExtraProps) => {
-  const id = useCardId();
-  const input = node === undefined ? null : inputOf(node);
+const rangeOf = (node: Element | undefined) => {
+  const start = node?.properties["dataStart"];
+  const end = node?.properties["dataEnd"];
+  return typeof start === "number" && typeof end === "number"
+    ? { start, end }
+    : null;
+};
+
+type TBoxProps = {
+  checked: boolean;
+  range: { start: number; end: number } | null;
+  label: string;
+};
+
+/** A box of the markdown as a checkbox; a click flips it in the markdown, which the agent gets as an edit. */
+const Box = ({ checked, range, label }: TBoxProps) => {
+  const toggle = useContext(ToggleContext);
+  return (
+    <input
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      disabled={toggle === null || range === null}
+      onPointerDown={stop}
+      onClick={stop}
+      onChange={() => {
+        if (toggle !== null && range !== null) toggle(range.start, range.end);
+      }}
+    />
+  );
+};
+
+const Input = ({ node, checked }: ComponentProps<"input"> & ExtraProps) => (
+  <Box checked={checked === true} range={rangeOf(node)} label="Done" />
+);
+
+const textIn = (node: Element | undefined): string =>
+  node === undefined
+    ? ""
+    : node.children
+        .map((child) =>
+          child.type === "text"
+            ? child.value
+            : child.type === "element"
+              ? textIn(child)
+              : "",
+        )
+        .join("");
+
+/** A cell of a box alone shows a checkbox, and an empty cell a dash. */
+const Cell = ({ node, children }: ComponentProps<"td"> & ExtraProps) => {
+  if (node?.properties["dataBox"] !== undefined)
+    return (
+      <td className="w-6">
+        <Box
+          checked={/x/i.test(textIn(node))}
+          range={rangeOf(node)}
+          label="Done"
+        />
+      </td>
+    );
   return (
     <td>
-      {input === null ? (
-        children
+      {textIn(node).trim() === "" ? (
+        <span data-chrome="" className="text-ink-ghost">
+          —
+        </span>
       ) : (
-        <CellInput
-          target={cellRef(id, input.row, input.column)}
-          input={input}
-        />
+        children
       )}
     </td>
   );
 };
 
-/** Links open in a new tab and do not select the part. */
+/** A header cell over a column of boxes has no title. */
+const HeaderCell = ({ node, children }: ComponentProps<"th"> & ExtraProps) =>
+  node?.properties["dataBox"] !== undefined ? (
+    <th className="w-6" />
+  ) : (
+    <th>{children}</th>
+  );
+
+const diffTones: Record<string, string> = {
+  [DiffKind.enum.add]: "bg-ins-bg",
+  [DiffKind.enum.remove]: "bg-del-bg",
+};
+
+/** A line of code, a row of the block that does not wrap: its number when the fence gives a file or a first line, and a tint in a diff. */
+const Span = ({
+  node,
+  children,
+  className,
+  style,
+}: ComponentProps<"span"> & ExtraProps) => {
+  if (node?.properties["dataCodeLine"] !== undefined) {
+    const diff = node.properties["dataDiff"];
+    return (
+      <span
+        data-code-line=""
+        data-diff={typeof diff === "string" ? diff : undefined}
+        className={`block min-h-[1lh] px-3 whitespace-pre ${typeof diff === "string" ? (diffTones[diff] ?? "") : ""}`}
+      >
+        {children}
+      </span>
+    );
+  }
+  if (node?.properties["dataLineNumber"] !== undefined)
+    return (
+      <span
+        data-chrome=""
+        className="mr-3 inline-block w-7 text-right text-ink-ghost select-none"
+      >
+        {children}
+      </span>
+    );
+  if (node?.properties["dataSign"] !== undefined) {
+    const add = textIn(node) === "+";
+    return (
+      <span className={add ? "text-success-strong" : "text-danger-strong"}>
+        {children}
+      </span>
+    );
+  }
+  return (
+    <span className={className} style={style}>
+      {children}
+    </span>
+  );
+};
+
+/** A code block on the sunken ground, with the file's name above it when the fence gives one; long lines scroll sideways. */
+const Pre = ({ node, children }: ComponentProps<"pre"> & ExtraProps) => {
+  const file = node?.properties["dataFile"];
+  const block = (
+    <pre className="my-0 overflow-x-auto rounded-code bg-surface-sunken py-2 font-mono text-[0.8125rem] leading-[1.625] text-ink-soft">
+      {children}
+    </pre>
+  );
+  return (
+    <figure className="my-3">
+      {typeof file === "string" && (
+        <figcaption
+          data-chrome=""
+          className="mb-1 font-mono text-[0.6875rem] leading-[1.45] text-ink-muted"
+        >
+          {file}
+        </figcaption>
+      )}
+      {block}
+    </figure>
+  );
+};
+
+/** Links open in a new tab. */
 const Anchor = ({ href, children }: ComponentProps<"a"> & ExtraProps) => (
   <a href={href} target="_blank" rel="noreferrer" onClick={stop}>
     {children}
@@ -372,44 +215,57 @@ const Anchor = ({ href, children }: ComponentProps<"a"> & ExtraProps) => (
 );
 
 const components = {
-  li: ListItem,
-  tr: TableRow,
-  td: TableCell,
   a: Anchor,
   span: Span,
   pre: Pre,
-  p: Paragraph,
-  h1: Heading,
-  h2: Heading,
-  h3: Heading,
-  h4: Heading,
-  h5: Heading,
-  h6: Heading,
+  td: Cell,
+  th: HeaderCell,
+  input: Input,
 };
 
 const remarkPlugins = [remarkGfm];
 
-const plainPlugins = [numberParts];
-
-const highlightPlugins = [highlight, numberParts];
-
-type TCardBodyProps = { id: string; md: string };
+type TCardBodyProps = {
+  md: string;
+  /** The markdown before the changes the card shows, or null to show it plain. */
+  before?: string | null;
+  diffStyle?: TDiffStyle;
+  toggle?: TToggle;
+};
 
 /** Whether the markdown has a fenced code block, which the colouring loads the highlighter for. */
 const hasFence = (md: string) => /^\s*(```|~~~)/m.test(md);
 
-const CardMarkdown = ({ id, md }: TCardBodyProps) => (
-  <div className="markdown">
-    <CardContext value={id}>
+const plugins = (
+  before: string | null,
+  style: TDiffStyle,
+  colour: boolean,
+): PluggableList => [
+  markBoxes,
+  ...(before === null
+    ? []
+    : [[showChanges, { before, style }] satisfies Pluggable]),
+  ...(colour ? [highlight] : []),
+  markCodeLines,
+];
+
+const CardMarkdown = ({
+  md,
+  before = null,
+  diffStyle = "word",
+  toggle = null,
+}: TCardBodyProps): ReactNode => (
+  <div data-text-root="" className="markdown select-text">
+    <ToggleContext value={toggle}>
       {hasFence(md) ? (
         <MarkdownHooks
           remarkPlugins={remarkPlugins}
-          rehypePlugins={highlightPlugins}
+          rehypePlugins={plugins(before, diffStyle, true)}
           components={components}
           fallback={
             <Markdown
               remarkPlugins={remarkPlugins}
-              rehypePlugins={plainPlugins}
+              rehypePlugins={plugins(before, diffStyle, false)}
               components={components}
             >
               {md}
@@ -421,19 +277,18 @@ const CardMarkdown = ({ id, md }: TCardBodyProps) => (
       ) : (
         <Markdown
           remarkPlugins={remarkPlugins}
-          rehypePlugins={plainPlugins}
+          rehypePlugins={plugins(before, diffStyle, false)}
           components={components}
         >
           {md}
         </Markdown>
       )}
-    </CardContext>
+    </ToggleContext>
   </div>
 );
 
 /**
- * The card's markdown, with each heading, paragraph, list item, table body row and code line as a part that takes
- * feedback and arrows. A card without a code block renders at once and stays as it is, so that a value typed in a
- * cell is not lost; one with a code block shows plain until the highlighter loads, and its inputs mount again then.
+ * The card's markdown on the design's scale: code blocks on the sunken ground, a table's boxes as checkboxes, and,
+ * with the markdown before, the changes since it. A card with a code block shows plain until the highlighter loads.
  */
 export const CardBody = memo(CardMarkdown);

@@ -52,8 +52,16 @@ export const useUndo = (act: TAct) => {
     setRemoved(null);
     switch (offer.kind) {
       case RemovedKind.enum.arrow: {
-        const { src, dst, text } = offer.arrow;
-        void act({ kind: ActionKind.enum.link, id: offer.id, src, dst, text });
+        const { card, quote, occurrence, dst, text } = offer.arrow;
+        void act({
+          kind: ActionKind.enum.link,
+          id: offer.id,
+          card,
+          quote,
+          occurrence: quote === "" ? null : occurrence,
+          dst,
+          text,
+        });
         return;
       }
       case RemovedKind.enum.card: {

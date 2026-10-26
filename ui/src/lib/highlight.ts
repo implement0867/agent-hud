@@ -3,24 +3,29 @@ import type { Root } from "hast";
 import type { VFile } from "vfile";
 import {
   createBundledHighlighter,
+  createCssVariablesTheme,
   createSingletonShorthands,
 } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { bundledLanguages } from "shiki/langs";
 
-const theme = "github-dark";
+/** The theme of CSS variables, which the stylesheet maps to the page's colours for each theme and accent. */
+const theme = createCssVariablesTheme({
+  name: "css-variables",
+  variablePrefix: "--shiki-",
+});
 
 const { getSingletonHighlighter } = createSingletonShorthands(
   createBundledHighlighter({
     langs: bundledLanguages,
-    themes: { [theme]: () => import("shiki/themes/github-dark.mjs") },
+    themes: { [theme.name ?? "css-variables"]: () => Promise.resolve(theme) },
     engine: () => createOnigurumaEngine(import("shiki/wasm")),
   }),
 );
 
 /**
  * A rehype plugin that colours fenced code blocks, and keeps the language and the rest of the fence's info on each pre as data-lang and data-meta.
- * The first code block loads the one chunk with Shiki's grammars, theme and WebAssembly; a language Shiki does not know shows as plain text.
+ * The first code block loads the one chunk with Shiki's grammars and WebAssembly; a language Shiki does not know shows as plain text.
  */
 export const highlight = () => async (tree: Root, file: VFile) => {
   const highlighter = await getSingletonHighlighter({
@@ -28,7 +33,7 @@ export const highlight = () => async (tree: Root, file: VFile) => {
     langs: [],
   });
   await rehypeShikiFromHighlighter(highlighter, {
-    theme,
+    theme: theme.name ?? "css-variables",
     lazy: true,
     fallbackLanguage: "text",
     transformers: [
@@ -37,6 +42,7 @@ export const highlight = () => async (tree: Root, file: VFile) => {
         pre(node) {
           node.properties["dataLang"] = this.options.lang;
           node.properties["dataMeta"] = this.options.meta?.__raw ?? "";
+          delete node.properties.style;
         },
       },
     ],

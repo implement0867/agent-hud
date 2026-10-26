@@ -7,11 +7,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from agent_hud.hud import Hud
-from agent_hud.models.actions import ActionKind, Author, Reaction, TBody
-from agent_hud.models.board import Arrow, Board, Point, Thread, Version
+from agent_hud.models.actions import ActionKind, Author, TBody
+from agent_hud.models.board import Arrow, Board, Point, Version
 from agent_hud.models.events import Accepted, AgentState, Edit, EventKind, Rejected
 from tests.conversation import Agent, User, open_agent, open_page, serve
-from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, say
+from tests.factories import as_json, comment, link, move, put, read_board, remove, say
 from tests.strategies import bodies, card_ids
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -33,111 +33,93 @@ def kinds(answers: list[Accepted | Rejected]) -> list[EventKind]:
     return [answer.kind for answer in answers]
 
 
-def feedback(board: Board | Version) -> dict[str, tuple[Reaction | None, list[tuple[Author, str]]]]:
-    """The user's reaction and the comments, by author and text, of each thread."""
-    return {
-        ref: (thread.reactions.get(Author.user), [(said.author, said.text) for said in thread.comments])
-        for ref, thread in board.threads.items()
-    }
+def feedback(board: Board | Version) -> dict[str, list[tuple[Author, str]]]:
+    """The comments, by author and text, of each thread, by the words it is on."""
+    return {thread.quote: [(said.author, said.text) for said in thread.comments] for thread in board.threads.values()}
 
 
 async def test_the_agent_revises_a_plan_from_the_users_feedback(agent: Agent, user: User) -> None:
     """Assemble: the agent puts a plan of three steps and asks the user to review it.
-    Act: the user reacts to each step, comments on two and sends; the agent answers a question, puts a new plan, and the user approves it with a message.
-    Assert: after each turn the agent hears the user's actions in order and reads the board that the page shows, the chat has the messages and comments in order, the feedback on the unchanged step stays, and the old plan has the rest in its history."""
+    Act: the user comments on the words of two steps and sends; the agent answers a question, puts a new plan, and the user approves it with a message.
+    Assert: after each turn the agent hears the user's actions in order and reads the board that the page shows, the chat has the messages and comments in order, the thread on the unchanged step stays, and the old plan has the rest in its history."""
     await agent.write(put("plan", "1. parse\n2. rewrite the cache\n3. render"), say("Review the plan"))
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
 
     review = [
-        react("plan/1", Reaction.approve),
-        react("plan/2", Reaction.reject),
-        comment("plan/2", "the cache is shared"),
-        react("plan/3", Reaction.question),
-        comment("plan/3", "render where?"),
+        comment("plan", "which parser?", "parse"),
+        comment("plan", "the cache is shared", "rewrite the cache"),
+        comment("plan", "render where?", "render"),
     ]
     assert kinds([await user.act(body) for body in review]) == [EventKind.accepted] * len(review)
     await user.send()
     assert await agent.hear() == review
     board = await read_board(agent.tools, history=True)
     assert feedback(board) == {
-        "plan/1": (Reaction.approve, []),
-        "plan/2": (Reaction.reject, [(Author.user, "the cache is shared")]),
-        "plan/3": (Reaction.question, [(Author.user, "render where?")]),
+        "parse": [(Author.user, "which parser?")],
+        "rewrite the cache": [(Author.user, "the cache is shared")],
+        "render": [(Author.user, "render where?")],
     }
 
-    await agent.write(comment("plan/3", "in the browser"))
+    await agent.write(comment("plan", "in the browser", "render"))
     board = board_before = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
-    assert feedback(board)["plan/3"] == (
-        Reaction.question,
-        [(Author.user, "render where?"), (Author.agent, "in the browser")],
-    )
+    assert feedback(board)["render"] == [(Author.user, "render where?"), (Author.agent, "in the browser")]
 
-    await agent.write(put("plan", "1. parse\n2. keep the cache\n3. render in the browser"), say("I kept the cache"))
+    await agent.write(put("plan", "1. parse\n2. keep the cache\n3. show it"), say("I kept the cache"))
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
     assert (feedback(board), [said.text for said in board.messages]) == (
-        {"plan/1": (Reaction.approve, [])},
-        ["Review the plan", "the cache is shared", "render where?", "in the browser", "I kept the cache"],
+        {"parse": [(Author.user, "which parser?")]},
+        [
+            "Review the plan",
+            "which parser?",
+            "the cache is shared",
+            "render where?",
+            "in the browser",
+            "I kept the cache",
+        ],
     )
-    old = (await read_board(agent.tools, history=True)).history["plan"][-1]
+    old = board.history["plan"][-1]
     assert (old.card.md, feedback(old)) == (
         "1. parse\n2. rewrite the cache\n3. render",
-        {ref: found for ref, found in feedback(board_before).items() if ref != "plan/1"},
+        {quote: found for quote, found in feedback(board_before).items() if quote != "parse"},
     )
 
-    approval = [react("plan", Reaction.approve), say("go ahead")]
+    approval = [comment("plan", "looks good"), say("go ahead")]
     assert kinds([await user.act(body) for body in approval]) == [EventKind.accepted] * len(approval)
     assert await agent.hear() == approval
-    assert (await read_board(agent.tools, history=True)).threads == {
-        "plan/1": Thread(reactions={Author.user: Reaction.approve}),
-        "plan": Thread(reactions={Author.user: Reaction.approve}),
+    assert feedback(await read_board(agent.tools, history=True)) == {
+        "parse": [(Author.user, "which parser?")],
+        "": [(Author.user, "looks good")],
     }
 
 
-async def test_the_agent_hears_only_the_values_that_fit_their_columns(agent: Agent, user: User) -> None:
-    """Assemble: the agent puts a table of tasks with a size, hours and done column.
-    Act: the user fills cells with values that fit and values that do not, and clears one; then the agent adds a row, and changes the Hours column to a check column.
-    Assert: the board rejects each value that does not fit, the agent hears only the others, without the cell filled and then cleared, and reads them; the card with the new row keeps them, and the card with the changed column keeps the values that fit their columns."""
-    table = "| Task | Size {S, M, L} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n| render | | | |"
+async def test_the_agent_hears_a_checked_box_as_an_edit(agent: Agent, user: User) -> None:
+    """Assemble: the agent puts a table of tasks with a column of boxes.
+    Act: the user checks the box of a task, as the page does, by a put of the markdown with the box checked.
+    Assert: the agent hears the change as a diff of the markdown, and reads the card with the box checked."""
+    table = "| | Task |\n|---|---|\n| [ ] | parse |\n| [ ] | render |"
     await agent.write(put("tasks", table))
-
-    fits = [fill("tasks/1/2", "M"), fill("tasks/1/3", 4), fill("tasks/2/4", value=True), fill("tasks/1/3", None)]
-    misfits = [fill("tasks/2/2", "XL"), fill("tasks/2/3", "four"), fill("tasks/1/1", "lex")]
-    answers = [
-        await user.act(body) for body in [fits[0], misfits[0], fits[1], misfits[1], fits[2], misfits[2], fits[3]]
-    ]
-    assert kinds(answers) == [EventKind.accepted, EventKind.rejected] * 3 + [EventKind.accepted]
-    assert [answer.reason for answer in answers if isinstance(answer, Rejected)] == [
-        "input 'tasks/2/2' (Size) takes one of S, M, L",
-        "input 'tasks/2/3' (Hours) takes a number",
-        "no input 'tasks/1/1': the input columns of row 'tasks/1' are 2 (Size), 3 (Hours), 4 (Done)",
-    ]
+    checked = table.replace("| [ ] | render |", "| [x] | render |")
+    assert (await user.act(put("tasks", checked, 0))).kind is EventKind.accepted
     await user.send()
-    assert await agent.hear() == [fits[0], fits[2]]
+    diff = "@@ -3,2 +3,2 @@\n | [ ] | parse |\n-| [ ] | render |\n+| [x] | render |"
+    assert await agent.hear() == [Edit(kind="edit", id="tasks", diff=diff)]
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
-    assert board.values == {"tasks/1/2": "M", "tasks/1/3": None, "tasks/2/4": True}
-
-    await agent.write(put("tasks", f"{table}\n| test | | | |"))
-    board = await read_board(agent.tools, history=True)
-    assert (await user.sees(board)).values == {"tasks/1/2": "M", "tasks/1/3": None, "tasks/2/4": True}
-
-    await agent.write(put("tasks", table.replace("Hours {number}", "Hours {check}")))
-    board = await read_board(agent.tools, history=True)
-    assert (await user.sees(board)).values == {"tasks/1/2": "M", "tasks/1/3": None, "tasks/2/4": True}
+    assert board.cards["tasks"].md == checked
 
 
 async def test_the_user_and_the_agent_discuss_code_with_arrows(agent: Agent, user: User) -> None:
-    """Assemble: the agent puts a code card, a card of options and a card of questions side by side, with an arrow from an option to a question.
-    Act: the user approves an option, draws an arrow from the code to it and answers the question; then the agent removes the options.
-    Assert: the agent hears and reads the user's arrow beside its own, and the page shows no arrow or feedback on the options once they are gone."""
+    """Assemble: the agent puts a code card, a card of options and a card of questions side by side, with an arrow from an option to the questions.
+    Act: the user comments on an option, draws an arrow from a line of the code to the options and answers the question; then the agent removes the options.
+    Assert: the agent hears and reads the user's arrow beside its own, and the page shows no arrow or thread on the options once they are gone."""
     await agent.write(
         put("code", "```python\ndef render(md: str) -> str:\n    return md\n```"),
         put("options", "1. highlight on the server\n2. highlight in the browser"),
         put("questions", "1. Which languages?"),
-        link("decides", "options/2", "questions/1"),
+        link("decides", "options", "questions", quote="highlight in the browser"),
         move("code", 0, 0),
         move("options", 420, 0),
         move("questions", 840, 0),
@@ -145,21 +127,27 @@ async def test_the_user_and_the_agent_discuss_code_with_arrows(agent: Agent, use
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
 
-    answer = [react("options/2", Reaction.approve), link("mine", "code", "options/2"), comment("questions/1", "all")]
+    answer = [
+        comment("options", "this one", "in the browser"),
+        link("mine", "code", "options", quote="return md"),
+        comment("questions", "all", "Which languages?"),
+    ]
     assert kinds([await user.act(body) for body in answer]) == [EventKind.accepted] * len(answer)
     await user.send()
     assert await agent.hear() == answer
     board = await read_board(agent.tools, history=True)
     assert board.arrows == {
-        "decides": Arrow(src="options/2", dst="questions/1", text="", author=Author.agent),
-        "mine": Arrow(src="code", dst="options/2", text="", author=Author.user),
+        "decides": Arrow(
+            card="options", quote="highlight in the browser", dst="questions", text="", author=Author.agent
+        ),
+        "mine": Arrow(card="code", quote="return md", dst="options", text="", author=Author.user),
     }
 
     await agent.write(remove("options"), say("Highlighting goes in the browser"))
     board = await read_board(agent.tools, history=True)
     seen = await user.sees(board)
     assert seen == board
-    assert (seen.arrows, list(feedback(seen))) == ({}, ["questions/1"])
+    assert (seen.arrows, list(feedback(seen))) == ({}, ["Which languages?"])
 
 
 async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, user: User) -> None:
@@ -172,7 +160,7 @@ async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, use
     board = await read_board(agent.tools, history=True)
     assert (board.cards["note"].author, board.positions) == (Author.user, {"note": Point(x=40, y=300)})
 
-    await agent.write(put("plan", "1. read the docs\n2. write the code"), link("from", "plan/1", "note"))
+    await agent.write(put("plan", "1. read the docs\n2. write the code"), link("from", "plan", "note", quote="docs"))
     edits = [put("plan", "1. read the docs\n2. write the tests\n3. write the code"), remove("note")]
     assert kinds([await user.act(body) for body in edits]) == [EventKind.accepted] * len(edits)
     await user.send()
@@ -186,21 +174,23 @@ async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, use
     )
 
 
-async def test_a_click_on_a_part_that_the_agent_just_removed_is_rejected(agent: Agent, user: User) -> None:
+async def test_a_comment_on_words_that_the_agent_just_removed_is_rejected(agent: Agent, user: User) -> None:
     """Assemble: the page shows a plan of three steps.
-    Act: the agent puts a plan of two steps, and the user reacts to step 3 of the old plan, then to step 2.
-    Assert: the board rejects the reaction to step 3, the agent hears only the reaction to step 2, and the page shows the new plan."""
+    Act: the agent puts a plan without step b, and the user comments on b, then on c.
+    Assert: the board rejects the comment on b, the agent hears only the comment on c, and the page shows the new plan."""
     await agent.write(put("plan", "1. a\n2. b\n3. c"))
     assert "plan" in (await user.sees(await read_board(agent.tools, history=True))).cards
 
     await agent.write(put("plan", "1. a\n2. c"))
-    stale = await user.act(react("plan/3", Reaction.reject))
+    stale = await user.act(comment("plan", "why?", "b"))
     assert stale == Rejected(
-        kind=EventKind.rejected, id=stale.id, reason="no part 'plan/3': card 'plan' has parts 1 to 2"
+        kind=EventKind.rejected,
+        id=stale.id,
+        reason="card 'plan' does not show the words 'b': quote its text without markdown",
     )
-    assert (await user.act(react("plan/2", Reaction.reject))).kind is EventKind.accepted
+    assert (await user.act(comment("plan", "why?", "c"))).kind is EventKind.accepted
     await user.send()
-    assert await agent.hear() == [react("plan/2", Reaction.reject)]
+    assert await agent.hear() == [comment("plan", "why?", "c")]
     board = await read_board(agent.tools, history=True)
     assert await user.sees(board) == board
 
@@ -209,13 +199,13 @@ async def test_an_agent_monitor_gets_what_the_user_did_while_no_monitor_was_open
     agent: Agent, user: User, address: tuple[str, int]
 ) -> None:
     """Assemble: the agent puts a plan, and its monitor ends.
-    Act: the user reacts, comments and sends, reloads the page, and the agent opens a new monitor.
+    Act: the user comments and sends, reloads the page, and the agent opens a new monitor.
     Assert: the page shows that no agent listens, the new monitor gets the user's turn, and the new page shows the board that the agent reads."""
     await agent.write(put("plan", "1. a\n2. b"))
     await agent.monitor.close()
     assert (await user.notes(lambda snapshot: snapshot.agent is AgentState.away)).agent is AgentState.away
 
-    missed = [react("plan/1", Reaction.question), comment("plan/1", "why a?")]
+    missed = [comment("plan", "why a?", "a")]
     assert kinds([await user.act(body) for body in missed]) == [EventKind.accepted] * len(missed)
     await user.send()
     async with open_page(address) as reloaded, agent.listen():
@@ -225,11 +215,11 @@ async def test_an_agent_monitor_gets_what_the_user_did_while_no_monitor_was_open
 
 async def test_the_page_shows_whose_turn_it_is(agent: Agent, user: User) -> None:
     """Assemble: an agent with a monitor and a plan on the board.
-    Act: the user reacts and sends; the agent answers; then the agent's monitor ends.
+    Act: the user comments and sends; the agent answers; then the agent's monitor ends.
     Assert: the page shows one unsent action before the send, then the agent working, waiting after its answer, and away."""
     await agent.write(put("plan", "1. a"))
     assert (await user.notes(lambda snapshot: snapshot.agent is AgentState.waiting)).agent is AgentState.waiting
-    await user.act(react("plan/1", Reaction.approve))
+    await user.act(comment("plan", "fine", "a"))
     assert (await user.notes(lambda snapshot: snapshot.unsent == 1)).unsent == 1
     await user.send()
     await agent.hear()

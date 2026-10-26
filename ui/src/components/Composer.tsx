@@ -1,4 +1,3 @@
-import { CornerDownLeft } from "lucide-react";
 import { useState } from "react";
 
 import { messageSchema } from "~/domain/actions";
@@ -13,7 +12,7 @@ type TComposerProps = {
   draft: TDraft;
 };
 
-/** The comment box: Enter posts the comment and Shift+Enter starts a new line; the text stays until the server takes it. The comment is pending until Send, in the chat. */
+/** The reply field of a thread: Enter posts the comment and Shift+Enter starts a new line; the text stays until the server takes it. The comment is pending until Send, in the chat. */
 export const Composer = ({ label, id, send, draft }: TComposerProps) => {
   const [sending, setSending] = useState(false);
   const ready = !sending && messageSchema.safeParse(draft.text).success;
@@ -24,38 +23,25 @@ export const Composer = ({ label, id, send, draft }: TComposerProps) => {
     setSending(false);
   };
   return (
-    <div className="flex items-end gap-1 rounded-2xl bg-surface-sunken p-1 focus-within:ring-2 focus-within:ring-accent-ring">
-      <textarea
-        rows={1}
-        aria-label={label}
-        placeholder={label}
-        id={id}
-        className="field-sizing-content max-h-40 min-h-8 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
-        value={draft.text}
-        readOnly={sending}
-        onChange={(event) => {
-          draft.set(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          event.stopPropagation();
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            void submit();
-          }
-        }}
-      />
-      <button
-        type="button"
-        aria-label="Post it"
-        title="Post the comment (Enter); Send, in the chat, sends it"
-        disabled={!ready}
-        className="grid size-8 place-items-center rounded-full bg-accent text-white transition-opacity disabled:opacity-30"
-        onClick={() => {
+    <textarea
+      rows={1}
+      aria-label={label}
+      placeholder={label}
+      id={id}
+      title="Enter posts the comment; Send, in the chat, sends it"
+      className="field-sizing-content max-h-32 min-h-6 w-full resize-none rounded-[0.75rem] bg-surface-sunken px-2 py-1 text-[0.75rem] leading-4 text-ink outline-none placeholder:text-ink-ghost focus:ring-2 focus:ring-accent-ring"
+      value={draft.text}
+      readOnly={sending}
+      onChange={(event) => {
+        draft.set(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
           void submit();
-        }}
-      >
-        <CornerDownLeft className="size-4" />
-      </button>
-    </div>
+        }
+      }}
+    />
   );
 };

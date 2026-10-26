@@ -29,14 +29,14 @@ from websockets.exceptions import InvalidStatus
 from agent_hud.boards import Huds
 from agent_hud.frames import head_of, turn_of
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Reaction, TBody
+from agent_hud.models.actions import Action, ActionKind, Author, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
 from agent_hud.server import build
 from agent_hud.settings import get_settings
 from agent_hud.store import Store
 from agent_hud.web import create_app, send_turns
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
-from tests.factories import as_json, put, react, read_board, say, send
+from tests.factories import as_json, comment, put, read_board, say, send
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
@@ -130,14 +130,14 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
 
 
 async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
-    """Assemble: a hud on a state file, with a card, a send that an agent took, and a reaction the user has not sent.
+    """Assemble: a hud on a state file, with a card, a send that an agent took, and a comment the user has not sent.
     Act: serve the app on it, and stop it.
     Assert: the checkpoint holds the board at the start of the user's turn, the state file only the turn, and a new hud starts on it."""
     state_file = tmp_path / "board.db"
     hud = Hud(state_file)
     hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
     hud.act([Action(id="u", author=Author.user, body=send())])
-    hud.act([Action(id="r", author=Author.user, body=react("plan/1", Reaction.approve))])
+    hud.act([Action(id="r", author=Author.user, body=comment("plan", "yes", "a"))])
     async with serve(hud, static_dir, tmp_path) as address, open_agent(address):
         pass
     store = Store(state_file)
@@ -325,7 +325,7 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     data: st.DataObject,
 ) -> None:
     """Assemble: a card that the agent put, a page, and two agents' listeners.
-    Act: the page asks for any action on the card or its parts, then sends if the action did not end the turn.
+    Act: the page asks for any action on the card or its words, then sends if the action did not end the turn.
     Assert: accepted, the page shows the board and each listener gets a turn of what the page listed as pending; or rejected, and the board is as it was."""
     body = data.draw(bodies(st.just(card_id)))
     await agent.call_tool("write", {"actions": as_json(put(card_id, md))})
@@ -401,8 +401,8 @@ async def test_a_message_needs_a_character_that_is_not_white_space(blank: str) -
 
 async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir: Path, tmp_path: Path) -> None:
     """Assemble: an app whose monitor frames hold 300 characters, with a list of eight items on its board.
-    Act: the user reacts to each item and sends.
-    Assert: the monitor gets several frames, each within the size, whose turn is the reactions with each item's text."""
+    Act: the user comments on each item and sends.
+    Assert: the monitor gets several frames, each within the size, whose turn is the comments."""
     hud = Hud()
     texts = [f"step {n} of the plan, with words that fill the line" for n in range(1, 9)]
     async with (
@@ -411,8 +411,8 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
         open_page(address) as user,
     ):
         await agent.write(put("plan", "\n".join(f"- {text}" for text in texts)))
-        reactions = [react(f"plan/{n}", Reaction.approve) for n in range(1, 9)]
-        for body in reactions:
+        comments = [comment("plan", "why this step?", text) for text in texts]
+        for body in comments:
             assert isinstance(await user.act(body), Accepted)
         await user.send()
         frames: list[str] = []
@@ -422,7 +422,7 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
     assert len(frames) > 1
     assert all(len(frame) <= 300 for frame in frames)
     turn = turn_of(frames)
-    assert (list(turn.actions), turn.parts) == (reactions, {f"plan/{n}": text for n, text in enumerate(texts, 1)})
+    assert list(turn.actions) == comments
 
 
 class Recorder:
@@ -439,10 +439,8 @@ async def test_the_sender_leaves_the_gap_between_the_frames_of_a_turn_and_none_b
     """Assemble: two turns, of which the first takes three frames of 200 characters and the second one.
     Act: send them with a gap of 0.2 s.
     Assert: the frames of the first turn go at least the gap apart, and the second turn's frame follows the last at once."""
-    first = Turn(
-        id="one", actions=tuple(say(f"message {n} of the first turn, long enough") for n in range(6)), parts={}
-    )
-    second = Turn(id="two", actions=(say("hi"),), parts={})
+    first = Turn(id="one", actions=tuple(say(f"message {n} of the first turn, long enough") for n in range(6)))
+    second = Turn(id="two", actions=(say("hi"),))
 
     async def turns() -> AsyncIterator[Turn]:
         yield first

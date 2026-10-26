@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { ConnectionStatus, createBoardStore } from "~/data/boardStore";
-import { BoardContext, FeedbackContext, StoreContext } from "~/data/context";
+import { BoardContext, StoreContext, ThreadsContext } from "~/data/context";
 
 type TBoardProviderProps = { children: ReactNode };
 
@@ -26,7 +26,9 @@ export const BoardProvider = ({ children }: TBoardProviderProps) => {
   return (
     <StoreContext value={store}>
       <BoardContext value={live}>
-        <FeedbackContext value={live.model.board}>{children}</FeedbackContext>
+        <ThreadsContext value={live.model.board.threads}>
+          {children}
+        </ThreadsContext>
       </BoardContext>
     </StoreContext>
   );

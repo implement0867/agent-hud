@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { groupPending, unsentOf } from "~/domain/pending";
-import { ActionKind, Author, Reaction } from "~/domain/actions";
-import type { TValue } from "~/domain/actions";
+import { ActionKind, Author } from "~/domain/actions";
 import type { TBoard } from "~/domain/board";
 import type { THeard } from "~/domain/events";
 
 const board: TBoard = {
   cards: {
     checklist: {
-      md: "| Task | Owner {text} | Hours {number} | Done {check} |\n|---|---|---|---|\n| Build the UI | | | |\n| Run make check | | | |",
+      md: "| | Task |\n|---|---|\n| [ ] | Build the UI |",
       author: Author.enum.agent,
       edited: false,
     },
@@ -19,83 +18,82 @@ const board: TBoard = {
       edited: false,
     },
   },
-  threads: {},
-  values: {},
+  threads: {
+    t1: {
+      card: "plan",
+      quote: "parse",
+      occurrence: 0,
+      comments: [
+        {
+          id: "a3",
+          author: "user",
+          text: "which parser?",
+          thread: "t1",
+          at: null,
+        },
+      ],
+    },
+  },
   arrows: {},
-  messages: [],
+  messages: [
+    { id: "a3", author: "user", text: "which parser?", thread: "t1", at: null },
+  ],
   positions: {},
-  widths: {},
+  sizes: {},
   history: {},
 };
 
 let count = 0;
-const heard = (
-  body: THeard["body"],
-  parts: Record<string, string> = {},
-): THeard => ({
-  id: `a${String((count += 1))}`,
+const heard = (body: THeard["body"], id?: string): THeard => ({
+  id: id ?? `a${String((count += 10))}`,
   author: Author.enum.user,
   body,
-  parts,
 });
 
-const fill = (ref: string, value: TValue) =>
-  heard(
-    { kind: ActionKind.enum.fill, ref, value },
-    { "checklist/2": "Run make check |  |  | " },
-  );
-
 describe("groupPending", () => {
-  it("reads a fill as the row's name, the column's title and the value, under the card's title", () => {
-    const [group] = groupPending(
-      [fill("checklist/2/2", "agent"), fill("checklist/2/3", 1)],
-      board,
-    );
-    expect(group?.title).toBe("Task");
-    expect(group?.lines.map(({ what, where }) => [where, what])).toEqual([
-      ["Run make check", "Owner: agent"],
-      ["Run make check", "Hours: 1"],
-    ]);
-    expect(group?.lines[0]?.ref).toBe("checklist/2");
-  });
-
-  it("names yes, no and cleared for a check and an empty cell", () => {
+  it("reads a comment as its text under its words, and opens its thread", () => {
     const [group] = groupPending(
       [
-        fill("checklist/2/4", true),
-        fill("checklist/2/4", false),
-        fill("checklist/2/2", null),
+        heard(
+          {
+            kind: ActionKind.enum.comment,
+            card: "plan",
+            quote: "parse",
+            text: "which parser?",
+          },
+          "a3",
+        ),
       ],
       board,
     );
-    expect(group?.lines.map(({ what }) => what)).toEqual([
-      "Done: yes",
-      "Done: no",
-      "Owner: cleared",
-    ]);
+    expect(group?.title).toBe("The plan");
+    expect(group?.lines[0]).toMatchObject({
+      what: "“which parser?”",
+      where: "parse",
+      card: "plan",
+      thread: "t1",
+    });
   });
 
   it("groups the actions by card in the order of the first on each, and puts messages under Chat", () => {
     const groups = groupPending(
       [
-        heard(
-          {
-            kind: ActionKind.enum.react,
-            ref: "plan/2",
-            reaction: Reaction.enum.reject,
-          },
-          { "plan/2": "render" },
-        ),
+        heard({
+          kind: ActionKind.enum.comment,
+          card: "plan",
+          quote: "",
+          text: "fine",
+        }),
         heard({ kind: ActionKind.enum.say, text: "go ahead" }),
-        fill("checklist/2/3", 1),
-        heard(
-          {
-            kind: ActionKind.enum.comment,
-            ref: "plan/1",
-            text: "which parser?",
-          },
-          { "plan/1": "parse" },
-        ),
+        heard({ kind: "edit", id: "checklist", diff: "-| [ ] |\n+| [x] |" }),
+        heard({
+          kind: ActionKind.enum.link,
+          id: "why",
+          card: "plan",
+          quote: "render",
+          dst: "checklist",
+          text: "",
+        }),
       ],
       board,
     );
@@ -105,13 +103,13 @@ describe("groupPending", () => {
       ["Task", 1],
     ]);
     expect(groups[0]?.lines.map(({ what, where }) => [what, where])).toEqual([
-      ["reject", "render"],
-      ["“which parser?”", "parse"],
+      ["“fine”", "the card"],
+      ["arrow to Task", "render"],
     ]);
     expect(groups[1]?.lines[0]).toMatchObject({
       what: "go ahead",
       where: "",
-      ref: null,
+      card: null,
     });
   });
 
@@ -138,19 +136,20 @@ describe("groupPending", () => {
 });
 
 describe("unsentOf", () => {
-  it("has the refs of the parts, cells and cards with an unsent action, and every action's id", () => {
+  it("has the cards with an unsent put or edit, and every action's id", () => {
     const pending = [
       heard({
-        kind: ActionKind.enum.react,
-        ref: "plan/2",
-        reaction: Reaction.enum.approve,
+        kind: ActionKind.enum.comment,
+        card: "plan",
+        quote: "",
+        text: "hi",
       }),
-      fill("checklist/2/3", 1),
       heard({ kind: ActionKind.enum.put, id: "note-1", md: "hi" }),
+      heard({ kind: "edit", id: "checklist", diff: "" }),
       heard({ kind: ActionKind.enum.say, text: "go" }),
     ];
-    const { refs, ids } = unsentOf(pending);
-    expect([...refs]).toEqual(["plan/2", "checklist/2/3", "note-1"]);
+    const { cards, ids } = unsentOf(pending);
+    expect([...cards]).toEqual(["note-1", "checklist"]);
     expect(ids).toEqual(new Set(pending.map(({ id }) => id)));
   });
 });

@@ -1,68 +1,234 @@
 @import "tailwindcss";
-@plugin "@tailwindcss/typography";
+@import "@fontsource/source-sans-3/latin-400.css";
+@import "@fontsource/source-sans-3/latin-ext-400.css";
+@import "@fontsource/source-sans-3/latin-400-italic.css";
+@import "@fontsource/source-sans-3/latin-500.css";
+@import "@fontsource/source-sans-3/latin-ext-500.css";
+@import "@fontsource/source-sans-3/latin-600.css";
+@import "@fontsource/source-sans-3/latin-ext-600.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-ext-400.css";
 
-/* The page's colours by role. Components use these names, never the palette's. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * The page's colours by role, for the light and the dark theme on stone, and the four accents. Components use the
+ * role names, never the palette's. The look menu sets data-theme, data-accent, data-density and data-radius on <html>.
+ */
+:root {
+  --canvas: #f5f5f4;
+  --surface: #ffffff;
+  --sunken: #f5f5f4;
+  --outline: #e7e5e4;
+  --edge: rgb(28 25 23 / 0.1);
+  --edge-faint: rgb(28 25 23 / 0.05);
+  --ink: #1c1917;
+  --ink-soft: #44403c;
+  --ink-muted: #78716c;
+  --ink-faint: #a8a29e;
+  --ink-ghost: #d6d3d1;
+  --success: #10b981;
+  --success-strong: #047857;
+  --success-soft: #d1fae5;
+  --ins-bg: rgb(16 185 129 / 0.14);
+  --danger: #e11d48;
+  --danger-strong: #be123c;
+  --danger-soft: #ffe4e6;
+  --danger-faint: #fff1f2;
+  --del-bg: rgb(225 29 72 / 0.1);
+  --del-line: rgb(190 18 60 / 0.5);
+  --warning: #f59e0b;
+  --warning-strong: #92400e;
+  --warning-soft: #fef3c7;
+  --warning-faint: #fffbeb;
+  --draw: #8b5cf6;
+  --draw-soft: #f5f3ff;
+  --on-accent: #ffffff;
+  --shadow-card:
+    0 1px 2px rgb(0 0 0 / 0.06), 0 10px 30px -12px rgb(0 0 0 / 0.18);
+  --shadow-pop: 0 10px 25px -8px rgb(0 0 0 / 0.25);
+  --accent: #0284c7;
+  --accent-strong: #0369a1;
+  --accent-ring: #38bdf8;
+  --accent-soft: #e0f2fe;
+  --accent-faint: #f0f9ff;
+  --selection: #bae6fd;
+  /* Comfortable density and a 12 px radius. */
+  --pad: 16px;
+  --pad-y: 12px;
+  --lh: 1.71;
+  --row: 6px;
+  --gap: 2px;
+  --r: 12px;
+  --r2: 8px;
+  --r3: 4px;
+  /* The body text of a card, which the look menu sets from 0.75rem to 1.0625rem. */
+  --text-body: 0.75rem;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --canvas: #0c0a09;
+  --surface: #1c1917;
+  --sunken: #292524;
+  --outline: #44403c;
+  --edge: rgb(255 255 255 / 0.1);
+  --edge-faint: rgb(255 255 255 / 0.06);
+  --ink: #f5f5f4;
+  --ink-soft: #d6d3d1;
+  --ink-muted: #a8a29e;
+  --ink-faint: #78716c;
+  --ink-ghost: #57534e;
+  --success: #34d399;
+  --success-strong: #6ee7b7;
+  --success-soft: rgb(52 211 153 / 0.18);
+  --ins-bg: rgb(52 211 153 / 0.16);
+  --danger: #fb7185;
+  --danger-strong: #fda4af;
+  --danger-soft: rgb(251 113 133 / 0.2);
+  --danger-faint: rgb(251 113 133 / 0.12);
+  --del-bg: rgb(251 113 133 / 0.16);
+  --del-line: rgb(253 164 175 / 0.5);
+  --warning: #fbbf24;
+  --warning-strong: #fcd34d;
+  --warning-soft: rgb(251 191 36 / 0.18);
+  --warning-faint: rgb(251 191 36 / 0.1);
+  --draw: #a78bfa;
+  --draw-soft: rgb(167 139 250 / 0.14);
+  --on-accent: #0c0a09;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 10px 30px -12px rgb(0 0 0 / 0.7);
+  --shadow-pop: 0 10px 25px -8px rgb(0 0 0 / 0.7);
+  --accent: #38bdf8;
+  --accent-strong: #7dd3fc;
+  --accent-ring: #0ea5e9;
+  --accent-soft: rgb(56 189 248 / 0.2);
+  --accent-faint: rgb(56 189 248 / 0.12);
+  --selection: rgb(56 189 248 / 0.35);
+  color-scheme: dark;
+}
+
+:root[data-accent="violet"] {
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --accent-ring: #a78bfa;
+  --accent-soft: #ede9fe;
+  --accent-faint: #f5f3ff;
+  --selection: #ddd6fe;
+}
+:root[data-theme="dark"][data-accent="violet"] {
+  --accent: #a78bfa;
+  --accent-strong: #c4b5fd;
+  --accent-ring: #8b5cf6;
+  --accent-soft: rgb(167 139 250 / 0.2);
+  --accent-faint: rgb(167 139 250 / 0.12);
+  --selection: rgb(167 139 250 / 0.35);
+}
+:root[data-accent="emerald"] {
+  --accent: #059669;
+  --accent-strong: #047857;
+  --accent-ring: #34d399;
+  --accent-soft: #d1fae5;
+  --accent-faint: #ecfdf5;
+  --selection: #a7f3d0;
+}
+:root[data-theme="dark"][data-accent="emerald"] {
+  --accent: #34d399;
+  --accent-strong: #6ee7b7;
+  --accent-ring: #10b981;
+  --accent-soft: rgb(52 211 153 / 0.2);
+  --accent-faint: rgb(52 211 153 / 0.12);
+  --selection: rgb(52 211 153 / 0.35);
+}
+:root[data-accent="amber"] {
+  --accent: #d97706;
+  --accent-strong: #b45309;
+  --accent-ring: #fbbf24;
+  --accent-soft: #fef3c7;
+  --accent-faint: #fffbeb;
+  --selection: #fde68a;
+}
+:root[data-theme="dark"][data-accent="amber"] {
+  --accent: #fbbf24;
+  --accent-strong: #fcd34d;
+  --accent-ring: #f59e0b;
+  --accent-soft: rgb(251 191 36 / 0.2);
+  --accent-faint: rgb(251 191 36 / 0.12);
+  --selection: rgb(251 191 36 / 0.35);
+}
+
+:root[data-density="compact"] {
+  --pad: 12px;
+  --pad-y: 8px;
+  --lh: 1.5;
+  --row: 3px;
+  --gap: 0px;
+}
+:root[data-radius="8"] {
+  --r: 8px;
+  --r2: 4px;
+  --r3: 2px;
+}
+:root[data-radius="16"] {
+  --r: 16px;
+  --r2: 12px;
+  --r3: 8px;
+}
+
 @theme inline {
-  --color-canvas: var(--color-stone-100);
-  --color-surface: var(--color-white);
-  --color-surface-sunken: var(--color-stone-100);
-
-  --color-edge: color-mix(in oklab, var(--color-stone-900) 10%, transparent);
-  --color-edge-faint: color-mix(
-    in oklab,
-    var(--color-stone-900) 5%,
-    transparent
-  );
-  --color-divider: var(--color-stone-100);
-  --color-outline: var(--color-stone-200);
-
-  --color-ink: var(--color-stone-900);
-  --color-ink-soft: var(--color-stone-700);
-  --color-ink-muted: var(--color-stone-500);
-  --color-ink-faint: var(--color-stone-400);
-  --color-ink-ghost: var(--color-stone-300);
-
-  --color-accent: var(--color-sky-600);
-  --color-accent-strong: var(--color-sky-700);
-  --color-accent-muted: var(--color-sky-200);
-  --color-accent-soft: var(--color-sky-100);
-  --color-accent-faint: var(--color-sky-50);
-  --color-accent-ring: var(--color-sky-400);
-  --color-accent-on-dark: var(--color-sky-300);
-
-  --color-success: var(--color-emerald-500);
-  --color-success-soft: var(--color-emerald-100);
-  --color-success-strong: var(--color-emerald-700);
-
-  --color-danger: var(--color-rose-600);
-  --color-danger-soft: var(--color-rose-100);
-  --color-danger-faint: var(--color-rose-50);
-  --color-danger-strong: var(--color-rose-700);
-
-  --color-warning: var(--color-amber-500);
-  --color-warning-soft: var(--color-amber-100);
-  --color-warning-faint: var(--color-amber-50);
-  --color-warning-strong: var(--color-amber-800);
-
-  /* The arrow that the user draws, and the part it starts at. */
-  --color-draw: var(--color-violet-500);
-  --color-draw-soft: var(--color-violet-50);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--sunken);
+  --color-edge: var(--edge);
+  --color-edge-faint: var(--edge-faint);
+  --color-divider: var(--sunken);
+  --color-outline: var(--outline);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-ink-ghost: var(--ink-ghost);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-faint: var(--accent-faint);
+  --color-accent-ring: var(--accent-ring);
+  --color-selection: var(--selection);
+  --color-on-accent: var(--on-accent);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-strong: var(--success-strong);
+  --color-ins-bg: var(--ins-bg);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-faint: var(--danger-faint);
+  --color-danger-strong: var(--danger-strong);
+  --color-del-bg: var(--del-bg);
+  --color-del-line: var(--del-line);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-faint: var(--warning-faint);
+  --color-warning-strong: var(--warning-strong);
+  /* The arrow that the user draws, and the card it drops on. */
+  --color-draw: var(--draw);
+  --color-draw-soft: var(--draw-soft);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+  --radius-card: var(--r);
+  --radius-bar: var(--r2);
+  --radius-code: var(--r3);
+  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @theme {
-  --shadow-card:
-    0 1px 2px rgb(0 0 0 / 0.06), 0 10px 30px -12px rgb(0 0 0 / 0.18);
-
   --animate-rise: rise 240ms ease-out;
   --animate-pop: pop 140ms ease-out;
-
   @keyframes rise {
     from {
       opacity: 0;
       translate: 0 8px;
     }
   }
-
   @keyframes pop {
     from {
       opacity: 0;
@@ -73,35 +239,251 @@
 
 /* A surface that floats over the board: the toolbar, the chat, the drawers and the panels. */
 @utility panel {
-  @apply rounded-2xl bg-surface shadow-xl ring-1 ring-edge;
+  @apply rounded-2xl bg-surface shadow-pop ring-1 ring-edge;
 }
 
 /* A card on the board, and a note that the user is writing. */
 @utility card {
-  @apply rounded-xl bg-surface shadow-card;
+  @apply rounded-card bg-surface shadow-card;
 }
 
 /* A message across the top or the bottom of the board. */
 @utility toast {
-  @apply pointer-events-auto absolute left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full px-4 py-1.5 text-sm text-white shadow-lg;
+  @apply pointer-events-auto absolute left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full bg-ink px-4 py-1.5 text-sm text-surface shadow-pop;
 }
 
-/* A card's markdown: compact prose, code blocks that wrap and have room for the marks of their lines, inline code on a tint. */
-@utility markdown {
-  @apply prose prose-sm prose-stone max-w-none prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight prose-p:my-1.5 prose-ol:my-1 prose-ul:my-1 prose-li:my-0.5 prose-table:my-2 prose-th:font-medium prose-th:text-ink-muted prose-code:font-normal prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-visible prose-pre:px-0 prose-pre:text-[13px] prose-pre:leading-relaxed prose-pre:break-words prose-pre:whitespace-pre-wrap;
+/* A small label in a line. */
+@utility pill {
+  @apply rounded-full px-1.5 py-px font-mono text-[0.625rem];
+}
 
+/* A key of the keyboard, as the editor's hint and the shortcut sheet name it. */
+@utility kbd {
+  @apply rounded bg-surface-sunken px-1 font-sans text-[0.625rem] leading-[14px] text-ink-muted ring-1 ring-outline ring-inset;
+}
+
+/*
+ * A card's markdown on the design's scale, in rem on a 16 px root with unitless line heights: h1 1.125rem, h2
+ * 1.0625rem, body --text-body, code 0.8125rem, tables 0.75rem, table heads 0.6875rem.
+ */
+@utility markdown {
+  font-size: var(--text-body);
+  line-height: var(--lh);
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+  & > :first-child {
+    margin-top: 0;
+  }
+  & > :last-child {
+    margin-bottom: 0;
+  }
+  & h1 {
+    margin: 0 0 0.5rem;
+    font-size: 1.125rem;
+    line-height: 1.33;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+  }
+  & h2 {
+    margin: 0.75rem 0 0.375rem;
+    font-size: 1.0625rem;
+    line-height: 1.41;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+  }
+  & :is(h3, h4, h5, h6) {
+    margin: 0.625rem 0 0.25rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  & p {
+    margin: 0.375rem 0;
+  }
+  & :is(ul, ol) {
+    margin: 0.25rem 0;
+    padding-left: 1.375rem;
+  }
+  & ul {
+    list-style: disc;
+  }
+  & ol {
+    list-style: decimal;
+  }
+  & li {
+    margin: var(--gap) 0;
+  }
+  & li::marker {
+    color: var(--ink-faint);
+  }
+  & li > :is(ul, ol) {
+    margin: 0;
+  }
+  & li > p {
+    margin: 0;
+  }
+  & .contains-task-list {
+    list-style: none;
+    padding-left: 0.25rem;
+  }
+  & strong {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  & em {
+    font-style: italic;
+  }
+  & a {
+    color: var(--accent);
+    &:hover {
+      color: var(--accent-strong);
+    }
+  }
   & :not(pre) > code {
-    @apply rounded bg-surface-sunken px-1 py-0.5;
+    border-radius: 4px;
+    background: var(--sunken);
+    padding: 0.125rem 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  & blockquote {
+    margin: 0.5rem 0;
+    border-left: 2px solid var(--outline);
+    padding-left: 0.75rem;
+    color: var(--ink-muted);
+  }
+  & hr {
+    margin: 0.75rem 0;
+    border-color: var(--outline);
+  }
+  & table {
+    margin: 0.5rem 0;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    line-height: 1.33;
+    font-variant-numeric: tabular-nums;
+  }
+  & th {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--outline);
+    text-align: left;
+    font-size: 0.6875rem;
+    line-height: 1.45;
+    font-weight: 500;
+    color: var(--ink-muted);
+  }
+  & td {
+    padding: var(--row) 8px;
+    border-bottom: 1px solid var(--sunken);
+    vertical-align: middle;
+    color: var(--ink-soft);
+  }
+  & :is(th, td):first-child {
+    padding-left: 0;
+  }
+  & input[type="checkbox"] {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin: 0 0.375rem 0 0;
+    vertical-align: -3px;
+    accent-color: var(--success);
+  }
+  & td > input[type="checkbox"] {
+    display: block;
+    margin: 0;
+  }
+  & img {
+    max-width: 100%;
+  }
+  & del {
+    text-decoration: line-through;
   }
 }
 
-/* A small label in a line: a card's version, a ref, an author's reaction. */
-@utility pill {
-  @apply rounded-full px-1.5 py-px font-mono text-[10px];
+/* The words of a new version that changed: removed, added, and the lines of the line style. */
+@utility diff-del {
+  border-radius: 2px;
+  background: var(--del-bg);
+  padding: 0 1px;
+  color: var(--danger-strong);
+  text-decoration: line-through;
+  text-decoration-color: var(--del-line);
+}
+@utility diff-ins {
+  border-radius: 2px;
+  background: var(--ins-bg);
+  padding: 0 1px;
+  color: var(--success-strong);
+  text-decoration: none;
+}
+
+/* A whole block that a new version removed or added, in the line style, with its sign. */
+.markdown .dl {
+  border-radius: 2px;
+}
+.markdown .dl::before {
+  display: inline-block;
+  width: 14px;
+  font-weight: 600;
+}
+.markdown .dl-del {
+  background: var(--del-bg);
+  color: var(--danger-strong);
+}
+.markdown .dl-del::before {
+  content: "−";
+}
+.markdown .dl-del del {
+  background: none;
+  text-decoration: none;
+  color: inherit;
+}
+.markdown .dl-ins {
+  background: var(--ins-bg);
+  color: var(--success-strong);
+}
+.markdown .dl-ins::before {
+  content: "+";
+}
+
+/* The words of a card that have a thread, and the words an arrow starts at, which the page marks with highlights. */
+::highlight(thread) {
+  background-color: var(--accent-faint);
+  text-decoration: underline 2px var(--accent);
+  text-underline-offset: 3px;
+}
+::highlight(arrow) {
+  text-decoration: underline 2px var(--draw);
+  text-underline-offset: 3px;
+}
+::highlight(quote) {
+  background-color: var(--selection);
+}
+
+::selection {
+  background: var(--selection);
+}
+
+/* The code colours of the css-variables theme: keywords in accent-strong, function names in ink. */
+:root {
+  --shiki-foreground: var(--ink-soft);
+  --shiki-background: transparent;
+  --shiki-token-keyword: var(--accent-strong);
+  --shiki-token-function: var(--ink);
+  --shiki-token-constant: var(--ink-soft);
+  --shiki-token-string: var(--ink-soft);
+  --shiki-token-string-expression: var(--ink-soft);
+  --shiki-token-comment: var(--ink-faint);
+  --shiki-token-parameter: var(--ink-soft);
+  --shiki-token-punctuation: var(--ink-soft);
+  --shiki-token-link: var(--accent);
 }
 
 @layer base {
   body {
-    @apply bg-canvas text-ink antialiased;
+    @apply bg-canvas font-sans text-ink antialiased;
   }
 }

@@ -2,22 +2,15 @@ import { z } from "zod";
 
 export const Author = z
   .enum(["agent", "user"])
-  .describe("Who made a card, a reaction, a comment, an arrow or a message");
-
-export const Reaction = z
-  .enum(["approve", "reject", "question"])
-  .describe("An author's reaction to a card or a part");
+  .describe("Who made a card, a comment, an arrow or a message");
 
 export const ActionKind = z
   .enum([
     "put",
     "remove",
     "restore",
-    "react",
-    "unreact",
     "comment",
     "say",
-    "fill",
     "link",
     "unlink",
     "move",
@@ -28,11 +21,18 @@ export const ActionKind = z
   ])
   .describe("What an action does to the board");
 
-export const valueSchema = z
-  .union([z.string(), z.number(), z.boolean(), z.null()])
+export const quoteSchema = z
+  .string()
   .describe(
-    "The value of an input cell: text, a number, true or false, or one of the options; null when the cell is empty",
+    "Words of a card as the card shows them, without markdown; empty for the card as a whole",
   );
+
+export const occurrenceSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .nullish()
+  .describe("Which place of the quote in the card's text, from 0");
 
 export const messageSchema = z
   .string()
@@ -62,30 +62,20 @@ export const bodySchema = z.discriminatedUnion("kind", [
     id: z.string().describe("Id of a removed card"),
   }),
   z.strictObject({
-    kind: z.literal(ActionKind.enum.react),
-    ref: z.string().describe("The card or part reacted to, such as plan/2"),
-    reaction: Reaction,
-  }),
-  z.strictObject({
-    kind: z.literal(ActionKind.enum.unreact),
-    ref: z.string().describe("The card or part whose reaction goes"),
-  }),
-  z.strictObject({
     kind: z.literal(ActionKind.enum.comment),
-    ref: z.string().describe("The card or part commented on"),
+    card: z.string().describe("The card commented on"),
+    quote: quoteSchema,
+    occurrence: occurrenceSchema,
     text: messageSchema,
   }),
   z.strictObject({ kind: z.literal(ActionKind.enum.say), text: messageSchema }),
   z.strictObject({
-    kind: z.literal(ActionKind.enum.fill),
-    ref: z.string().describe("A cell of an input column, such as plan/3/2"),
-    value: valueSchema,
-  }),
-  z.strictObject({
     kind: z.literal(ActionKind.enum.link),
     id: z.string().describe("Arrow id"),
-    src: z.string().describe("The card or part the arrow starts at"),
-    dst: z.string().describe("The card or part the arrow points to"),
+    card: z.string().describe("The card the arrow starts at"),
+    quote: quoteSchema,
+    occurrence: occurrenceSchema,
+    dst: z.string().describe("The card the arrow points to"),
     text: z.string().describe("Text on the arrow"),
   }),
   z.strictObject({
@@ -104,7 +94,13 @@ export const bodySchema = z.discriminatedUnion("kind", [
     width: z
       .number()
       .positive()
+      .optional()
       .describe("Width of the card on the board, in pixels"),
+    height: z
+      .number()
+      .positive()
+      .optional()
+      .describe("Height of the card on the board, in pixels"),
   }),
   z.strictObject({
     kind: z.literal(ActionKind.enum.place),
@@ -122,6 +118,4 @@ export const requestSchema = z.strictObject({
 });
 
 export type TAuthor = z.infer<typeof Author>;
-export type TReaction = z.infer<typeof Reaction>;
 export type TBody = z.infer<typeof bodySchema>;
-export type TValue = z.infer<typeof valueSchema>;

@@ -8,14 +8,27 @@ import pytest
 import pytest_asyncio
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
-from playwright.async_api import Browser, Page, async_playwright, expect
+from playwright.async_api import Browser, Locator, Page, async_playwright, expect
 
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Link, Reaction
-from agent_hud.models.board import Arrow, Card, Point
+from agent_hud.models.actions import Action, ActionKind, Author, Link
+from agent_hud.models.board import Card, Point
+from agent_hud.models.events import Edit
 from agent_hud.settings import find_static_dir
 from tests.conversation import TOKEN, Agent, open_agent, open_page, serve
-from tests.factories import as_json, comment, fill, link, move, put, react, read_board, remove, restore, say, unlink
+from tests.factories import (
+    as_json,
+    comment,
+    link,
+    move,
+    put,
+    read_board,
+    remove,
+    resize,
+    restore,
+    say,
+    unlink,
+)
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -71,45 +84,113 @@ async def send(page: Page) -> None:
     await page.get_by_label("Send to the agent").click()
 
 
+def card(page: Page, card_id: str) -> Locator:
+    """The card with the id on the board."""
+    return page.locator(f'article[data-card="{card_id}"]')
+
+
+async def select_words(page: Page, card_id: str, start: str, end: str | None = None) -> None:
+    """
+    Select the words of the card from the first place of start to the end of the first place of end after it, or of
+    start, as a drag over them does, and wait for the toolbar of the selection.
+    """
+    await expect(card(page, card_id)).to_contain_text(start)
+    await page.evaluate(
+        """([card, start, end]) => {
+          const root = document.querySelector(`article[data-card="${card}"] [data-text-root]`);
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          const range = document.createRange();
+          let begun = false;
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            if (!begun) {
+              const at = node.data.indexOf(start);
+              if (at === -1) continue;
+              range.setStart(node, at);
+              begun = true;
+              const until = node.data.indexOf(end, at);
+              if (until !== -1) { range.setEnd(node, until + end.length); break; }
+            } else {
+              const until = node.data.indexOf(end);
+              if (until !== -1) { range.setEnd(node, until + end.length); break; }
+            }
+          }
+          getSelection().removeAllRanges();
+          getSelection().addRange(range);
+          document.dispatchEvent(new PointerEvent('pointerup'));
+        }""",
+        [card_id, start, end or start],
+    )
+    await expect(page.get_by_role("toolbar", name="On the selection")).to_be_visible()
+
+
+async def comment_on(page: Page, card_id: str, words: str, text: str, end: str | None = None) -> None:
+    """Select the words, or from them to the end words, comment on them with the toolbar and post the comment."""
+    await select_words(page, card_id, words, end)
+    await page.get_by_role("toolbar", name="On the selection").get_by_role("button", name="Comment").click()
+    box = page.get_by_role("textbox", name="Comment")
+    await expect(box).to_be_focused()
+    await box.fill(text)
+    await box.press("Enter")
+    await expect(page.get_by_role("textbox", name="Reply")).to_be_visible()
+
+
+async def select_card(page: Page, card_id: str) -> None:
+    """Click the card's padding, clear of its words and its handles, which selects it."""
+    box = await card(page, card_id).bounding_box()
+    assert box is not None
+    await page.mouse.click(box["x"] + box["width"] - 30, box["y"] + box["height"] - 6)
+
+
+def thread_on(page: Page, quote: str) -> Locator:
+    """The open thread on the words."""
+    return page.get_by_role("region", name=f"Thread on “{quote}”", exact=True)
+
+
+def bubble(page: Page, card_id: str) -> Locator:
+    """The bubbles of the threads of the card."""
+    return card(page, card_id).locator("button[data-thread]")
+
+
 async def test_the_user_reviews_a_plan_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:
     """Assemble: the agent puts a plan of three steps and asks the user to review it.
-    Act: the user rejects step 2 with the quick reaction, comments on it and sends; the agent answers and puts a new plan; the user opens the history and sends a chat message.
-    Assert: the agent hears the user's turns, the chat shows the agent's answer on plan/2, the new plan closes the old feedback and shows in the history with it; a screenshot of each turn goes in tmp_path."""
+    Act: the user selects the words of step 2, comments on them and sends; the agent answers in the thread and puts a
+    new plan without those words; the user opens the history and sends a chat message.
+    Assert: the agent hears the comment with its quote, the bubble counts the agent's answer, the new plan moves the
+    thread to the history with its card; a screenshot of each turn goes in tmp_path."""
     await agent.write(put("plan", "1. parse\n2. rewrite the cache\n3. render"), say("Review the plan"))
-    await expect(page.locator('[data-ref="plan/3"]')).to_have_text("render")
+    await expect(card(page, "plan")).to_contain_text("rewrite the cache")
     await expect(page.get_by_label("Chat with the agent")).to_contain_text("Review the plan")
     await expect(page.get_by_role("status", name="Agent")).to_contain_text("your turn")
     await snap(page, tmp_path / "1-plan.png")
 
-    await page.locator('[data-ref="plan/2"]').hover()
-    await page.get_by_label("reject plan/2").click()
-    await page.locator('[data-ref="plan/2"]').click()
-    await page.get_by_label("Comment").fill("the cache is shared")
-    await page.get_by_label("Comment").press("Enter")
-    await expect(page.get_by_label("2 unsent")).to_be_visible()
+    await comment_on(page, "plan", "rewrite the cache", "the cache is shared")
+    await expect(page.get_by_label("1 unsent")).to_be_visible()
     await send(page)
-    assert await agent.hear() == [react("plan/2", Reaction.reject), comment("plan/2", "the cache is shared")]
+    assert await agent.hear() == [comment("plan", "the cache is shared", "rewrite the cache", 0)]
     await expect(page.get_by_role("status", name="Agent")).to_contain_text("working on your turn")
-    await expect(page.get_by_label("reject plan/2")).to_have_attribute("aria-pressed", "true")
+    await page.keyboard.press("Escape")
     await snap(page, tmp_path / "2-review.png")
 
-    await agent.write(comment("plan/2", "Who else reads it?"))
+    await agent.write(comment("plan", "Who else reads it?", "rewrite the cache"))
     await expect(page.get_by_role("status", name="Agent")).to_contain_text("Agent connected · your turn")
-    await expect(page.get_by_label("Feedback on plan/2")).to_contain_text("Who else reads it?")
-    chat = page.get_by_label("Chat with the agent")
-    await expect(chat).to_contain_text("Who else reads it?")
-    await expect(chat.get_by_label("Show plan/2")).to_have_count(2)
+    await expect(bubble(page, "plan")).to_have_attribute("aria-label", re.compile("1 new from the agent"))
+    await bubble(page, "plan").click()
+    thread = thread_on(page, "rewrite the cache")
+    await expect(thread).to_contain_text("Who else reads it?")
+    await expect(bubble(page, "plan")).not_to_have_attribute("aria-label", re.compile("new from the agent"))
+    await expect(
+        page.get_by_label("Chat with the agent").get_by_label("Show the thread on “rewrite the cache”")
+    ).to_have_count(2)
     await snap(page, tmp_path / "3-answer.png")
 
     await agent.write(put("plan", "1. parse\n2. keep the cache\n3. render"), say("I kept the cache"))
-    await expect(page.locator('[data-ref="plan/2"]')).to_have_text("keep the cache")
-    await expect(page.get_by_label("Feedback on plan/2")).to_be_hidden()
-    await expect(page.get_by_label("reject plan/2")).to_have_attribute("aria-pressed", "false")
+    await expect(card(page, "plan")).to_contain_text("keep the cache")
+    await expect(thread).to_have_count(0)
+    await expect(bubble(page, "plan")).to_have_count(0)
     await page.get_by_label("History of plan").click()
     old = page.get_by_label("plan version 1")
     await expect(old).to_contain_text("rewrite the cache")
     await expect(old).to_contain_text("the cache is shared")
-    await expect(page.locator('[data-ref="plan/2"]')).to_have_count(1)
     await snap(page, tmp_path / "4-history.png")
 
     await page.get_by_label("Close the history").click()
@@ -120,126 +201,90 @@ async def test_the_user_reviews_a_plan_in_the_browser(page: Page, agent: Agent, 
     await snap(page, tmp_path / "5-go.png")
 
 
-async def test_the_user_fills_a_table_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:
-    """Assemble: the agent puts a table of tasks with a size, hours and done column.
-    Act: the user chooses a size, types the hours, checks a task as done and sends; then the agent asks about the hours.
-    Assert: the agent hears each value with the type of its column, reads the same values, and the page keeps them; a screenshot of each turn goes in tmp_path."""
-    await agent.write(
-        put(
-            "tasks",
-            "| Task | Size {S, M, L} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n| render | | | |",
-        )
-    )
-    await expect(page.get_by_label("Input tasks/2/3")).to_have_attribute("placeholder", "Hours")
-    await page.get_by_label("Input tasks/1/2").select_option("M")
-    await page.get_by_label("Input tasks/1/3").fill("4")
-    await page.get_by_label("Input tasks/1/3").press("Enter")
-    await page.get_by_label("Input tasks/2/4").click()
-    await expect(page.get_by_label("3 unsent")).to_be_visible()
-    await send(page)
-    assert await agent.hear() == [fill("tasks/1/2", "M"), fill("tasks/1/3", 4), fill("tasks/2/4", value=True)]
-    assert (await read_board(agent.tools)).values == {"tasks/1/2": "M", "tasks/1/3": 4, "tasks/2/4": True}
-    await snap(page, tmp_path / "1-filled.png")
-
-    await agent.write(comment("tasks/1", "Do 4 hours cover the tests?"))
-    await expect(page.get_by_label("Chat with the agent")).to_contain_text("Do 4 hours cover the tests?")
-    await expect(page.get_by_label("Input tasks/1/3")).to_have_value("4")
-    await expect(page.get_by_label("Input tasks/2/4")).to_be_checked()
-    await snap(page, tmp_path / "2-question.png")
-
-
-async def test_the_user_draws_an_arrow_between_code_and_an_option_in_the_browser(
+async def test_a_box_of_a_table_is_a_checkbox_that_the_agent_hears_as_an_edit(
     page: Page, agent: Agent, tmp_path: Path
 ) -> None:
-    """Assemble: the agent puts a code card in colour, a card of options and a card of questions side by side.
-    Act: the user moves the pointer from option 2 to its dot, as a hand does, drags the dot to the question and sends;
-    then the agent labels the arrow.
-    Assert: the agent hears a link from option 2 to the question and reads it with the label, and the page shows the label; a screenshot of each turn goes in tmp_path."""
-    await agent.write(
-        put("code", "```python\ndef render(md: str) -> str:\n    return md\n```"),
-        put("options", "1. highlight on the server\n2. highlight in the browser"),
-        put("questions", "1. Which languages?"),
-        move("code", 0, 0),
-        move("options", 700, 0),
-        move("questions", 1140, 0),
-    )
-    await expect(page.locator('[data-ref="code"] pre.shiki')).to_be_visible()
-    await settled(page)
-
-    await page.locator('[data-ref="options/2"]').hover()
-    dot = await page.get_by_label("Draw an arrow from options/2").bounding_box()
-    goal = await page.locator('[data-ref="questions/1"]').bounding_box()
-    assert dot is not None and goal is not None
-    # The dot is at the right end of its strip; the steps pass each point between the part and the dot.
-    await page.mouse.move(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2, steps=20)
-    await page.mouse.down()
-    await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=10)
-    await page.mouse.up()
+    """Assemble: the agent puts a table whose first column is boxes, with no header, and an empty cell.
+    Act: the user checks the box of the first row and sends.
+    Assert: the boxes show as checkboxes, the header over them is empty, the empty cell shows a dash; the agent hears
+    an edit whose diff checks the box, and reads the markdown with it; a screenshot goes in tmp_path."""
+    await agent.write(put("tasks", "| | Task | Hours |\n|---|---|---|\n| [ ] | parse | 4 |\n| [x] | render | |"))
+    boxes_ = card(page, "tasks").get_by_role("checkbox", name="Done")
+    await expect(boxes_).to_have_count(2)
+    await expect(boxes_.nth(1)).to_be_checked()
+    await expect(card(page, "tasks").locator("th").first).to_have_text("")
+    await expect(card(page, "tasks").locator("td").last).to_have_text("—")
+    await boxes_.first.click()
+    await expect(boxes_.first).to_be_checked()
+    await expect(page.get_by_label("1 unsent")).to_be_visible()
     await send(page)
     match await agent.hear():
-        case [Link(kind=ActionKind.link, id=arrow_id, src="options/2", dst="questions/1")]:
-            pass
+        case [Edit(id="tasks", diff=diff)]:
+            assert "-| [ ] | parse | 4 |" in diff
+            assert "+| [x] | parse | 4 |" in diff
         case other:
-            pytest.fail(f"the agent heard {other}, not a link from options/2 to questions/1")
-    await snap(page, tmp_path / "1-arrow.png")
-
-    await agent.write(link(arrow_id, "options/2", "questions/1", "decides"))
-    assert (await read_board(agent.tools)).arrows[arrow_id] == Arrow(
-        src="options/2", dst="questions/1", text="decides", author=Author.agent
-    )
-    await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_have_value("decides")
-    await page.keyboard.press("Escape")
-    await page.keyboard.press("Escape")
-    await expect(page.get_by_text("decides", exact=True)).to_be_visible()
-    await snap(page, tmp_path / "2-label.png")
+            pytest.fail(f"the agent heard {other}, not an edit of tasks")
+    assert "| [x] | parse | 4 |" in (await read_board(agent.tools)).cards["tasks"].md
+    await snap(page, tmp_path / "1-checked.png")
 
 
-async def test_a_fast_drag_from_the_dot_draws_an_arrow_and_its_label_selects_it_for_delete_with_undo(
-    page: Page, agent: Agent
+async def test_the_user_draws_an_arrow_from_words_to_a_card_and_removes_it_with_undo(
+    page: Page, agent: Agent, tmp_path: Path
 ) -> None:
     """Assemble: a card of options and a card of questions side by side.
-    Act: the pointer jumps from outside the options card straight onto the dot of option 2, drags to the question and
-    releases; then clicks the dot without a move; the agent labels the arrow; the user clicks the label, presses Delete,
-    clicks Undo in the toast, and sends.
-    Assert: the board did not pan and the agent hears the link; the click on the dot opens no feedback; the label click
-    selects the arrow, Delete removes it with a toast, Undo links it again, and the agent hears the unlink and the link."""
+    Act: the user selects the words of option 2, clicks the arrow button, moves over the questions card and clicks it,
+    and sends; the agent labels the arrow; the user clicks the label, presses Delete, clicks Undo, and sends.
+    Assert: the questions card shows the drop ring under the pointer; the agent hears a link from the words to the card
+    and reads it with the label; Delete removes it with a toast, Undo links it again, and the agent hears both."""
     await agent.write(
         put("options", "1. highlight on the server\n2. highlight in the browser"),
         put("questions", "1. Which languages?"),
         move("options", 0, 0),
-        move("questions", 500, 0),
+        move("questions", 600, 0),
     )
-    card = page.locator('article[data-ref="options"]')
-    await expect(card).to_be_visible()
+    await expect(card(page, "questions")).to_be_visible()
     await settled(page)
-    before = await boxes(page, "options")
-    dot = await page.get_by_label("Draw an arrow from options/2").bounding_box()
-    goal = await page.locator('[data-ref="questions/1"]').bounding_box()
-    assert dot is not None and goal is not None
-    await page.mouse.move(dot["x"] + 200, dot["y"] + 150)
-    await page.mouse.move(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2, steps=1)
-    await page.mouse.down()
-    await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=3)
-    await page.mouse.up()
-    assert await boxes(page, "options") == before, "a drag from the dot pans nothing"
+    await select_words(page, "options", "highlight in the browser")
+    await page.get_by_label("Draw an arrow from here").click()
+    goal = await card(page, "questions").bounding_box()
+    assert goal is not None
+    await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=5)
+    await expect(card(page, "questions")).to_have_class(re.compile(r"--draw"))
+    await page.mouse.click(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2)
+    await expect(card(page, "questions")).not_to_have_class(re.compile(r"--draw"))
+    await snap(page, tmp_path / "1-arrow.png")
     await send(page)
     match await agent.hear():
-        case [Link(kind=ActionKind.link, id=arrow_id, src="options/2", dst="questions/1")]:
+        case [
+            Link(
+                kind=ActionKind.link,
+                id=arrow_id,
+                card="options",
+                quote="highlight in the browser",
+                occurrence=0,
+                dst="questions",
+            )
+        ]:
             pass
         case other:
-            pytest.fail(f"the agent heard {other}, not a link from options/2 to questions/1")
+            pytest.fail(f"the agent heard {other}, not a link from the words to questions")
 
-    await page.mouse.click(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2)
-    await expect(page.get_by_label("Feedback on options/2")).to_have_count(0)
-
-    await agent.write(link(arrow_id, "options/2", "questions/1", "decides"))
+    await agent.write(link(arrow_id, "options", "questions", "decides", "highlight in the browser"))
     await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_have_value("decides")
+    arrow = (await read_board(agent.tools)).arrows[arrow_id]
+    assert (arrow.card, arrow.quote, arrow.dst, arrow.text, arrow.author) == (
+        "options",
+        "highlight in the browser",
+        "questions",
+        "decides",
+        Author.agent,
+    )
     await page.keyboard.press("Escape")
     await page.keyboard.press("Escape")
     label = page.get_by_label(f"Arrow {arrow_id}: decides")
     await expect(label).to_be_visible()
     await label.click()
-    await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_be_visible()
+    await expect(page.get_by_label(f"Text of arrow {arrow_id}")).to_have_value("decides")
     await page.keyboard.press("Escape")
     await page.keyboard.press("Delete")
     toast = page.locator('[role="status"]', has_text="Removed the arrow")
@@ -248,107 +293,145 @@ async def test_a_fast_drag_from_the_dot_draws_an_arrow_and_its_label_selects_it_
     await toast.get_by_role("button", name="Undo").click()
     await expect(page.get_by_label(f"Arrow {arrow_id}: decides")).to_be_visible()
     await send(page)
-    assert await agent.hear() == [unlink(arrow_id), link(arrow_id, "options/2", "questions/1", "decides")]
+    assert await agent.hear() == [
+        unlink(arrow_id),
+        link(arrow_id, "options", "questions", "decides", "highlight in the browser", 0),
+    ]
 
 
 async def test_the_user_reviews_a_line_of_code_in_the_browser(page: Page, agent: Agent, tmp_path: Path) -> None:
     """Assemble: the agent puts a card with inline code and a code block of a file from line 10.
-    Act: the user rejects line 2, which is part 3 after the paragraph, with the quick reaction, comments on it and sends.
-    Assert: the inline code shows no backticks, the block shows the file and the line numbers, and the agent hears the reaction and the comment with the file and line of the part; a screenshot goes in tmp_path."""
+    Act: the user selects words of line 11, comments on them and sends.
+    Assert: the inline code shows no backticks, the block shows the file above it and the line numbers in the ghost
+    ink, its lines do not wrap, and the agent hears the comment on the words without the line number; a screenshot goes
+    in tmp_path."""
     await agent.write(
         put(
             "code",
             "Call `render` once.\n\n```python file=src/render.py start=10\ndef render(md: str) -> str:\n    return md\n```",
         )
     )
-    await expect(page.locator('[data-ref="code"] pre.shiki')).to_be_visible()
-    await expect(page.locator('[data-ref="code"] figcaption')).to_have_text("src/render.py")
-    await expect(page.locator('[data-ref="code/3"]')).to_have_text("11    return md")
-    inline = page.locator('[data-ref="code"] p code')
+    code = card(page, "code")
+    await expect(code.locator("pre span[style]").first).to_be_visible()
+    await expect(code.locator("figcaption")).to_have_text("src/render.py")
+    await expect(code.locator("[data-code-line]").nth(1)).to_have_text(re.compile(r"^11\s+return md$"))
+    assert await code.locator("[data-code-line]").nth(1).evaluate("line => getComputedStyle(line).whiteSpace") == "pre"
+    inline = code.locator("p code")
     assert await inline.evaluate("code => getComputedStyle(code, '::before').content") == "none"
 
-    await page.locator('[data-ref="code/3"]').hover()
-    await page.get_by_label("reject code/3").click()
-    await page.locator('[data-ref="code/3"]').click()
-    await page.get_by_label("Comment").fill("md is not html")
-    await page.get_by_label("Comment").press("Enter")
+    # The colours split the line into a token for each word.
+    await comment_on(page, "code", "return", "md is not html", end="md")
     await send(page)
-    turn = await agent.turn()
-    assert list(turn.actions) == [react("code/3", Reaction.reject), comment("code/3", "md is not html")]
-    assert turn.parts == {"code/3": "src/render.py:11:     return md"}
-    await expect(page.get_by_label("reject code/3")).to_have_attribute("aria-pressed", "true")
+    assert await agent.hear() == [comment("code", "md is not html", "return md", 0)]
     await snap(page, tmp_path / "1-line.png")
 
 
-async def test_a_ref_in_the_chat_shows_the_part(page: Page, agent: Agent, tmp_path: Path) -> None:
-    """Assemble: the agent puts a plan of two steps.
-    Act: the agent says a message that names plan/2, and the user clicks the ref in the chat; then the agent's monitor ends.
-    Assert: the page selects plan/2 and opens its feedback, and the pill shows that no agent listens; a screenshot goes in tmp_path."""
-    await agent.write(put("plan", "1. parse\n2. render"), say("Is plan/2 needed?"))
-    await page.get_by_label("Chat with the agent").get_by_role("button", name="plan/2").click()
-    await expect(page.get_by_label("Feedback on plan/2")).to_be_visible()
+async def test_a_comment_in_the_chat_opens_its_thread(page: Page, agent: Agent, tmp_path: Path) -> None:
+    """Assemble: the agent puts a plan of two steps and comments on the words of step 2.
+    Act: the user clicks the comment's words in the chat; then the agent's monitor ends.
+    Assert: the page opens the thread on those words, and the pill shows that no agent listens; a screenshot goes in tmp_path."""
+    await agent.write(put("plan", "1. parse\n2. render"), comment("plan", "Is it needed?", "render"))
+    await page.get_by_label("Chat with the agent").get_by_label("Show the thread on “render”").click()
+    await expect(thread_on(page, "render")).to_contain_text("Is it needed?")
     await agent.monitor.close()
     await expect(page.get_by_role("status", name="Agent")).to_contain_text("No agent connected")
-    await snap(page, tmp_path / "1-ref.png")
+    await snap(page, tmp_path / "1-thread.png")
 
 
-async def test_each_card_shows_its_author_and_id_and_the_user_sets_its_width(
+async def drag(page: Page, handle: Locator, dx: float, dy: float) -> None:
+    """Drag the handle by the distance in screen pixels."""
+    box = await handle.bounding_box()
+    assert box is not None
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x + dx, y + dy, steps=10)
+    await page.mouse.up()
+
+
+async def test_a_corner_drag_sets_the_width_and_the_height_which_the_board_keeps(
     page: Page, agent: Agent, tmp_path: Path
 ) -> None:
     """Assemble: the agent puts a plan, and the user writes a note.
-    Act: the user drags the bottom right corner of the plan 200 pixels to the right, and reloads the page.
-    Assert: the agent's card shows its id, the user's note none, and each the icon of its author on the same background; the plan is 200 pixels wider after
-    the reload, the agent reads its width, and the user's turn does not carry the resize; a screenshot goes in tmp_path."""
-    await agent.write(put("plan", "1. parse\n2. render"), move("plan", 0, 0))
+    Act: the user drags the bottom right corner of the plan 200 pixels right and 100 down, and reloads the page.
+    Assert: the card shows its markdown from its first line, with no strip above it; the plan is 200 pixels wider and
+    100 taller after the reload, the agent reads its size, and the user's turn does not carry the resize; a screenshot
+    goes in tmp_path."""
+    await agent.write(put("plan", "# Plan\n\n1. parse\n2. render"), move("plan", 0, 0))
+    plan = card(page, "plan")
+    await expect(plan.locator("header")).to_have_count(0)
     await page.mouse.dblclick(300, 600)
     await page.get_by_role("textbox", name="New note").fill("check the docs")
     await page.get_by_role("textbox", name="New note").press("Control+Enter")
-    note = page.locator("article").filter(has_text="check the docs")
-    await expect(note.get_by_role("img", name="By you")).to_be_visible()
-    note_id = await note.get_attribute("data-ref")
-    assert note_id is not None
-    await expect(note.locator("header")).not_to_contain_text(note_id)
-    plan = page.locator('article[data-ref="plan"]')
-    await expect(plan.get_by_role("img", name="By the agent")).to_be_visible()
-    await expect(plan.locator("header")).to_contain_text("plan")
-    background = "article => getComputedStyle(article).backgroundColor"
-    assert await note.evaluate(background) == await plan.evaluate(background)
+    await expect(page.locator("article").filter(has_text="check the docs")).to_be_visible()
     await expect(page.get_by_label("1 unsent")).to_be_visible()
 
+    await settled(page)
     before = await plan.bounding_box()
-    corner = await page.get_by_role("separator", name="Width of plan").bounding_box()
-    assert before is not None and corner is not None
-    await page.mouse.move(corner["x"] + corner["width"] / 2, corner["y"] + corner["height"] / 2)
-    await page.mouse.down()
-    await page.mouse.move(corner["x"] + corner["width"] / 2 + 200, corner["y"] + corner["height"] / 2, steps=10)
-    await page.mouse.up()
-    assert (await read_board(agent.tools)).widths == {"plan": before["width"] + 200}
+    assert before is not None
+    heading = await plan.locator("h1").bounding_box()
+    assert heading is not None and heading["y"] - before["y"] < 20, "the heading is the card's first line"
+    await plan.hover()
+    await drag(page, page.get_by_label("Resize plan from the bottom right"), 200, 100)
+    size = (await read_board(agent.tools)).sizes["plan"]
+    assert size.width is not None and size.height is not None
+    assert (round(size.width), round(size.height)) == (round(before["width"] + 200), round(before["height"] + 100))
     await page.reload()
     await expect(plan).to_be_visible()
+    await settled(page)
     after = await plan.bounding_box()
-    assert after is not None and after["width"] == before["width"] + 200
+    assert after is not None
+    assert (round(after["width"]), round(after["height"])) == (
+        round(before["width"] + 200),
+        round(before["height"] + 100),
+    )
     await expect(page.get_by_label("1 unsent")).to_be_visible()
-    await snap(page, tmp_path / "1-width.png")
+    await snap(page, tmp_path / "1-size.png")
+
+
+async def test_an_edge_drag_sets_one_side_and_a_card_shorter_than_its_text_scrolls(page: Page, agent: Agent) -> None:
+    """Assemble: a plan of twenty steps, which the agent makes 160 pixels tall.
+    Act: the user drags the plan's left edge 100 pixels left, and turns the wheel over the plan.
+    Assert: the card is 160 pixels tall and its text scrolls inside it; the left drag widens the card and moves its
+    left edge, which the agent reads as a width and a place, with the height as it was."""
+    await agent.write(
+        put("plan", "\n".join(f"{n}. step {n}" for n in range(1, 21))), move("plan", 200, 0), resize("plan", height=160)
+    )
+    plan = card(page, "plan")
+    await expect(plan).to_be_visible()
+    await settled(page)
+    box = await plan.bounding_box()
+    assert box is not None and round(box["height"]) == 160
+    scroller = plan.locator("div").first
+    assert await scroller.evaluate("element => element.scrollHeight > element.clientHeight")
+    await page.mouse.move(box["x"] + 60, box["y"] + 80)
+    await page.mouse.wheel(0, 200)
+    await expect(scroller).not_to_have_js_property("scrollTop", 0)
+
+    await plan.hover()
+    await drag(page, page.get_by_label("Resize plan from the left"), -100, 0)
+    board = await read_board(agent.tools)
+    size = board.sizes["plan"]
+    assert size.height == 160
+    assert size.width is not None and round(size.width) == round(box["width"] + 100)
+    assert round(board.positions["plan"].x) == 100
 
 
 async def test_a_card_is_as_wide_as_its_content_up_to_a_column(page: Page, agent: Agent) -> None:
-    """Assemble: a short note, a table with three input columns and a long step, and a long paragraph.
+    """Assemble: a short note, a table with a long step, and a long paragraph.
     Assert: the note is narrower than 300 pixels; the table's row is one line tall, with its step text on one line and
     wider than 200 pixels; the paragraph's card is a column wide, 640 pixels."""
     step = "Bump the version in the plugin and the server"
     await agent.write(
         put("note", "ok"),
-        put(
-            "tasks",
-            f"| Step | Owner {{agent, user}} | Hours {{number}} | Done {{check}} |\n|---|---|---|---|\n| {step} | | | |",
-        ),
+        put("tasks", f"| Step | Owner | Hours |\n|---|---|---|\n| {step} | agent | 2 |"),
         put("prose", " ".join(f"word{n}" for n in range(80))),
     )
     shown = await boxes(page, "note", "tasks", "prose")
     assert shown["note"][2] < 300
     assert shown["prose"][2] == 640
-    row = await page.locator('[data-ref="tasks/1"]').bounding_box()
-    text = await page.locator('[data-ref="tasks/1"] td').nth(1).bounding_box()
+    row = await card(page, "tasks").locator("tbody tr").first.bounding_box()
+    text = await card(page, "tasks").locator("tbody td").first.bounding_box()
     assert row is not None and text is not None
     assert row["height"] < 48, "the step is on one line"
     assert text["width"] > 200
@@ -357,7 +440,7 @@ async def test_a_card_is_as_wide_as_its_content_up_to_a_column(page: Page, agent
 async def on_top(page: Page, x: float, y: float) -> str | None:
     """The id of the card that shows at the point of the screen, or None when no card does."""
     found = await page.evaluate(
-        "([x, y]) => document.elementFromPoint(x, y)?.closest('article[data-ref]')?.dataset.ref ?? null", [x, y]
+        "([x, y]) => document.elementFromPoint(x, y)?.closest('article[data-card]')?.dataset.card ?? null", [x, y]
     )
     return None if found is None else str(found)
 
@@ -367,7 +450,7 @@ async def boxes(page: Page, *ids: str) -> dict[str, tuple[int, int, int, int]]:
     await settled(page)
     rects = {}
     for card_id in ids:
-        box = await page.locator(f'article[data-ref="{card_id}"]').bounding_box()
+        box = await card(page, card_id).bounding_box()
         assert box is not None
         rects[card_id] = (round(box["x"]), round(box["y"]), round(box["width"]), round(box["height"]))
     return rects
@@ -395,12 +478,12 @@ async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them
         other = await browser.new_page(viewport={"width": 1440, "height": 900})
         await other.goto(f"http://{host}:{port}/?token={TOKEN}")
         for card_id in "abcd":
-            await expect(other.locator(f'article[data-ref="{card_id}"]')).to_be_visible()
+            await expect(card(other, card_id)).to_be_visible()
         assert await boxes(other, "a", "b", "c", "d") == first
         await other.close()
 
         await agent.write(put("a", "\n".join(f"{n}. step {n}" for n in range(1, 13))))
-        await expect(page.locator('[data-ref="a/12"]')).to_have_text("step 12")
+        await expect(card(page, "a")).to_contain_text("step 12")
         tall = await boxes(page, "a", "d")
         assert tall["a"][3] > first["a"][3] + 48, "the taller first card reaches the fourth"
         assert (await read_board(agent.tools)).positions["d"] == board.positions["d"]
@@ -410,13 +493,12 @@ async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them
 
 async def test_an_edit_does_not_replace_a_newer_version_unless_the_user_says_so(page: Page, agent: Agent) -> None:
     """Assemble: the agent's plan on the board.
-    Act: the user opens the editor and types; the agent puts a new version; the user saves with Ctrl+Enter, then clicks Save over it.
+    Act: the user double-clicks the card and types; the agent puts a new version; the user saves with Ctrl+Enter, then clicks Save over it.
     Assert: the editor says the card changed and stays open with the agent's version on the board; after Save over it the card
-    has the user's text, keeps the agent's author with edited true, and says edited by you."""
+    has the user's text and keeps the agent's author with edited true."""
     await agent.write(put("plan", "1. parse\n2. render"))
-    card = page.locator('article[data-ref="plan"]')
-    await card.hover()
-    await page.get_by_label("Edit plan").click()
+    plan = card(page, "plan")
+    await plan.get_by_text("render").dblclick()
     box = page.get_by_label("Markdown of plan")
     await box.fill("1. parse\n2. render\n3. ship")
     await agent.write(put("plan", "1. parse\n2. cache\n3. render"))
@@ -425,58 +507,65 @@ async def test_an_edit_does_not_replace_a_newer_version_unless_the_user_says_so(
     await expect(box).to_be_visible()
     assert (await read_board(agent.tools)).cards["plan"].md == "1. parse\n2. cache\n3. render"
     await page.get_by_role("button", name="Save over it").click()
-    await expect(page.locator('[data-ref="plan/3"]')).to_have_text("ship")
-    await expect(card).to_contain_text("edited by you")
+    await expect(plan).to_contain_text("ship")
+    await expect(box).to_have_count(0)
     board = await read_board(agent.tools)
     assert board.cards["plan"] == Card(md="1. parse\n2. render\n3. ship", author=Author.agent, edited=True)
 
 
-async def test_the_editor_saves_with_its_button_and_asks_once_when_a_changed_part_has_feedback(
+async def test_the_editor_shows_the_save_key_alone_and_asks_only_when_a_question_applies(
     page: Page, agent: Agent
 ) -> None:
-    """Assemble: a plan of two steps, where the user approved step 2.
-    Act: the user opens the editor with the pencil, changes step 2 and clicks Save, then Keep editing, then saves with
-    Ctrl+Enter and Save anyway; then opens the editor again, changes step 1 alone and clicks Save.
-    Assert: the editor shows Save and Cancel; the first save asks once, naming one part whose feedback moves, and keeps
-    the editor open on Keep editing; Save anyway saves and the approve is gone with the changed text; a change of a part
-    without feedback saves without a question."""
-    await agent.write(put("plan", "1. parse\n2. render"))
-    card = page.locator('article[data-ref="plan"]')
-    await page.locator('[data-ref="plan/2"]').hover()
-    await page.get_by_label("approve plan/2").click()
-    await page.mouse.move(700, 700)
-    await expect(card.get_by_role("img", name="user: approve")).to_be_visible()
-
-    await card.hover()
-    await page.get_by_label("Edit plan").click()
+    """Assemble: a plan of two steps, with a thread of the agent on the words of step 2.
+    Act: the user opens the editor with E on the selected card, rewords step 2 and saves with Ctrl+Enter, then Keep
+    editing, then Ctrl+Enter and Save anyway; opens it again, changes step 1 and clicks outside, then Discard; opens it
+    again, changes step 1 and saves with Ctrl+Enter.
+    Assert: the editor has the accent ring, the hint names the key and there is no Save or Cancel button; the first save
+    asks once, naming one thread whose words go, and Save anyway moves the thread to the history; a click outside with
+    changes asks about them, and Discard keeps the card; a change that keeps every quote saves at once."""
+    await agent.write(put("plan", "1. parse\n2. render"), comment("plan", "why?", "render"))
+    plan = card(page, "plan")
+    await expect(bubble(page, "plan")).to_have_count(1)
+    await select_card(page, "plan")
+    await page.keyboard.press("e")
     box = page.get_by_label("Markdown of plan")
-    await expect(box).to_be_visible()
-    await expect(card.get_by_role("button", name="Save", exact=True)).to_be_visible()
-    await expect(card.get_by_role("button", name="Cancel")).to_be_visible()
-    await box.fill("1. parse\n2. render fast")
-    await card.get_by_role("button", name="Save", exact=True).click()
-    await expect(card.get_by_role("alert")).to_contain_text("moves the feedback on 1 part you changed")
-    await card.get_by_role("button", name="Keep editing").click()
-    await expect(box).to_be_visible()
-    await expect(card.get_by_role("alert")).to_have_count(0)
-    await box.press("Control+Enter")
-    await card.get_by_role("button", name="Save anyway").click()
-    await expect(page.locator('[data-ref="plan/2"]')).to_have_text("render fast")
-    await expect(card.get_by_role("img", name="user: approve")).to_have_count(0)
+    await expect(box).to_be_focused()
+    await expect(plan).to_have_class(re.compile(r"0_0_0_2px_var\(--accent-ring\)"))
+    await expect(plan.locator("#editor-keys")).to_have_text(re.compile(r"Ctrl\s*↵\s*save"))
+    await expect(plan.get_by_role("button", name="Save", exact=True)).to_have_count(0)
+    await expect(plan.get_by_role("button", name="Cancel")).to_have_count(0)
+    await expect(plan.get_by_role("alert")).to_have_count(0)
 
-    await card.hover()
-    await page.get_by_label("Edit plan").click()
-    await box.fill("1. parse the config\n2. render fast")
-    await card.get_by_role("button", name="Save", exact=True).click()
-    await expect(page.locator('[data-ref="plan/1"]')).to_have_text("parse the config")
+    await box.fill("1. parse\n2. draw")
+    await box.press("Control+Enter")
+    await expect(plan.get_by_role("alert")).to_contain_text("moves 1 thread or arrow on words you changed")
+    await plan.get_by_role("button", name="Keep editing").click()
+    await expect(plan.get_by_role("alert")).to_have_count(0)
+    await box.press("Control+Enter")
+    await plan.get_by_role("button", name="Save anyway").click()
+    await expect(plan).to_contain_text("draw")
+    await expect(bubble(page, "plan")).to_have_count(0)
+
+    await plan.get_by_text("parse").dblclick()
+    await box.fill("1. parse it\n2. draw")
+    await page.mouse.click(700, 700)
+    await expect(plan.get_by_role("alert")).to_contain_text("Unsaved changes")
+    await plan.get_by_role("button", name="Discard").click()
+    await expect(box).to_have_count(0)
+    assert (await read_board(agent.tools)).cards["plan"].md == "1. parse\n2. draw"
+
+    await plan.get_by_text("parse").dblclick()
+    await box.fill("1. parse the config\n2. draw")
+    await box.press("Control+Enter")
+    await expect(plan).to_contain_text("parse the config")
     await expect(box).to_have_count(0)
 
 
-async def test_a_note_lands_in_view_saves_on_a_click_outside_and_opens_no_feedback(page: Page, agent: Agent) -> None:
+async def test_a_note_lands_in_view_saves_on_a_click_outside_and_opens_no_thread(page: Page, agent: Agent) -> None:
     """Assemble: an empty board with the chat at the bottom right.
     Act: the user double-clicks near the bottom right of the free space, types a note and clicks elsewhere on the board.
     Assert: the draft is whole inside the viewport and left of the chat; the click outside saves the note as a card by
-    the user, with no feedback panel open."""
+    the user, with no thread open."""
     await agent.write(say("hello"))
     chat = await page.get_by_role("complementary", name="Chat with the agent").bounding_box()
     assert chat is not None
@@ -491,49 +580,53 @@ async def test_a_note_lands_in_view_saves_on_a_click_outside_and_opens_no_feedba
     await page.mouse.click(600, 100)
     note = page.locator("article").filter(has_text="remember the docs")
     await expect(note).to_be_visible()
-    await expect(note.get_by_role("img", name="By you")).to_be_visible()
-    await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
+    board = await read_board(agent.tools)
+    assert [found.author for found in board.cards.values()] == [Author.user]
+    await expect(page.locator('section[aria-label^="Thread on"]')).to_have_count(0)
 
 
 async def test_a_removed_card_comes_back_with_undo_or_from_the_history(page: Page, agent: Agent) -> None:
-    """Assemble: two cards of the agent, placed.
-    Act: the user selects the first and presses Delete, then clicks Undo in the toast; then removes the second with its
-    button and clicks Restore in the history; then sends.
-    Assert: the first card is back where it was, the second is back, and the agent hears the removes and restores."""
-    await agent.write(put("a", "first"), put("b", "second"))
-    await expect(page.locator('article[data-ref="b"]')).to_be_visible()
+    """Assemble: two cards of the agent, placed, the first with a title.
+    Act: the user selects the first and presses Delete, then clicks Undo in the toast; then selects the second, presses
+    Backspace and clicks Restore in the history; then sends.
+    Assert: the toast names the first card by its title; the first card is back where it was, the second is back, and
+    the agent hears the removes and restores."""
+    await agent.write(put("a", "# Risks\n\nfirst"), put("b", "second"))
+    await expect(card(page, "b")).to_be_visible()
     before = await boxes(page, "a")
-    await page.locator('article[data-ref="a"] header').click()
+    await select_card(page, "a")
     await page.keyboard.press("Delete")
-    toast = page.locator('[role="status"]', has_text="Removed “first”")
+    toast = page.locator('[role="status"]', has_text="Removed “Risks”")
     await expect(toast).to_be_visible()
     await toast.get_by_role("button", name="Undo").click()
-    await expect(page.locator('article[data-ref="a"]')).to_be_visible()
+    await expect(card(page, "a")).to_be_visible()
     assert await boxes(page, "a") == before
-    await page.locator('article[data-ref="b"]').hover()
-    await page.get_by_label("Remove b").click()
-    await expect(page.locator('article[data-ref="b"]')).to_have_count(0)
+    await select_card(page, "b")
+    await page.keyboard.press("Backspace")
+    await expect(card(page, "b")).to_have_count(0)
     await page.keyboard.press("h")
     await page.get_by_label("Restore b").click()
-    await expect(page.locator('article[data-ref="b"]')).to_be_visible()
+    await expect(card(page, "b")).to_be_visible()
     await send(page)
     assert await agent.hear() == [remove("a"), restore("a"), remove("b"), restore("b")]
 
 
 async def test_a_half_written_comment_survives_the_agents_new_version(page: Page, agent: Agent) -> None:
     """Assemble: the agent's plan.
-    Act: the user selects plan/2 and types a comment without sending; the agent puts a new version; the user selects plan/2 again.
-    Assert: the panel closed with the new version, and when it opens again the box has the text and says the card changed."""
+    Act: the user selects the words of step 2, starts a comment without posting it; the agent puts a new version that
+    keeps those words; the user selects them again and clicks Comment.
+    Assert: the thread closed with the new version, and when it opens again the box has the text and says the card changed."""
     await agent.write(put("plan", "1. parse\n2. render"))
-    await page.locator('[data-ref="plan/2"]').click()
-    await page.get_by_label("Comment").fill("what about the cache")
+    await select_words(page, "plan", "render")
+    await page.keyboard.press("c")
+    await page.get_by_role("textbox", name="Comment").fill("what about the cache")
     await agent.write(put("plan", "1. parse\n2. render\n3. ship"))
-    await expect(page.get_by_label("Feedback on plan/2")).to_have_count(0)
-    await page.locator('[data-ref="plan/2"]').click()
-    await expect(page.get_by_label("Comment")).to_have_value("what about the cache")
-    await expect(page.get_by_label("Feedback on plan/2")).to_contain_text(
-        "The card changed since you started this comment"
-    )
+    thread = thread_on(page, "render")
+    await expect(thread).to_have_count(0)
+    await select_words(page, "plan", "render")
+    await page.get_by_role("toolbar", name="On the selection").get_by_role("button", name="Comment").click()
+    await expect(page.get_by_role("textbox", name="Comment")).to_have_value("what about the cache")
+    await expect(thread).to_contain_text("The card changed since you started this comment")
 
 
 async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
@@ -548,10 +641,10 @@ async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
     async with serve(hud, static_dir, tmp_path) as (host, port):
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
         await page.goto(f"http://{host}:{port}/?token={TOKEN}")
-        await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
+        await expect(card(page, "plan")).to_be_visible()
         await page.get_by_label("Message the agent").fill("half a thought")
     await expect(page.get_by_role("alert")).to_contain_text("not reachable")
-    await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
+    await expect(card(page, "plan")).to_be_visible()
     async with serve(hud, static_dir, tmp_path, port=port):
         await expect(page.get_by_role("alert")).to_have_count(0, timeout=15000)
         await expect(page.get_by_label("Message the agent")).to_have_value("half a thought")
@@ -563,11 +656,12 @@ async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
 
 async def test_the_shortcut_sheet_names_the_keys_for_the_platform(page: Page) -> None:
     """Act: press ?, then Esc.
-    Assert: a dialog of shortcuts opens, with the modifier of the platform, and closes."""
+    Assert: a dialog of shortcuts opens, with the modifier of the platform and the comment key, and closes."""
     await page.keyboard.press("?")
     sheet = page.get_by_role("dialog", name="Shortcuts")
     await expect(sheet).to_be_visible()
     await expect(sheet).to_contain_text("Ctrl + Enter")
+    await expect(sheet).to_contain_text("Comment on the selected words")
     await page.keyboard.press("Escape")
     await expect(sheet).to_have_count(0)
 
@@ -581,7 +675,7 @@ async def test_a_narrow_screen_shows_the_toolbar_whole_above_the_chat(
     await agent.write(put("plan", "1. parse"), say("hello"))
     page = await browser.new_page(viewport={"width": 390, "height": 800})
     await page.goto(f"http://{host}:{port}/?token={TOKEN}")
-    await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
+    await expect(card(page, "plan")).to_be_visible()
     send_box = await page.get_by_label("Send to the agent").bounding_box()
     toolbar = await page.get_by_role("navigation", name="Tools").bounding_box()
     chat = await page.get_by_label("Chat with the agent").bounding_box()
@@ -603,109 +697,149 @@ def inside(box: dict[str, float], area: dict[str, float]) -> bool:
     )
 
 
-async def test_the_feedback_panel_stays_in_the_viewport_at_every_zoom(page: Page, agent: Agent) -> None:
-    """Assemble: a wide code card near the right edge of the view, and a chat panel at the right.
-    Act: the user selects a code line; then zooms out to a third.
-    Assert: the panel is inside the viewport, to the left of the card, since the right has no room; zoomed out,
-    the panel has the same size, and sits beside the card still, on either side."""
-    await agent.write(put("code", "```python\nx = 1\ny = 2\n```"), move("code", 700, 0))
-    await page.locator('[data-ref="code/2"]').click()
-    panel = page.get_by_label("Feedback on code/2")
-    await expect(panel).to_be_visible()
+async def test_a_thread_stays_in_the_viewport_at_every_zoom(page: Page, agent: Agent) -> None:
+    """Assemble: a code card near the right of the view, with a thread of the agent on a line, and the chat at the right.
+    Act: the user opens the thread with its bubble; then zooms out to a third.
+    Assert: the thread is 220 pixels wide, inside the viewport and clear of the card; zoomed out, it has the same size
+    and still sits inside the viewport, clear of the card."""
+    await agent.write(
+        put("code", "```python\nx = 1\ny = 2\n```"), move("code", 700, 0), comment("code", "why 2?", "y = 2")
+    )
+    await bubble(page, "code").click()
+    thread = thread_on(page, "y = 2")
+    await expect(thread).to_be_visible()
     await settled(page)
     viewport = {"x": 0, "y": 0, "width": 1440, "height": 900}
-    before = await panel.bounding_box()
-    card = await page.locator('article[data-ref="code"]').bounding_box()
-    assert before is not None and card is not None
+    before = await thread.bounding_box()
+    shown = await card(page, "code").bounding_box()
+    assert before is not None and shown is not None
+    assert round(before["width"]) == 220
     assert inside(before, viewport)
-    assert before["x"] + before["width"] <= card["x"]
+    assert not overlaps(before, shown)
     for _ in range(5):
         await page.keyboard.press("-")
     await settled(page)
-    after = await panel.bounding_box()
-    card = await page.locator('article[data-ref="code"]').bounding_box()
-    assert after is not None and card is not None
-    assert round(card["width"]) < 300, "the card is a third of its size"
+    after = await thread.bounding_box()
+    shown = await card(page, "code").bounding_box()
+    assert after is not None and shown is not None
+    assert round(shown["width"]) < 300, "the card is a third of its size"
     assert (round(after["width"]), round(after["height"])) == (round(before["width"]), round(before["height"]))
     assert inside(after, viewport)
-    assert after["x"] >= card["x"] + card["width"] or after["x"] + after["width"] <= card["x"]
+    assert not overlaps(after, shown)
+
+
+def overlaps(a: dict[str, float], b: dict[str, float]) -> bool:
+    """Whether two bounding boxes cross."""
+    return (
+        a["x"] < b["x"] + b["width"]
+        and a["x"] + a["width"] > b["x"]
+        and a["y"] < b["y"] + b["height"]
+        and a["y"] + a["height"] > b["y"]
+    )
 
 
 async def test_the_wheel_over_the_comments_scrolls_them_and_not_the_board(page: Page, agent: Agent) -> None:
     """Assemble: a plan whose first step has thirty comments from the agent.
-    Act: the user selects the step and turns the wheel over the comments.
+    Act: the user opens the thread and turns the wheel over the comments.
     Assert: the comments scroll, and the card stays where it was."""
-    await agent.write(put("plan", "1. parse\n2. render"), *(comment("plan/1", f"note {n}") for n in range(30)))
-    await page.locator('[data-ref="plan/1"]').click()
-    comments = page.get_by_label("Comments on plan/1")
+    await agent.write(put("plan", "1. parse\n2. render"), *(comment("plan", f"note {n}", "parse") for n in range(30)))
+    await bubble(page, "plan").click()
+    comments = thread_on(page, "parse").get_by_label("Comments")
     await expect(comments).to_be_visible()
     await settled(page)
-    card = await boxes(page, "plan")
+    shown = await boxes(page, "plan")
     box = await comments.bounding_box()
     assert box is not None
     await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     await page.mouse.wheel(0, 400)
     await expect(comments).not_to_have_js_property("scrollTop", 0)
-    assert await boxes(page, "plan") == card
+    assert await boxes(page, "plan") == shown
 
 
-async def test_headings_and_paragraphs_take_feedback(page: Page, agent: Agent) -> None:
-    """Assemble: the agent puts a card with a heading, a paragraph and a list.
-    Act: the user approves the paragraph with the quick reaction and sends.
-    Assert: the heading, the paragraph and the item are parts 1 to 3, the paragraph's feedback opens, and the agent
-    hears the reaction with the paragraph's text."""
-    await agent.write(put("doc", "# Title\n\nSome prose here.\n\n1. a step"))
-    await expect(page.locator('[data-ref="doc/1"]')).to_have_text("Title")
-    await expect(page.locator('[data-ref="doc/2"]')).to_have_text("Some prose here.")
-    await expect(page.locator('[data-ref="doc/3"]')).to_have_text("a step")
-    await page.locator('[data-ref="doc/2"]').click()
-    await expect(page.get_by_label("Feedback on doc/2")).to_be_visible()
-    await page.keyboard.press("a")
-    await send(page)
-    turn = await agent.turn()
-    assert (list(turn.actions), turn.parts) == ([react("doc/2", Reaction.approve)], {"doc/2": "Some prose here."})
-
-
-async def test_a_cell_and_a_header_open_no_feedback_and_c_opens_the_selections(page: Page, agent: Agent) -> None:
-    """Assemble: a table with input columns.
-    Act: the user focuses a cell with the keyboard and clicks a checkbox; then clicks the card's header and presses C.
-    Assert: no feedback opens for the cells; the header click selects the card without its feedback; C opens the
-    card's feedback with the comment box focused."""
-    await agent.write(
-        put("tasks", "| Task | Hours {number} | Done {check} |\n|---|---|---|\n| parse | | |\n| render | | |")
-    )
-    await page.get_by_label("Input tasks/2/2").focus()
-    await page.get_by_label("Input tasks/1/3").click()
-    await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
-    card = page.locator('article[data-ref="tasks"]')
-    await card.locator("header").click(position={"x": 150, "y": 10})
-    await expect(card).to_have_class(re.compile("ring-accent-ring"))
-    await expect(page.locator('[aria-label^="Feedback on"]')).to_have_count(0)
+async def test_selected_words_open_the_toolbar_and_c_starts_a_thread_on_them(page: Page, agent: Agent) -> None:
+    """Assemble: the agent puts a card with a heading, a paragraph and a list, where "step" occurs twice.
+    Act: the user selects words across the heading and the paragraph and presses C, comments and sends; then selects
+    the second "step" and comments with the toolbar's button, and sends.
+    Assert: the toolbar has Comment and Arrow, the comment box takes the focus, and the agent hears each comment with
+    its quote as the card shows it and its place, the second at occurrence 1; the words of each thread show a bubble."""
+    await agent.write(put("doc", "# Title\n\nSome prose here.\n\n1. a step\n2. another step"))
+    await select_words(page, "doc", "Title", "Some prose")
+    toolbar = page.get_by_role("toolbar", name="On the selection")
+    await expect(toolbar.get_by_role("button")).to_have_count(2)
     await page.keyboard.press("c")
-    await expect(page.get_by_label("Feedback on tasks")).to_be_visible()
-    await expect(page.get_by_label("Comment")).to_be_focused()
+    box = page.get_by_role("textbox", name="Comment")
+    await expect(box).to_be_focused()
+    await box.fill("merge these")
+    await box.press("Enter")
+    await send(page)
+    assert await agent.hear() == [comment("doc", "merge these", "Title Some prose", 0)]
 
-
-async def test_escape_closes_the_feedback_then_the_selection_and_the_pending_list(page: Page, agent: Agent) -> None:
-    """Assemble: a plan.
-    Act: the user clicks step 2, focuses the comment box and presses Esc, then A; presses Esc and A again; then opens
-    the list of what Send carries and presses Esc; opens it again and clicks the empty board.
-    Assert: the first Esc closes the panel and keeps step 2 selected, so A approves it; the second Esc clears the
-    selection, so A changes nothing; Esc and a click outside close the list."""
-    await agent.write(put("plan", "1. parse\n2. render"))
-    part = page.locator('[data-ref="plan/2"]')
-    await part.click()
-    panel = page.get_by_label("Feedback on plan/2")
-    await expect(panel).to_be_visible()
-    await page.get_by_label("Comment").focus()
     await page.keyboard.press("Escape")
-    await expect(panel).to_have_count(0)
-    await page.keyboard.press("a")
+    await page.evaluate(
+        """() => {
+          const items = document.querySelectorAll('article[data-card="doc"] li');
+          const node = [...items[1].childNodes].find((child) => child.nodeType === Node.TEXT_NODE);
+          const at = node.data.indexOf('step');
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + 4);
+          getSelection().removeAllRanges();
+          getSelection().addRange(range);
+          document.dispatchEvent(new PointerEvent('pointerup'));
+        }"""
+    )
+    await toolbar.get_by_role("button", name="Comment").click()
+    await page.get_by_role("textbox", name="Comment").fill("which step?")
+    await page.get_by_role("textbox", name="Comment").press("Enter")
+    await send(page)
+    assert await agent.hear() == [comment("doc", "which step?", "step", 1)]
+    await expect(bubble(page, "doc")).to_have_count(2)
+
+
+async def test_a_click_selects_a_card_which_the_keys_move_and_edit(page: Page, agent: Agent) -> None:
+    """Assemble: a plan at a place.
+    Act: the user clicks the card's padding, presses ArrowRight and Shift+ArrowDown, then E, then Esc.
+    Assert: the click selects the card, with its frame and handles; the keys move it 8 pixels right and 32 down, as
+    the agent reads; E opens the editor and Esc closes it."""
+    await agent.write(put("plan", "1. parse\n2. render"), move("plan", 100, 100))
+    plan = card(page, "plan")
+    await expect(plan).to_be_visible()
+    await select_card(page, "plan")
+    await expect(page.get_by_label("Resize plan from the top left")).to_be_visible()
     await page.mouse.move(700, 700)
-    await expect(part.get_by_role("img", name="user: approve")).to_be_visible()
+    await expect(page.get_by_label("Resize plan from the top left")).to_be_visible()
+    await page.keyboard.press("ArrowRight")
+    await page.keyboard.press("Shift+ArrowDown")
+    positions = await positions_once(agent, lambda found: found.get("plan") == Point(x=108, y=132))
+    assert positions["plan"] == Point(x=108, y=132)
+    await page.keyboard.press("e")
+    box = page.get_by_label("Markdown of plan")
+    await expect(box).to_be_visible()
     await page.keyboard.press("Escape")
-    await page.keyboard.press("a")
-    await expect(part.get_by_role("img", name="user: approve")).to_be_visible()
+    await expect(box).to_have_count(0)
+
+
+async def test_escape_closes_the_thread_then_the_selection_and_the_pending_list(page: Page, agent: Agent) -> None:
+    """Assemble: a plan with a comment of the user on its words, not sent.
+    Act: the user opens the thread and presses Esc in its reply box; selects words and presses Esc; opens the list of
+    what Send carries and presses Esc; opens it again and clicks the empty board.
+    Assert: Esc closes the thread, Esc ends the selection of words and its toolbar, and Esc and a click outside close
+    the list."""
+    await agent.write(put("plan", "1. parse\n2. render"))
+    await comment_on(page, "plan", "render", "fast?")
+    thread = thread_on(page, "render")
+    await page.get_by_role("textbox", name="Reply").focus()
+    await page.keyboard.press("Escape")
+    await expect(thread).to_have_count(0)
+    await bubble(page, "plan").click()
+    await expect(thread).to_be_visible()
+    await page.keyboard.press("Escape")
+    await expect(thread).to_have_count(0)
+
+    await select_words(page, "plan", "parse")
+    await page.keyboard.press("Escape")
+    await expect(page.get_by_role("toolbar", name="On the selection")).to_have_count(0)
+
     chevron = page.get_by_label("What goes to the agent")
     pending = page.get_by_label("Pending actions")
     await chevron.click()
@@ -718,30 +852,23 @@ async def test_escape_closes_the_feedback_then_the_selection_and_the_pending_lis
     await expect(pending).to_have_count(0)
 
 
-async def test_the_quick_buttons_are_not_in_the_tab_order(page: Page, agent: Agent) -> None:
-    """Assemble: a table of two rows with a number column.
-    Act: the user hovers the first row, so that its quick buttons show, focuses its cell and presses Tab.
-    Assert: the focus lands on the second row's cell, past the quick buttons."""
-    await agent.write(put("tasks", "| Task | Hours {number} |\n|---|---|\n| parse | |\n| render | |"))
-    await page.locator('[data-ref="tasks/1"]').hover()
-    await expect(page.get_by_label("approve tasks/1")).to_be_visible()
-    await page.get_by_label("Input tasks/1/2").focus()
-    await page.keyboard.press("Tab")
-    await expect(page.get_by_label("Input tasks/2/2")).to_be_focused()
-
-
-async def test_the_feedback_panel_keeps_clear_of_the_cards(page: Page, agent: Agent) -> None:
-    """Assemble: two cards side by side at the left edge of the view, with a gap narrower than the panel.
-    Act: the user clicks a step of the left card.
-    Assert: the panel is inside the viewport and covers neither card."""
+async def test_a_thread_keeps_clear_of_the_cards(page: Page, agent: Agent) -> None:
+    """Assemble: two cards side by side at the left edge of the view, with a gap narrower than a thread, and a thread
+    of the agent on a step of the left card.
+    Act: the user opens the thread.
+    Assert: the thread is inside the viewport and covers neither card."""
     await agent.write(
         put("a", "1. parse\n2. render"),
         put("b", "\n".join(f"{n}. step {n}" for n in range(1, 9))),
         move("a", 0, 0),
         move("b", 430, 0),
+        comment("a", "why?", "parse"),
     )
-    await page.locator('[data-ref="a/1"]').click()
-    panel = await page.get_by_label("Feedback on a/1").bounding_box()
+    await bubble(page, "a").click()
+    thread = thread_on(page, "parse")
+    await expect(thread).to_be_visible()
+    await settled(page)
+    panel = await thread.bounding_box()
     assert panel is not None
     shown = await boxes(page, "a", "b")
     assert inside(panel, {"x": 0, "y": 0, "width": 1440, "height": 900})
@@ -770,9 +897,9 @@ async def test_a_card_out_of_view_gets_a_chip_that_shows_it(page: Page, agent: A
     await chip.click()
     await expect(chip).to_have_count(0)
     await settled(page)
-    card = await page.locator('article[data-ref="far"]').bounding_box()
-    assert card is not None
-    assert inside(card, {"x": 0, "y": 0, "width": chat["x"], "height": 900})
+    shown = await card(page, "far").bounding_box()
+    assert shown is not None
+    assert inside(shown, {"x": 0, "y": 0, "width": chat["x"], "height": 900})
 
 
 async def test_fit_all_keeps_the_cards_clear_of_the_chat(page: Page, agent: Agent) -> None:
@@ -780,15 +907,15 @@ async def test_fit_all_keeps_the_cards_clear_of_the_chat(page: Page, agent: Agen
     Act: the user presses 1.
     Assert: both cards are inside the viewport to the left of the chat."""
     await agent.write(put("a", "1. one"), put("b", "1. two"), move("a", 0, 0), move("b", 2600, 1800))
-    await expect(page.locator('article[data-ref="b"]')).to_be_attached()
+    await expect(card(page, "b")).to_be_attached()
     await page.keyboard.press("1")
     await settled(page)
     chat = await page.get_by_label("Chat with the agent").bounding_box()
     assert chat is not None
     for card_id in "ab":
-        card = await page.locator(f'article[data-ref="{card_id}"]').bounding_box()
-        assert card is not None
-        assert inside(card, {"x": 0, "y": 0, "width": chat["x"], "height": 900}), card_id
+        shown = await card(page, card_id).bounding_box()
+        assert shown is not None
+        assert inside(shown, {"x": 0, "y": 0, "width": chat["x"], "height": 900}), card_id
 
 
 async def test_the_user_drags_the_chat_to_a_width_that_the_browser_keeps(page: Page) -> None:
@@ -825,15 +952,15 @@ async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Ag
         await tools.call_tool("write", {"actions": as_json(put("plan", "1. a"))})
         board = str((await tools.call_tool("listen", {})).structured_content["board"])  # type: ignore[index]
     await agent.write(put("shared-note", "1. b"))
-    await expect(page.locator('article[data-ref="shared-note"]')).to_be_visible()
+    await expect(card(page, "shared-note")).to_be_visible()
     await page.get_by_label("Boards").click()
     menu = page.get_by_role("menu", name="Other boards")
     await expect(menu.get_by_role("menuitem", name=re.compile("^shared"))).to_have_attribute("aria-current", "page")
     item = menu.get_by_role("menuitem", name=re.compile(f"^{board} 1 card$"))
     await expect(item).to_be_visible()
     await item.click()
-    await expect(page.locator('article[data-ref="plan"]')).to_be_visible()
-    await expect(page.locator('article[data-ref="shared-note"]')).to_have_count(0)
+    await expect(card(page, "plan")).to_be_visible()
+    await expect(card(page, "shared-note")).to_have_count(0)
     assert f"board={board}" in page.url
     await expect(page.get_by_label("Boards")).to_have_text(board)
 
@@ -852,12 +979,12 @@ async def test_cards_may_cross_after_their_first_place_and_the_one_last_touched_
     page: Page, agent: Agent
 ) -> None:
     """Assemble: a tall code card at the top left, and a plan that the agent moves 200 pixels below the code's top, onto it.
-    Act: the user clicks the code card's header; then the agent puts a new version of the plan.
+    Act: the user clicks the code card's padding; then the agent puts a new version of the plan.
     Assert: the plan stays where the agent put it, in the agent's read and on the page, and shows over the code card
     where they cross; after the click the code card shows on top there; after the new version the plan does again."""
     code = "```python\n" + "\n".join(f"line_{n} = {n}" for n in range(1, 12)) + "\n```"
     await agent.write(put("code", code), put("plan", "1. parse\n2. render"), move("code", 0, 0), move("plan", 0, 200))
-    await expect(page.locator('[data-ref="plan/2"]')).to_have_text("render")
+    await expect(card(page, "plan")).to_contain_text("render")
     shown = await boxes(page, "code", "plan")
     assert shown["code"][3] > 200, "the plan at 200 is on the code card"
     assert (await read_board(agent.tools)).positions["plan"] == Point(x=0, y=200)
@@ -865,95 +992,64 @@ async def test_cards_may_cross_after_their_first_place_and_the_one_last_touched_
     x, y = shown["plan"][0] + 40, shown["plan"][1] + 10
     assert await on_top(page, x, y) == "plan"
 
-    await page.locator('article[data-ref="code"] header').click(position={"x": 150, "y": 10})
+    await page.mouse.click(shown["code"][0] + 6, shown["code"][1] + 40)
     assert await on_top(page, x, y) == "code"
     assert (await read_board(agent.tools)).positions["plan"] == Point(x=0, y=200), "a touch moves nothing"
 
     await agent.write(put("plan", "1. parse\n2. render\n3. ship"))
-    await expect(page.locator('[data-ref="plan/3"]')).to_have_text("ship")
+    await expect(card(page, "plan")).to_contain_text("ship")
     assert await on_top(page, x, y) == "plan"
 
 
-async def test_a_click_on_the_comment_count_opens_the_thread_and_leaves_the_verdict(page: Page, agent: Agent) -> None:
-    """Assemble: a plan, where the agent commented on step 2.
-    Act: the user hovers step 2 and approves it with the quick button; then hovers again and clicks the comment count.
-    Assert: the comment count stays in place while the quick buttons show, beside them and not under them; the click
-    opens the feedback on step 2 with the approve still pressed; the agent hears the approve alone, and no question
-    button is among the quick buttons."""
-    await agent.write(put("plan", "1. parse\n2. render"), comment("plan/2", "the cache is shared"))
-    part = page.locator('[data-ref="plan/2"]')
-    thread = page.get_by_label("Thread on plan/2")
-    await expect(thread).to_be_visible()
+async def test_a_bubble_counts_the_agents_new_comments_until_the_user_opens_the_thread(
+    page: Page, agent: Agent, browser: Browser, address: tuple[str, int]
+) -> None:
+    """Assemble: a plan, where the agent commented twice on the words of step 2.
+    Act: the user opens the thread with its bubble and closes it; reloads the page; the agent comments again.
+    Assert: the bubble is filled with the count 2 and sits in the card's right margin, level with the words; once
+    opened it counts nothing new, also after the reload; the agent's next comment counts 1."""
+    await agent.write(
+        put("plan", "1. parse\n2. render the page"),
+        comment("plan", "the cache is shared", "render"),
+        comment("plan", "and slow", "render"),
+    )
+    mark = bubble(page, "plan")
+    await expect(mark).to_have_attribute("aria-label", "Thread on “render”, 2 new from the agent")
+    await expect(mark).to_have_text("2")
     await settled(page)
-    resting = await thread.bounding_box()
-    await part.hover()
-    approve = page.get_by_label("approve plan/2")
-    await expect(approve).to_be_visible()
-    await expect(page.get_by_label("question plan/2")).to_have_count(0)
-    hovered = await thread.bounding_box()
-    quick = await approve.bounding_box()
-    assert resting is not None and hovered is not None and quick is not None
-    assert {k: round(v) for k, v in hovered.items()} == {k: round(v) for k, v in resting.items()}, "the count stays put"
-    assert quick["x"] + quick["width"] <= hovered["x"], "the quick buttons sit before the comment count"
-    await approve.click()
-    await expect(approve).to_have_attribute("aria-pressed", "true")
-    await page.mouse.move(0, 0)
-    await part.hover()
-    await thread.click()
-    await expect(page.get_by_label("Feedback on plan/2")).to_be_visible()
-    await expect(page.get_by_label("approve plan/2")).to_have_attribute("aria-pressed", "true")
-    await send(page)
-    assert await agent.hear() == [react("plan/2", Reaction.approve)]
+    place = await mark.bounding_box()
+    shown = await card(page, "plan").bounding_box()
+    words = await card(page, "plan").locator("li").nth(1).bounding_box()
+    assert place is not None and shown is not None and words is not None
+    assert shown["x"] + shown["width"] - 44 <= place["x"] <= shown["x"] + shown["width"]
+    assert words["y"] - 4 <= place["y"] <= words["y"] + words["height"]
+
+    await mark.click()
+    await expect(thread_on(page, "render")).to_contain_text("and slow")
+    await page.keyboard.press("Escape")
+    await expect(mark).to_have_attribute("aria-label", "Thread on “render”")
+    await page.reload()
+    await expect(mark).to_have_attribute("aria-label", "Thread on “render”")
+    await agent.write(comment("plan", "still?", "render"))
+    await expect(mark).to_have_attribute("aria-label", "Thread on “render”, 1 new from the agent")
 
 
-async def test_the_marks_of_a_table_row_sit_before_its_text(page: Page, agent: Agent) -> None:
-    """Assemble: a table with a check column.
-    Act: the user hovers the first row.
-    Assert: the quick buttons sit before the row's text, and the row's checkbox is clear of them by more than their width."""
-    await agent.write(put("tasks", "| Task | Done {check} |\n|---|---|\n| parse | |\n| render | |"))
-    await positions_once(agent, {"tasks"}.issubset)
+async def test_a_thread_on_a_table_cell_has_its_bubble_level_with_the_row(page: Page, agent: Agent) -> None:
+    """Assemble: a table of three rows, with a thread of the agent on the hours of the second row.
+    Assert: the hours have the bubble in the margin, level with the second row, and numbers are tabular."""
+    await agent.write(
+        put("tasks", "| Step | Hours |\n|---|---|\n| parse | 1 |\n| render | 25 |\n| ship | 3 |"),
+        comment("tasks", "so many?", "25"),
+    )
+    mark = bubble(page, "tasks")
+    await expect(mark).to_be_visible()
     await settled(page)
-    row = page.locator('[data-ref="tasks/1"]')
-    await row.hover()
-    quick = page.get_by_label("approve tasks/1")
-    await expect(quick).to_be_visible()
-    approve = await quick.bounding_box()
-    text = await row.locator("td").nth(1).bounding_box()
-    check = await page.get_by_label("Input tasks/1/2").bounding_box()
-    assert approve is not None and text is not None and check is not None
-    assert approve["x"] + approve["width"] <= text["x"]
-    assert check["x"] - (approve["x"] + approve["width"]) > 2 * approve["width"]
-
-
-async def test_the_quick_reactions_of_a_card_sit_in_line_with_its_header(page: Page, agent: Agent) -> None:
-    """Assemble: a card with a heading.
-    Act: the user hovers the card's header.
-    Assert: the strip of quick reactions is inside the header, to the right of the Remove button and above the heading."""
-    await agent.write(put("plan", "# Plan\n\n1. parse"))
-    header = page.locator('article[data-ref="plan"] header')
-    await header.hover()
-    approve = page.get_by_label("approve plan", exact=True)
-    await expect(approve).to_be_visible()
-    await settled(page)
-    strip = await approve.locator("..").bounding_box()
-    head = await header.bounding_box()
-    remove_button = await page.get_by_label("Remove plan").bounding_box()
-    heading = await page.locator('[data-ref="plan/1"]').bounding_box()
-    assert strip is not None and head is not None and remove_button is not None and heading is not None
-    assert inside(strip, head)
-    assert strip["x"] >= remove_button["x"] + remove_button["width"]
-    assert strip["y"] + strip["height"] <= heading["y"]
-
-
-def crossing(shown: dict[str, tuple[int, int, int, int]]) -> list[tuple[str, str]]:
-    """The pairs of cards whose screen rects cross."""
-    found = list(shown.items())
-    return [
-        (a, b)
-        for i, (a, (ax, ay, aw, ah)) in enumerate(found)
-        for b, (bx, by, bw, bh) in found[i + 1 :]
-        if ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
-    ]
+    row = await card(page, "tasks").locator("tbody tr").nth(1).bounding_box()
+    place = await mark.bounding_box()
+    assert row is not None and place is not None
+    assert row["y"] - 4 <= place["y"] and place["y"] + place["height"] <= row["y"] + row["height"] + 4
+    numbers = await card(page, "tasks").locator("table").evaluate("table => getComputedStyle(table).fontVariantNumeric")
+    assert numbers == "tabular-nums"
 
 
 async def test_new_cards_of_any_size_land_clear_of_each_other(page: Page, agent: Agent) -> None:
@@ -971,8 +1067,8 @@ async def test_new_cards_of_any_size_land_clear_of_each_other(page: Page, agent:
             case 2:
                 return " ".join(f"word{i}" for i in range(chance.randint(3, 120)))
             case _:
-                rows = "\n".join(f"| task {i} | |" for i in range(chance.randint(1, 8)))
-                return f"| Task | Hours {{number}} |\n|---|---|\n{rows}"
+                rows = "\n".join(f"| [ ] | task {i} | {i} |" for i in range(chance.randint(1, 8)))
+                return f"| | Task | Hours |\n|---|---|---|\n{rows}"
 
     cards = {f"card{n}": md(n) for n in range(8)}
     written: list[str] = []
@@ -986,73 +1082,63 @@ async def test_new_cards_of_any_size_land_clear_of_each_other(page: Page, agent:
         assert crossing(shown) == [], f"after {batch}: {shown}"
 
 
+def crossing(shown: dict[str, tuple[int, int, int, int]]) -> list[tuple[str, str]]:
+    """The pairs of cards whose screen rects cross."""
+    found = list(shown.items())
+    return [
+        (a, b)
+        for i, (a, (ax, ay, aw, ah)) in enumerate(found)
+        for b, (bx, by, bw, bh) in found[i + 1 :]
+        if ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+    ]
+
+
 async def test_one_send_in_the_chat_lists_the_changes_by_card_and_marks_them_unsent_until_sent(
     page: Page, agent: Agent, tmp_path: Path
 ) -> None:
-    """Assemble: a checklist table with an owner, hours and done column, and a plan.
-    Act: the user fills two cells of a row, approves a step and comments on it; closes and opens the chat; opens the list
-    of what Send carries; sends.
-    Assert: the toolbar has no Send and keeps its size through all of it; the chat's Send counts 4, and the closed chat
-    says so; the cells, the step's reaction, its comment count and the comment's bubble are marked unsent; the list has
-    one line per action, with the row's name, the column's title and the value under the table's title, and the step's
-    text under the plan's title; after Send nothing is marked unsent, Send has no count, and the agent hears the four
-    actions; a screenshot goes in tmp_path."""
+    """Assemble: a checklist table with boxes, and a plan.
+    Act: the user checks a box and comments on words of the plan; closes and opens the chat; opens the list of what
+    Send carries; sends.
+    Assert: the toolbar has no Send and keeps its size through all of it; the chat's Send counts 2, and the closed chat
+    says so; the thread's bubble and the comment's chat bubble are marked unsent; the list has one line per action,
+    the edit under the table's title and the comment under its words under the plan's title; after Send nothing is
+    marked unsent, Send is disabled, and the agent hears the two actions; a screenshot goes in tmp_path."""
     await agent.write(
-        put(
-            "checklist",
-            "| Task | Owner {text} | Hours {number} | Done {check} |\n|---|---|---|---|\n| Build the UI | | | |\n| Run make check | | | |",
-        ),
+        put("checklist", "| | Task |\n|---|---|\n| [ ] | Build the UI |\n| [ ] | Run make check |"),
         put("plan", "# The plan\n\n1. parse\n2. render"),
     )
     toolbar = page.get_by_role("navigation", name="Tools")
     await expect(toolbar).to_be_visible()
     await expect(toolbar.get_by_label("Send to the agent")).to_have_count(0)
     before = await toolbar.bounding_box()
-    await page.get_by_label("Input checklist/2/2").fill("agent")
-    await page.get_by_label("Input checklist/2/2").press("Enter")
-    await page.get_by_label("Input checklist/2/3").fill("1")
-    await page.get_by_label("Input checklist/2/3").press("Enter")
-    step = page.locator('[data-ref="plan/2"]')
-    await step.hover()
-    await page.get_by_label("approve plan/2").click()
-    await step.click()
-    await page.get_by_label("Comment").fill("fast, please")
-    await page.get_by_label("Comment").press("Enter")
-    await page.mouse.move(700, 850)
+    await card(page, "checklist").get_by_role("checkbox", name="Done").nth(1).click()
+    await comment_on(page, "plan", "render", "fast, please")
+    await page.keyboard.press("Escape")
     chat = page.get_by_label("Chat with the agent")
-    await expect(chat.get_by_label("4 unsent")).to_be_visible()
-    await expect(page.get_by_label("Input checklist/2/2")).to_have_attribute("title", "Not sent yet")
-    await expect(page.get_by_label("Input checklist/2/3")).to_have_attribute("data-unsent", "")
-    await expect(step.get_by_role("img", name="user: approve, unsent")).to_be_visible()
-    await expect(step.get_by_label("Thread on plan/2, unsent")).to_be_visible()
-    await expect(chat.locator("li[data-unsent]")).to_have_text("“parse”fast, pleaseunsent")
+    await expect(chat.get_by_label("2 unsent")).to_be_visible()
+    await expect(bubble(page, "plan")).to_have_attribute("data-unsent", "")
+    await expect(chat.locator("li[data-unsent]")).to_have_text("“render”fast, pleaseunsent")
     assert await toolbar.bounding_box() == before
 
     await page.get_by_label("Close the chat").click()
-    await expect(page.get_by_label("Open the chat")).to_contain_text("4 to send")
+    await expect(page.get_by_label("Open the chat")).to_contain_text("2 to send")
     await page.get_by_label("Open the chat").click()
     await page.get_by_label("What goes to the agent").click()
     pending = page.get_by_label("Pending actions")
-    await expect(pending.locator("li")).to_have_count(4)
-    table = pending.get_by_label("Task")
-    await expect(table.locator("li").nth(0)).to_have_text("Run make checkOwner: agent")
-    await expect(table.locator("li").nth(1)).to_have_text("Run make checkHours: 1")
-    plan = pending.get_by_label("The plan")
-    await expect(plan.locator("li").nth(0)).to_have_text("parseapprove")
-    await expect(plan.locator("li").nth(1)).to_have_text("parse“fast, please”")
+    await expect(pending.locator("li")).to_have_count(2)
+    await expect(pending.get_by_label("Task").locator("li")).to_have_text(["edited"])
+    await expect(pending.get_by_label("The plan").locator("li")).to_have_text(["render“fast, please”"])
     await snap(page, tmp_path / "1-pending.png")
 
     await send(page)
-    assert await agent.hear() == [
-        fill("checklist/2/2", "agent"),
-        fill("checklist/2/3", 1),
-        react("plan/2", Reaction.approve),
-        comment("plan/2", "fast, please"),
-    ]
+    match await agent.hear():
+        case [Edit(id="checklist"), second]:
+            assert second == comment("plan", "fast, please", "render", 0)
+        case other:
+            pytest.fail(f"the agent heard {other}")
     await expect(page.locator("[data-unsent]")).to_have_count(0)
     await expect(page.locator('[aria-label$=" unsent"]')).to_have_count(0)
     await expect(chat.get_by_label("Send to the agent")).to_be_disabled()
-    await expect(step.get_by_role("img", name="user: approve")).to_be_visible()
     assert await toolbar.bounding_box() == before
     await snap(page, tmp_path / "2-sent.png")
 
@@ -1063,11 +1149,15 @@ async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
     """Assemble: two cards with an arrow between them.
     Act: the user reads the toolbar, fits the cards and resets the view; opens the board menu, chooses Clear this board
     and keeps the board; chooses it again and clears.
-    Assert: Note, History, Shortcuts and Fit show their names, and the toolbar has no Clear; after Fit the zoom
+    Assert: Note, History, Shortcuts, Look and Fit show their names, and the toolbar has no Clear; after Fit the zoom
     button reads another percentage and resets the view to 100 %, where it is disabled; the confirm is in the page and
     names the board, 2 cards and 1 arrow; Keep leaves the cards; Clear empties the board; screenshots go in tmp_path."""
     await agent.write(
-        put("a", "1. parse"), put("b", "1. render"), move("a", 0, 0), move("b", 1400, 0), link("ab", "a/1", "b/1")
+        put("a", "1. parse"),
+        put("b", "1. render"),
+        move("a", 0, 0),
+        move("b", 1400, 0),
+        link("ab", "a", "b", quote="parse"),
     )
     await expect(page.locator("article")).to_have_count(2)
     toolbar = page.get_by_role("navigation", name="Tools")
@@ -1075,9 +1165,10 @@ async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
         ("New note", "Note"),
         ("History", "History"),
         ("Shortcuts", "Shortcuts"),
+        ("Look", "Look"),
         ("Fit all cards", "Fit"),
     ]:
-        await expect(toolbar.get_by_role("button", name=name)).to_have_text(text)
+        await expect(toolbar.get_by_role("button", name=name, exact=True)).to_have_text(text)
     await expect(toolbar.get_by_role("button", name="Clear")).to_have_count(0)
     reset = toolbar.get_by_role("button", name="Reset the view")
     await expect(reset).to_have_text("100%")
@@ -1110,118 +1201,120 @@ async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
     await expect(page.get_by_role("menuitem", name="Clear this board")).to_be_disabled()
 
 
-async def test_the_agents_new_version_marks_what_it_changed_until_the_user_looks(
+async def test_the_agents_new_version_shows_a_word_diff_until_the_user_hides_it(
     page: Page, agent: Agent, tmp_path: Path
 ) -> None:
-    """Assemble: the agent's plan of three steps, with the user's approval on step 2.
-    Act: the agent puts a version that rewords step 2, replaces step 3 and comments on step 2; the user clicks step 3.
-    Assert: steps 2 and 3 carry the changed mark and step 1 does not; the card lists the two texts that went, struck
-    through, and its header counts them; the version chip says the history holds feedback; the comment count says the
-    agent commented last; the click clears the marks and the list; a screenshot goes in tmp_path."""
-    await agent.write(put("plan", "1. parse\n2. render\n3. test"))
-    step2 = page.locator('[data-ref="plan/2"]')
-    await step2.hover()
-    await page.get_by_label("approve plan/2").click()
-    await page.mouse.move(700, 700)
-    await expect(step2.get_by_role("img", name="user: approve")).to_be_visible()
-    await expect(page.locator("[data-changed]")).to_have_count(0)
+    """Assemble: the agent's plan of a paragraph and three steps.
+    Act: the agent puts a version that rewords step 2, replaces step 3 and adds a step; the user clicks Hide changes,
+    then Show changes, then picks the line style in the Look menu.
+    Assert: "Hide changes · History" sits on the title line and the card has no strip above it; the removed words show
+    struck through and the added words tinted, and step 1 is plain; Hide changes shows the new text plain, with Show
+    changes in its place; the line style shows the old lines before the new ones; a screenshot goes in tmp_path."""
+    await agent.write(put("plan", "# Plan\n\n1. parse\n2. render the page\n3. test"))
+    plan = card(page, "plan")
+    await expect(plan.get_by_role("button", name="Hide changes")).to_have_count(0)
+    await agent.write(put("plan", "# Plan\n\n1. parse\n2. render the whole page\n3. ship\n4. announce"))
+    hide = plan.get_by_role("button", name="Hide changes")
+    await expect(hide).to_be_visible()
+    await expect(plan.locator("header")).to_have_count(0)
+    await settled(page)
+    title = await plan.locator("h1").bounding_box()
+    link_box = await hide.bounding_box()
+    history = await plan.get_by_label("History of plan").bounding_box()
+    assert title is not None and link_box is not None and history is not None
+    assert title["y"] <= link_box["y"] + link_box["height"] / 2 <= title["y"] + title["height"]
+    assert link_box["x"] < history["x"]
+    await expect(plan.locator("ins.diff-ins")).to_have_text(["whole", "ship", "announce"])
+    await expect(plan.locator("del.diff-del")).to_have_text(["test"])
+    await expect(plan.locator("li").first).to_have_text("parse")
+    await snap(page, tmp_path / "1-diff.png")
 
-    await agent.write(put("plan", "1. parse\n2. render fast\n3. ship"), comment("plan/2", "faster now"))
-    await expect(page.locator('[data-ref="plan/2"][data-changed]')).to_be_visible()
-    await expect(page.locator('[data-ref="plan/3"][data-changed]')).to_be_visible()
-    await expect(page.locator('[data-ref="plan/1"][data-changed]')).to_have_count(0)
-    card = page.locator('article[data-ref="plan"]')
-    await expect(card.get_by_label("Removed from plan by the agent").locator("li")).to_have_text(["render", "test"])
-    await expect(card.locator("header")).to_contain_text("agent: 2 new, 2 removed")
-    await expect(card.get_by_label("History of plan")).to_have_attribute("title", re.compile("feedback in the history"))
-    await expect(step2.get_by_label("Thread on plan/2, last by the agent")).to_be_visible()
-    await snap(page, tmp_path / "1-changed.png")
+    await hide.click()
+    await expect(plan.locator("ins, del")).to_have_count(0)
+    await expect(plan.locator("li")).to_have_text(["parse", "render the whole page", "ship", "announce"])
+    await plan.get_by_role("button", name="Show changes").click()
+    await expect(plan.locator("del.diff-del")).to_have_count(1)
 
-    await page.locator('[data-ref="plan/3"]').click()
-    await expect(page.locator("[data-changed]")).to_have_count(0)
-    await expect(card.get_by_label("Removed from plan by the agent")).to_have_count(0)
-    await expect(card.locator("header")).not_to_contain_text("agent:")
+    await page.get_by_role("button", name="Look", exact=True).click()
+    await page.get_by_role("dialog", name="Look").get_by_role("radio", name="lines").click()
+    await page.keyboard.press("Escape")
+    await expect(plan.locator(".dl-del")).to_have_count(2)
+    await expect(plan.locator(".dl-ins")).to_have_count(3)
+    await snap(page, tmp_path / "2-lines.png")
+
+
+async def test_the_dark_theme_and_the_look_survive_a_reload(page: Page, agent: Agent) -> None:
+    """Assemble: a card on the board.
+    Act: the user opens the Look menu, picks the dark theme, the violet accent, the compact density and the 16 radius,
+    and reloads the page.
+    Assert: the root element names each choice, the card's ground is the dark surface, the browser keeps the look under
+    agent-hud-look, and all of it holds after the reload."""
+    await agent.write(put("plan", "1. parse"))
+    await expect(card(page, "plan")).to_be_visible()
+    await page.get_by_role("button", name="Look", exact=True).click()
+    look = page.get_by_role("dialog", name="Look")
+    for group, option in [("Theme", "dark"), ("Accent", "violet"), ("Density", "compact"), ("Radius", "16")]:
+        await look.get_by_role("radiogroup", name=group).get_by_role("radio", name=option, exact=True).click()
+    root = page.locator("html")
+    expected = {"data-theme": "dark", "data-accent": "violet", "data-density": "compact", "data-radius": "16"}
+    for _ in range(2):
+        for name, value in expected.items():
+            await expect(root).to_have_attribute(name, value)
+        ground = await card(page, "plan").evaluate("article => getComputedStyle(article).backgroundColor")
+        assert ground == "rgb(28, 25, 23)"
+        kept = await page.evaluate("JSON.parse(localStorage.getItem('agent-hud-look'))")
+        assert {key: kept[key] for key in ("theme", "accent", "density", "radius")} == {
+            "theme": "dark",
+            "accent": "violet",
+            "density": "compact",
+            "radius": "16",
+        }
+        await page.reload()
+        await expect(card(page, "plan")).to_be_visible()
 
 
 async def test_the_history_docks_beside_the_board_and_an_arrow_the_agent_removes_shows(
     page: Page, agent: Agent
 ) -> None:
-    """Assemble: two cards side by side, and an arrow the user draws between them.
+    """Assemble: two cards side by side, and an arrow the user draws from words of the first to the second.
     Act: the user opens and closes the history; the agent removes the arrow; the user puts it back; the user collapses
     the chat by its header.
     Assert: while the history is open the card sits to the right of it, moved by the history's width and gap, and it
-    is back once the history closes; a toast names the removed arrow, and Put it back links it again, after which the
-    toast goes; the chat collapses to its button."""
-    await agent.write(put("a", "1. parse"), put("b", "1. render"), move("a", 0, 0), move("b", 500, 0))
-    card = page.locator('article[data-ref="a"]')
-    await expect(card).to_be_visible()
+    is back once the history closes; a toast names the removed arrow by its words and its card, and Put it back links
+    it again, after which the toast goes; the chat collapses to its button."""
+    await agent.write(put("a", "1. parse"), put("b", "# Render\n\n1. render"), move("a", 0, 0), move("b", 500, 0))
+    first = card(page, "a")
+    await expect(first).to_be_visible()
     await settled(page)
-    before = await card.bounding_box()
+    before = await first.bounding_box()
     assert before is not None
     await page.keyboard.press("h")
     drawer = page.get_by_role("complementary", name="History")
     await expect(drawer).to_be_visible()
     await settled(page)
     box = await drawer.bounding_box()
-    moved = await card.bounding_box()
+    moved = await first.bounding_box()
     assert box is not None and moved is not None
     assert moved["x"] == before["x"] + box["x"] + box["width"] + 16
     await page.get_by_label("Close the history").click()
     await expect(drawer).to_have_count(0)
     await settled(page)
-    assert await card.bounding_box() == before
+    assert await first.bounding_box() == before
 
-    dot = await page.get_by_label("Draw an arrow from a/1").bounding_box()
-    goal = await page.locator('[data-ref="b/1"]').bounding_box()
-    assert dot is not None and goal is not None
-    await page.mouse.move(dot["x"] + dot["width"] - 6, dot["y"] + dot["height"] / 2, steps=2)
-    await page.mouse.down()
-    await page.mouse.move(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2, steps=3)
-    await page.mouse.up()
+    await select_words(page, "a", "parse")
+    await page.get_by_label("Draw an arrow from here").click()
+    goal = await card(page, "b").bounding_box()
+    assert goal is not None
+    await page.mouse.click(goal["x"] + goal["width"] / 2, goal["y"] + goal["height"] / 2)
     arrows = (await read_board(agent.tools)).arrows
     assert len(arrows) == 1
     (arrow_id,) = arrows
     await agent.write(unlink(arrow_id))
     toast = page.get_by_role("status", name="Arrow removed by the agent")
-    await expect(toast).to_contain_text("The agent removed your arrow from “parse” to “render”")
+    await expect(toast).to_contain_text("The agent removed your arrow from “parse” to “Render”")
     await toast.get_by_role("button", name="Put it back").click()
     await expect(toast).to_have_count(0)
     assert set((await read_board(agent.tools)).arrows) == {arrow_id}
 
     await page.get_by_role("button", name="Collapse the chat").click()
     await expect(page.get_by_label("Open the chat")).to_be_visible()
-
-
-async def test_the_page_names_parts_by_their_text_and_keeps_the_refs_for_the_agent(
-    page: Page, agent: Agent, tmp_path: Path
-) -> None:
-    """Assemble: a Risks card with a heading and two bullets, a table with an Hours column, and a message from the
-    agent that names the second bullet by its ref.
-    Act: the user clicks the second bullet and comments on it; removes the Risks card with Delete.
-    Assert: the feedback panel names the bullet by its text and its card by its title, with the ref in its title
-    attribute; the chat's chip on the comment says the text and keeps the ref as its label; the agent's ref link keeps
-    the ref as its text and has the part's text as its title; the Hours cell's placeholder is Hours; the undo toast
-    names the card by its title; a screenshot goes in tmp_path."""
-    await agent.write(
-        put("risks", "# Risks\n\n- the cache is shared\n- the parser is slow"),
-        put("tasks", "| Task | Hours {number} |\n|---|---|\n| parse | |"),
-        say("Look at risks/3 first"),
-    )
-    bullet = page.locator('[data-ref="risks/3"]')
-    await bullet.click()
-    panel = page.get_by_label("Feedback on risks/3")
-    await expect(panel.locator("header")).to_contain_text("“the parser is slow” in Risks")
-    await expect(panel.locator("header [title='risks/3']")).to_have_count(1)
-    await page.get_by_label("Comment").fill("how slow?")
-    await page.get_by_label("Comment").press("Enter")
-    chat = page.get_by_label("Chat with the agent")
-    await expect(chat.get_by_label("Show risks/3")).to_have_text("“the parser is slow”")
-    link = chat.get_by_role("button", name="risks/3", exact=True)
-    await expect(link).to_have_attribute("title", "the parser is slow")
-    await expect(page.get_by_label("Input tasks/1/2")).to_have_attribute("placeholder", "Hours")
-    await snap(page, tmp_path / "1-names.png")
-
-    await page.keyboard.press("Escape")
-    await page.locator('article[data-ref="risks"] header').click(position={"x": 150, "y": 10})
-    await page.keyboard.press("Delete")
-    await expect(page.locator('[role="status"]', has_text="Removed “Risks”")).to_be_visible()

@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Generator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from difflib import unified_diff
 from pathlib import Path
 from typing import NamedTuple
@@ -11,74 +11,37 @@ from agent_hud.models.actions import (
     Author,
     Clear,
     Comment,
-    Fill,
     Link,
     Misfit,
     Move,
     Place,
     Put,
-    React,
     Remove,
     Resize,
     Restore,
     Send,
     TActionId,
-    TBody,
     TCardId,
-    TRef,
-    Unreact,
 )
-from agent_hud.models.board import Board, Thread
+from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, EventKind, Heard, Snapshot, Turn
-from agent_hud.models.refs import card_of
 from agent_hud.store import Store
 
 
 def hear(board: Board, action: Action) -> Heard:
-    """The action as the agent hears it on the board before it: a put on a card of the board as a diff, and the text of the parts it names."""
+    """The action as the agent hears it on the board before it: a put on a card of the board as a diff."""
     match action.body:
         case Put(id=card_id, md=md) if card_id in board.cards:
             lines = unified_diff(board.cards[card_id].md.splitlines(), md.splitlines(), lineterm="", n=1)
             body = Edit(kind="edit", id=card_id, diff="\n".join(list(lines)[2:]))
         case _:
             body = action.body
-    return Heard(id=action.id, author=action.author, body=body, parts=board.part_texts(action.body))
+    return Heard(id=action.id, author=action.author, body=body)
 
 
-def setting(body: TBody) -> tuple[str, TRef] | None:
-    """What the action sets, which a later action that sets the same replaces: the reaction on a ref, or a cell's value."""
-    match body:
-        case React(ref=ref) | Unreact(ref=ref):
-            return "reaction", ref
-        case Fill(ref=ref):
-            return "value", ref
-        case _:
-            return None
-
-
-def net(actions: list[Action], board: Board) -> list[Action]:
-    """
-    The actions as a turn carries them, on the board at its start: without the moves, resizes and places, with the last of
-    the reactions on a part and the last of the fills of a cell, and without those where the turn ends as it began.
-    """
-    last = {key: n for n, action in enumerate(actions) if (key := setting(action.body)) is not None}
-
-    def carries(n: int, action: Action) -> bool:
-        if (key := setting(action.body)) is not None and last[key] != n:
-            return False
-        match action.body:
-            case Move() | Resize() | Place() | Send():
-                return False
-            case React(ref=ref, reaction=reaction):
-                return reaction != board.threads.get(ref, Thread()).reactions.get(action.author)
-            case Unreact(ref=ref):
-                return action.author in board.threads.get(ref, Thread()).reactions
-            case Fill(ref=ref, value=value):
-                return value != board.values.get(ref)
-            case _:
-                return True
-
-    return [action for n, action in enumerate(actions) if carries(n, action)]
+def net(actions: list[Action]) -> list[Action]:
+    """The actions as a turn carries them: without the moves, resizes and places, which read has."""
+    return [action for action in actions if not isinstance(action.body, Move | Resize | Place | Send)]
 
 
 class Since(NamedTuple):
@@ -203,7 +166,7 @@ class Hud:
     def changed_since(self, action_id: TActionId) -> Since | None:
         """
         What came after the action with the id: the cards that the actions after it touched, put, removed, restored,
-        moved or resized, or with feedback, a value or an arrow on a part, or every card when a clear came after it;
+        moved or resized, or with a comment or an arrow on it, or every card when a clear came after it;
         and the ids of those actions. None when the log no longer has the id.
         """
         found = [n for n, action in enumerate(self.log.actions) if action.id == action_id]
@@ -229,32 +192,20 @@ class Hud:
                     _,
                 ):
                     changed.add(card_id)
-                case React(ref=ref) | Unreact(ref=ref) | Comment(ref=ref) | Fill(ref=ref), _:
-                    changed.add(card_of(ref))
-                case Link(src=src, dst=dst), _:
-                    changed.update((card_of(src), card_of(dst)))
+                case Comment(card=card_id), _:
+                    changed.add(card_id)
+                case Link(card=card_id, dst=dst), _:
+                    changed.update((card_id, dst))
                 case _:
                     pass
         return Since(changed, {action.id for action in after})
 
     def _turn(self, start: int, end: int) -> tuple[Heard, ...]:
         """
-        The user's actions from the turn start to the end, as the agent hears them: the net against the board at the
-        turn's start with the agent's actions of the turn applied, so that a value the user sets on a row that the agent
-        put in the turn counts, even when the row that had that number before carried the same value.
+        The user's actions from the turn start to the end, as the agent hears them.
         """
-        window = self.log.actions[start:end]
-        base = self._turn_boards[start]
-        for action in window:
-            if action.author is not Author.agent:
-                continue
-            # An agent action on what the user made in the turn, such as a reaction on the user's note, does not fit
-            # the board without the user's actions; the net then compares against the board without it, which carries
-            # the user's actions on it.
-            with suppress(ValueError):
-                base = base.apply(action)
-        actions = [action for action in window if action.author is Author.user]
-        return tuple(self._heard[action.id] for action in net(actions, base))
+        actions = [action for action in self.log.actions[start:end] if action.author is Author.user]
+        return tuple(self._heard[action.id] for action in net(actions))
 
     def _mark_read(self, end: int) -> None:
         if end <= self._agent_read:

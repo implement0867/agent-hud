@@ -5,49 +5,44 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from agent_hud.frames import frames, head_of, lines, turn_of
-from agent_hud.models.actions import Reaction, TBody
 from agent_hud.models.events import Edit, THeardBody, Turn
-from agent_hud.models.refs import named_refs
-from tests.factories import comment, fill, link, put, react, say
-from tests.strategies import action_ids, agent_bodies, card_ids, item_texts
+from tests.factories import comment, link, put, say
+from tests.strategies import action_ids, agent_bodies, card_ids
 
 
 @st.composite
 def turns(draw: st.DrawFn) -> Turn:
-    """A turn of any of the agent's kinds of action and edits, with a text for some of the parts the actions name."""
+    """A turn of any of the agent's kinds of action and edits."""
     edits = st.builds(Edit, kind=st.just("edit"), id=card_ids(), diff=st.text())
     actions: list[THeardBody] = draw(st.lists(st.one_of(agent_bodies(card_ids()), edits)))
-    named = {ref for action in actions if not isinstance(action, Edit) for ref in named_refs(action)}
-    parts = {ref: draw(item_texts()) for ref in sorted(named) if draw(st.booleans())}
-    return Turn(id=draw(action_ids()), actions=tuple(actions), parts=parts)
+    return Turn(id=draw(action_ids()), actions=tuple(actions))
 
 
 def a_turn() -> Turn:
-    """A turn like the live test's: reactions, a comment, fills on one row, a note, an arrow and a message."""
-    actions: list[TBody] = [
-        react("risks/2", Reaction.approve),
-        comment("risks/2", "why?"),
-        fill("checklist/2/2", "agent"),
-        fill("checklist/2/3", 1),
+    """A turn like the live test's: comments, an edit, a note, an arrow and a message."""
+    actions: list[THeardBody] = [
+        comment("risks", "why?", "The UI build is stale"),
+        comment("risks", "and this?", "stale", 1),
+        comment("risks", "fine"),
+        Edit(kind="edit", id="checklist", diff="@@ -3 +3 @@\n-| [ ] | Bump |\n+| [x] | Bump |"),
         put("note-1", "# A note\n\nwith text"),
-        link("a1", "risks/2", "checklist/2", "before"),
+        link("a1", "risks", "checklist", "before", "The UI build"),
         say("done"),
     ]
-    parts = {"risks/2": "The UI build is stale", "checklist/2": "Bump the version |  |  | "}
-    return Turn(id="end", actions=tuple(actions), parts=parts)
+    return Turn(id="end", actions=tuple(actions))
 
 
-def test_each_line_is_one_action_with_the_text_of_the_parts_it_is_the_first_to_name() -> None:
-    """Assemble: a turn of reactions, a comment, fills, a note, an arrow and a message.
+def test_each_line_is_one_action_with_its_fields() -> None:
+    """Assemble: a turn of comments, an edit, a note, an arrow and a message.
     Act: take its lines.
-    Assert: one JSON line per action with its fields, the parts in the first line that names each, and no version on the note."""
+    Assert: one JSON line per action with its fields, and no version on the note or occurrence on a quote at one place."""
     assert lines(a_turn()) == [
-        '{"kind":"react","ref":"risks/2","reaction":"approve","parts":{"risks/2":"The UI build is stale"}}',
-        '{"kind":"comment","ref":"risks/2","text":"why?"}',
-        '{"kind":"fill","ref":"checklist/2/2","value":"agent","parts":{"checklist/2":"Bump the version |  |  | "}}',
-        '{"kind":"fill","ref":"checklist/2/3","value":1.0}',
+        '{"kind":"comment","card":"risks","quote":"The UI build is stale","text":"why?"}',
+        '{"kind":"comment","card":"risks","quote":"stale","occurrence":1,"text":"and this?"}',
+        '{"kind":"comment","card":"risks","quote":"","text":"fine"}',
+        '{"kind":"edit","id":"checklist","diff":"@@ -3 +3 @@\\n-| [ ] | Bump |\\n+| [x] | Bump |"}',
         '{"kind":"put","id":"note-1","md":"# A note\\n\\nwith text"}',
-        '{"kind":"link","id":"a1","src":"risks/2","dst":"checklist/2","text":"before"}',
+        '{"kind":"link","id":"a1","card":"risks","quote":"The UI build","dst":"checklist","text":"before"}',
         '{"kind":"say","text":"done"}',
     ]
 
@@ -90,7 +85,7 @@ def test_the_turn_of_frames_needs_all_the_frames_of_one_turn_in_order() -> None:
     Act: take the turn of the frames with one missing, out of order, or with the other's.
     Assert: ValueError each time, which names the heads."""
     first, second, *rest = frames(a_turn(), 200)
-    other = frames(Turn(id="other", actions=(say("hi"),), parts={}), 200)
+    other = frames(Turn(id="other", actions=(say("hi"),)), 200)
     for wrong in ([first, *rest], [second, first, *rest], [*other, second]):
         with pytest.raises(ValueError, match="frames of one turn"):
             turn_of(wrong)

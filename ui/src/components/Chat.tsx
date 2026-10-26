@@ -5,7 +5,6 @@ import {
   PanelRightClose,
   SendHorizontal,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
@@ -14,11 +13,8 @@ import { IconButton } from "~/components/IconButton";
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Author, messageSchema } from "~/domain/actions";
 import { groupPending } from "~/domain/pending";
-import { TallyKind, tally } from "~/domain/reactions";
-import type { TTallyKind } from "~/domain/reactions";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
 import { mod } from "~/lib/keys";
-import { reactionIcons, reactionTones } from "~/theme";
 
 const widthKey = "agent-hud:chat-width";
 
@@ -26,47 +22,28 @@ const widthKey = "agent-hud:chat-width";
 const place =
   "pointer-events-auto absolute right-4 bottom-[calc(var(--toolbar)+2rem)] xl:bottom-4";
 
-const tallyLooks: Record<TTallyKind, { Icon: LucideIcon; tone: string }> = {
-  approve: { Icon: reactionIcons.approve, tone: reactionTones.approve },
-  reject: { Icon: reactionIcons.reject, tone: reactionTones.reject },
-  question: { Icon: reactionIcons.question, tone: reactionTones.question },
-  comments: { Icon: MessageCircle, tone: "bg-accent-soft text-accent-strong" },
-};
-
-/** A chip for each kind of feedback on the board, by either author; a click shows the next part with it. */
+/** The count of the threads on the board; a click opens the next thread. */
 const Tally = () => {
   const { model } = useBoard();
   const { show } = useWhiteboard();
   const [turn, setTurn] = useState(0);
-  const refs = tally(model.board.threads);
-  const kinds = TallyKind.options.filter((kind) => refs[kind].length > 0);
-  if (kinds.length === 0) return null;
+  const threads = Object.entries(model.board.threads);
+  if (threads.length === 0) return null;
   return (
-    <span
-      aria-label="Feedback on the board"
-      className="flex items-center gap-1"
+    <button
+      type="button"
+      aria-label="Threads on the board"
+      title={`On the board: ${String(threads.length)} threads. Show the next`}
+      className="flex h-6 items-center gap-1 rounded-full bg-accent-soft px-1.5 text-xs font-medium text-accent-strong"
+      onClick={() => {
+        const found = threads[turn % threads.length];
+        if (found !== undefined) show(found[1].card, found[0]);
+        setTurn(turn + 1);
+      }}
     >
-      {kinds.map((kind) => {
-        const { Icon, tone } = tallyLooks[kind];
-        const found = refs[kind];
-        return (
-          <button
-            key={kind}
-            type="button"
-            title={`On the board: ${String(found.length)} with ${kind}. Show the next`}
-            className={`flex h-6 items-center gap-1 rounded-full px-1.5 text-xs font-medium ${tone}`}
-            onClick={() => {
-              const ref = found[turn % found.length];
-              if (ref !== undefined) show(ref);
-              setTurn(turn + 1);
-            }}
-          >
-            <Icon className="size-3" strokeWidth={2.5} />
-            {found.length}
-          </button>
-        );
-      })}
-    </span>
+      <MessageCircle className="size-3" strokeWidth={2.5} />
+      {threads.length}
+    </button>
   );
 };
 
@@ -105,16 +82,16 @@ const PendingList = ({ close }: TPendingListProps) => {
               {group.title}
             </h3>
             <ul>
-              {group.lines.map(({ id, ref, what, where }) => (
+              {group.lines.map(({ id, card, thread, what, where }) => (
                 <li key={id}>
                   <button
                     type="button"
-                    disabled={ref === null}
+                    disabled={card === null}
                     className="flex w-full items-baseline gap-2 rounded-lg px-2 py-1 text-left enabled:hover:bg-surface-sunken"
                     onClick={() => {
-                      if (ref === null) return;
+                      if (card === null) return;
                       close();
-                      show(ref);
+                      show(card, thread);
                     }}
                   >
                     {where !== "" && (
@@ -143,7 +120,7 @@ const PendingList = ({ close }: TPendingListProps) => {
 };
 
 const sendTone =
-  "flex h-8 items-center bg-accent text-white transition-colors hover:bg-accent-strong disabled:bg-ink-ghost";
+  "flex h-8 items-center bg-accent text-on-accent transition-colors hover:bg-accent-strong disabled:bg-ink-ghost";
 
 type TSendBoxProps = { send: () => void };
 
@@ -249,7 +226,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
             {unsent > 0 && (
               <span
                 aria-label={`${String(unsent)} unsent`}
-                className="rounded-full bg-white/25 px-1.5 text-xs tabular-nums"
+                className="rounded-full bg-on-accent/25 px-1.5 text-xs tabular-nums"
               >
                 {unsent}
               </span>
@@ -261,7 +238,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
               aria-label="What goes to the agent"
               aria-expanded={open}
               title="What Send carries"
-              className={`${sendTone} rounded-r-full border-l border-white/30 px-1`}
+              className={`${sendTone} rounded-r-full border-l border-on-accent/30 px-1`}
               onClick={() => {
                 setOpen(!open);
               }}
@@ -342,7 +319,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
         type="button"
         aria-label="Open the chat"
         style={style}
-        className={`${place} flex h-11 w-fit items-center gap-2 rounded-full bg-surface px-3 text-ink-soft shadow-lg ring-1 ring-edge hover:text-ink`}
+        className={`${place} flex h-11 w-fit items-center gap-2 rounded-full bg-surface px-3 text-ink-soft shadow-pop ring-1 ring-edge hover:text-ink`}
         onClick={() => {
           setOpen(true);
         }}
@@ -351,13 +328,13 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
         {unsent > 0 && (
           <span
             aria-label={`${String(unsent)} unsent`}
-            className="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-white"
+            className="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-on-accent"
           >
             {unsent} to send
           </span>
         )}
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-accent text-[11px] font-semibold text-white">
+          <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-accent text-[11px] font-semibold text-on-accent">
             {unread}
           </span>
         )}
@@ -374,7 +351,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
         role="separator"
         aria-label="Resize the chat"
         aria-orientation="vertical"
-        className="absolute inset-y-3 -left-1.5 w-3 cursor-col-resize rounded-full hover:bg-accent-muted/60"
+        className="absolute inset-y-3 -left-1.5 w-3 cursor-col-resize rounded-full hover:bg-accent-soft"
         onPointerDown={resize}
       />
       <header className="flex items-center gap-2 border-b border-divider px-4 py-3">
@@ -398,7 +375,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
       </header>
       <ul className="flex min-h-24 flex-col-reverse gap-2 overflow-y-auto px-3 py-3">
         {model.board.messages.toReversed().map((said) => (
-          <Bubble key={said.id} said={said} withRef />
+          <Bubble key={said.id} said={said} />
         ))}
       </ul>
       <SendBox send={send} />

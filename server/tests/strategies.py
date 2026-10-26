@@ -1,23 +1,20 @@
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
-from agent_hud.models.actions import Action, Author, Reaction, TAgentBody, TBody, TCardId, TMessage, TValue
+from agent_hud.models.actions import Action, Author, TAgentBody, TBody, TCardId, TMessage
 from tests.factories import (
     clear,
     comment,
-    fill,
     link,
     move,
     place,
     put,
-    react,
     remove,
     resize,
     restore,
     say,
     send,
     unlink,
-    unreact,
 )
 
 
@@ -42,11 +39,10 @@ def list_md(marker: str, texts: list[str]) -> str:
     return "\n".join(f"{marker}{text}" for text in texts)
 
 
-def table_md(rows: list[list[str]], specs: list[str] | None = None) -> str:
-    """A table with a header row of the width of the first row, whose columns take the specs in order, then none."""
+def table_md(rows: list[list[str]]) -> str:
+    """A table with a header row of the width of the first row."""
     width = len(rows[0])
-    headers = [f"h{spec}" for spec in [*(specs or []), *[""] * width][:width]]
-    lines = [headers, ["---"] * width, *rows]
+    lines = [[f"h{n}" for n in range(width)], ["---"] * width, *rows]
     return "\n".join("| " + " | ".join(cells) + " |" for cells in lines)
 
 
@@ -58,27 +54,18 @@ def tables() -> st.SearchStrategy[list[list[str]]]:
 
 
 def mds() -> st.SearchStrategy[str]:
-    """Card markdown, often with a list, so that refs to list items fit some cards and not others."""
+    """Card markdown, often with a list of words, so that quotes of those words fit some cards and not others."""
     lists = st.builds(list_md, st.sampled_from(["- ", "1. "]), st.lists(item_texts(), min_size=1, max_size=3))
-    tables_md = st.builds(
-        table_md, tables(), st.lists(st.sampled_from(["", " {text}", " {number}", " {check}", " {a, b}"]))
-    )
-    return st.one_of(st.text(st.characters(codec="utf-8", exclude_characters="{"), min_size=1), lists, tables_md)
+    return st.one_of(st.text(st.characters(codec="utf-8"), min_size=1), lists, st.builds(table_md, tables()))
 
 
-def refs(ids: st.SearchStrategy[str]) -> st.SearchStrategy[str]:
-    numbers = st.integers(1, 4)
-    return st.one_of(ids, st.builds("{}/{}".format, ids, numbers), st.builds("{}/{}/{}".format, ids, numbers, numbers))
+def quotes() -> st.SearchStrategy[str]:
+    """Words that a card may show, the card as a whole, or words that no card shows."""
+    return st.one_of(st.just(""), item_texts(), st.just("nowhere at all"))
 
 
-def values() -> st.SearchStrategy[TValue]:
-    return st.one_of(
-        st.text(),
-        st.floats(allow_nan=False, allow_infinity=False),
-        st.booleans(),
-        st.none(),
-        st.sampled_from(["a", "b"]),
-    )
+def occurrences() -> st.SearchStrategy[int | None]:
+    return st.one_of(st.none(), st.integers(0, 2))
 
 
 def coordinates() -> st.SearchStrategy[float]:
@@ -89,20 +76,22 @@ def widths() -> st.SearchStrategy[float]:
     return st.floats(min_value=0, exclude_min=True, allow_infinity=False)
 
 
+def sizes() -> st.SearchStrategy[tuple[float | None, float | None]]:
+    """A width, a height or both."""
+    return st.tuples(st.none() | widths(), st.none() | widths()).filter(lambda size: size != (None, None))
+
+
 def agent_bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TAgentBody]:
     return st.one_of(
         st.builds(put, ids, mds()),
         st.builds(remove, ids),
         st.builds(restore, ids),
-        st.builds(react, refs(ids), st.from_type(Reaction)),
-        st.builds(unreact, refs(ids)),
-        st.builds(comment, refs(ids), messages()),
+        st.builds(comment, ids, messages(), quotes(), occurrences()),
         st.builds(say, messages()),
-        st.builds(fill, refs(ids), values()),
-        st.builds(link, ids, refs(ids), refs(ids)),
+        st.builds(link, ids, ids, ids, st.text(), quotes(), occurrences()),
         st.builds(unlink, ids),
         st.builds(move, ids, coordinates(), coordinates()),
-        st.builds(resize, ids, widths()),
+        sizes().flatmap(lambda size: st.builds(resize, ids, st.just(size[0]), st.just(size[1]))),
         st.builds(clear),
     )
 
