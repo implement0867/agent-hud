@@ -11,6 +11,27 @@ import type { TPoint } from "~/domain/board";
 import { toBoard, zoomAt } from "~/lib/geometry";
 import type { TView } from "~/lib/geometry";
 
+/** Whether an element at or above the target, in a card, can scroll its text further by the wheel's distance. */
+const scrolls = (target: EventTarget | null, deltaY: number) => {
+  for (
+    let element = target instanceof Element ? target : null;
+    element !== null && element.tagName !== "ARTICLE";
+    element = element.parentElement
+  ) {
+    const room =
+      deltaY > 0
+        ? element.scrollHeight - element.clientHeight - element.scrollTop
+        : element.scrollTop;
+    if (
+      element.scrollHeight > element.clientHeight &&
+      getComputedStyle(element).overflowY === "auto" &&
+      room > 0
+    )
+      return true;
+  }
+  return false;
+};
+
 type TCanvasProps = {
   view: TView;
   setView: Dispatch<SetStateAction<TView>>;
@@ -52,6 +73,13 @@ export const Canvas = ({
         event.target === root ||
         (event.target instanceof Node && world.current?.contains(event.target));
       if (onBoard !== true) return;
+      // A card shorter than its text scrolls its text under the wheel, until the text reaches its end.
+      if (
+        !event.ctrlKey &&
+        !event.metaKey &&
+        scrolls(event.target, event.deltaY)
+      )
+        return;
       event.preventDefault();
       const box = root.getBoundingClientRect();
       const at = { x: event.clientX - box.left, y: event.clientY - box.top };
@@ -115,7 +143,7 @@ export const Canvas = ({
       className={`relative flex-1 touch-none overflow-clip bg-canvas select-none ${space ? "cursor-grab active:cursor-grabbing" : ""}`}
       style={{
         backgroundImage:
-          "radial-gradient(circle, rgb(168 162 158 / 0.55) 1px, transparent 1.2px)",
+          "radial-gradient(circle, var(--ink-ghost) 1px, transparent 1.2px)",
         backgroundSize: `${String(grid)}px ${String(grid)}px`,
         backgroundPosition: `${String(view.x)}px ${String(view.y)}px`,
       }}

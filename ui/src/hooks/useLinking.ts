@@ -1,17 +1,19 @@
 import { useCallback, useState } from "react";
-import type { PointerEvent, RefObject } from "react";
+import type { RefObject } from "react";
 
 import type { TAct } from "~/data/boardStore";
 import { ActionKind } from "~/domain/actions";
 import { newId } from "~/domain/board";
+import type { TAnchor, TPoint } from "~/domain/board";
 import { SelectionKind } from "~/hooks/useWhiteboard";
 import type { TLinking, TWhiteboard } from "~/hooks/useWhiteboard";
-import { endOnBoard, pointOnBoard, refAt } from "~/lib/dom";
+import { cardAt, pointOnBoard } from "~/lib/dom";
 import { invariant } from "~/lib/invariant";
 
 /**
- * The arrow that the user drags from a part: its loose end follows the pointer, and when the button goes up it links to
- * the part under the pointer, which selects the new arrow for its label. Esc drops it.
+ * The arrow that the user draws from words of a card: it starts at the end of the words and its loose end follows the
+ * pointer; the card under the pointer shows as the drop target, and a press on it links the words to that card and
+ * selects the new arrow for its label. A press elsewhere, or Esc, drops the arrow.
  */
 export const useLinking = (
   world: RefObject<HTMLElement | null>,
@@ -21,15 +23,22 @@ export const useLinking = (
   const [linking, setLinking] = useState<TLinking | null>(null);
 
   const beginLink = useCallback(
-    (from: string, event: PointerEvent) => {
+    (
+      from: TAnchor,
+      start: TPoint,
+      pointer: { clientX: number; clientY: number },
+    ) => {
       const root = world.current;
-      invariant(root !== null, "parts render in the world");
-      const start = endOnBoard(root, from);
-      invariant(start !== null, "an arrow starts at a part on the board");
-      const follow = (pointer: { clientX: number; clientY: number }) => {
-        setLinking({ from, start, to: pointOnBoard(root, pointer) });
+      invariant(root !== null, "cards render in the world");
+      const follow = (at: { clientX: number; clientY: number }) => {
+        setLinking({
+          from,
+          start,
+          to: pointOnBoard(root, at),
+          over: cardAt(at),
+        });
       };
-      follow(event);
+      follow(pointer);
       const listening = new AbortController();
       const { signal } = listening;
       const stop = () => {
@@ -38,30 +47,37 @@ export const useLinking = (
       };
       window.addEventListener("pointermove", follow, { signal });
       window.addEventListener(
-        "pointerup",
-        (up) => {
+        "pointerdown",
+        (down) => {
+          down.preventDefault();
+          down.stopPropagation();
           stop();
-          const dst = refAt(up);
-          if (dst === null || dst === from) return;
+          const dst = cardAt(down);
+          if (dst === null || dst === from.card) return;
           const id = newId("arrow");
           void act({
             kind: ActionKind.enum.link,
             id,
-            src: from,
+            card: from.card,
+            quote: from.quote,
+            occurrence: from.quote === "" ? null : from.occurrence,
             dst,
             text: "",
           }).then((taken) => {
             if (taken) select({ kind: SelectionKind.enum.arrow, id });
           });
         },
-        { signal },
+        { signal, capture: true },
       );
       window.addEventListener(
         "keydown",
         (key) => {
-          if (key.key === "Escape") stop();
+          if (key.key === "Escape") {
+            key.stopPropagation();
+            stop();
+          }
         },
-        { signal },
+        { signal, capture: true },
       );
     },
     [world, act, select],

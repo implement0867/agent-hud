@@ -1,25 +1,21 @@
 import { ActionKind } from "~/domain/actions";
-import type { TValue } from "~/domain/actions";
 import type { TBoard } from "~/domain/board";
 import type { THeard } from "~/domain/events";
-import { cardTitle, columnsOf, firstLine, rowName } from "~/domain/parts";
-import { cardOf, rowOf } from "~/domain/ref";
+import { cardTitle, firstLine, short } from "~/domain/text";
 import { assertNever } from "~/lib/assertNever";
 
-/** What the page shows as pending: the refs with an unsent action on them, parts, cells, cards and arrows, and the ids of the unsent actions. */
+/** What the page shows as pending: the cards with an unsent put, and the ids of the unsent actions. */
 export type TUnsent = {
-  refs: ReadonlySet<string>;
+  cards: ReadonlySet<string>;
   ids: ReadonlySet<string>;
 };
 
-/** The ref the action is on: the part or cell it names, or the card or arrow it is about; none for a message or a clear. */
-const refOf = ({ body }: THeard): string | null => {
+/** The card the action is on, or the card an arrow starts at; none for a message, a clear or an unlink. */
+const cardOf = ({ body }: THeard): string | null => {
   switch (body.kind) {
-    case ActionKind.enum.react:
-    case ActionKind.enum.unreact:
     case ActionKind.enum.comment:
-    case ActionKind.enum.fill:
-      return body.ref;
+    case ActionKind.enum.link:
+      return body.card;
     case ActionKind.enum.put:
     case "edit":
     case ActionKind.enum.remove:
@@ -27,9 +23,8 @@ const refOf = ({ body }: THeard): string | null => {
     case ActionKind.enum.move:
     case ActionKind.enum.resize:
     case ActionKind.enum.place:
-    case ActionKind.enum.link:
-    case ActionKind.enum.unlink:
       return body.id;
+    case ActionKind.enum.unlink:
     case ActionKind.enum.say:
     case ActionKind.enum.clear:
     case ActionKind.enum.send:
@@ -40,19 +35,21 @@ const refOf = ({ body }: THeard): string | null => {
 };
 
 export const unsentOf = (pending: THeard[]): TUnsent => ({
-  refs: new Set(
-    pending.flatMap((heard) => {
-      const ref = refOf(heard);
-      return ref === null ? [] : [ref];
-    }),
+  cards: new Set(
+    pending.flatMap(({ body }) =>
+      body.kind === ActionKind.enum.put || body.kind === "edit"
+        ? [body.id]
+        : [],
+    ),
   ),
   ids: new Set(pending.map(({ id }) => id)),
 });
 
-/** One unsent action as the user reads it: what changed, and where on the board; a click shows the ref when it has one. */
+/** One unsent action as the user reads it: what changed, and where on the board; a click shows the card or the thread. */
 export type TLine = {
   id: string;
-  ref: string | null;
+  card: string | null;
+  thread: string | null;
   what: string;
   where: string;
 };
@@ -64,71 +61,56 @@ export type TGroup = {
   lines: TLine[];
 };
 
-const nameOfValue = (value: TValue): string => {
-  switch (value) {
-    case null:
-      return "cleared";
-    case true:
-      return "yes";
-    case false:
-      return "no";
-    default:
-      return String(value);
-  }
+const titleOf = (board: TBoard, card: string) => {
+  const md = board.cards[card]?.md;
+  return md === undefined ? card : cardTitle(md) || card;
 };
 
 const describe = (heard: THeard, board: TBoard): Omit<TLine, "id"> => {
-  const { body, parts } = heard;
-  const partText = (ref: string) => parts[ref] ?? ref;
+  const { body } = heard;
+  const at = (card: string, what: string, where = "") => ({
+    card,
+    thread: null,
+    what,
+    where,
+  });
   switch (body.kind) {
     case ActionKind.enum.put:
-      return { ref: body.id, what: "new note", where: firstLine(body.md) };
+      return at(body.id, "new note", firstLine(body.md));
     case "edit":
-      return { ref: body.id, what: "edited", where: "" };
+      return at(body.id, "edited");
     case ActionKind.enum.remove:
-      return { ref: body.id, what: "removed", where: "" };
+      return at(body.id, "removed");
     case ActionKind.enum.restore:
-      return { ref: body.id, what: "restored", where: "" };
-    case ActionKind.enum.react:
-      return { ref: body.ref, what: body.reaction, where: partText(body.ref) };
-    case ActionKind.enum.unreact:
-      return { ref: body.ref, what: "no reaction", where: partText(body.ref) };
+      return at(body.id, "restored");
     case ActionKind.enum.comment:
       return {
-        ref: body.ref,
+        card: body.card,
+        thread:
+          board.messages.find((said) => said.id === heard.id)?.thread ?? null,
         what: `“${body.text}”`,
-        where: partText(body.ref),
+        where: body.quote === "" ? "the card" : short(body.quote),
       };
     case ActionKind.enum.say:
-      return { ref: null, what: body.text, where: "" };
-    case ActionKind.enum.fill: {
-      const row = rowOf(body.ref);
-      const column = Number(body.ref.slice(row.length + 1));
-      const title = columnsOf(board.cards[cardOf(row)]?.md ?? "")[column - 1];
-      return {
-        ref: row,
-        what: `${title === undefined || title === "" ? `column ${String(column)}` : title}: ${nameOfValue(body.value)}`,
-        where: parts[row] === undefined ? row : rowName(partText(row)),
-      };
-    }
+      return { card: null, thread: null, what: body.text, where: "" };
     case ActionKind.enum.link:
-      return {
-        ref: body.src,
-        what: `arrow to ${partText(body.dst)}${body.text === "" ? "" : ` “${body.text}”`}`,
-        where: partText(body.src),
-      };
+      return at(
+        body.card,
+        `arrow to ${titleOf(board, body.dst)}${body.text === "" ? "" : ` “${body.text}”`}`,
+        body.quote === "" ? "the card" : short(body.quote),
+      );
     case ActionKind.enum.unlink:
-      return { ref: null, what: "arrow removed", where: "" };
+      return { card: null, thread: null, what: "arrow removed", where: "" };
     case ActionKind.enum.move:
-      return { ref: body.id, what: "moved", where: "" };
+      return at(body.id, "moved");
     case ActionKind.enum.resize:
-      return { ref: body.id, what: "resized", where: "" };
+      return at(body.id, "resized");
     case ActionKind.enum.place:
-      return { ref: body.id, what: "placed", where: "" };
+      return at(body.id, "placed");
     case ActionKind.enum.clear:
-      return { ref: null, what: "cleared", where: "" };
+      return { card: null, thread: null, what: "cleared", where: "" };
     case ActionKind.enum.send:
-      return { ref: null, what: "sent", where: "" };
+      return { card: null, thread: null, what: "sent", where: "" };
     default:
       return assertNever(body);
   }
@@ -146,19 +128,15 @@ const groupOf = (
   };
   const found = apart[heard.body.kind];
   if (found !== undefined) return found;
-  const ref = refOf(heard) ?? "";
-  const id = cardOf(
-    heard.body.kind === ActionKind.enum.link ? heard.body.src : ref,
-  );
-  const md = board.cards[id]?.md;
+  const id = cardOf(heard) ?? "";
   return {
     key: id,
     title:
-      md === undefined
+      heard.body.kind === ActionKind.enum.put && !Object.hasOwn(board.cards, id)
         ? id
         : heard.body.kind === ActionKind.enum.put
           ? cardTitle(heard.body.md)
-          : cardTitle(md),
+          : titleOf(board, id),
   };
 };
 

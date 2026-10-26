@@ -32,11 +32,6 @@ export const heardSchema = z
     id: z.string().describe("The action's id"),
     author: Author,
     body: z.discriminatedUnion("kind", [...bodySchema.options, editSchema]),
-    parts: z
-      .record(z.string(), z.string())
-      .describe(
-        "The text of each part that the action names, as it was when the user acted",
-      ),
   })
   .describe("A user's action as the agent's monitor gets it");
 

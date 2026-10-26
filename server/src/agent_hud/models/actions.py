@@ -1,15 +1,14 @@
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, Discriminator, Field, StringConstraints
+from pydantic import AwareDatetime, Discriminator, Field, StringConstraints, model_validator
 
 from agent_hud.models.base import Model
 
 type TCardId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
-type TRef = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}(/[1-9][0-9]*){0,2}$")]
 type TActionId = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 type TMessage = Annotated[str, StringConstraints(pattern=r"\S")]
-type TValue = str | float | bool | None
+type TQuote = Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)]
 
 
 class Author(StrEnum):
@@ -17,21 +16,12 @@ class Author(StrEnum):
     user = "user"
 
 
-class Reaction(StrEnum):
-    approve = "approve"
-    reject = "reject"
-    question = "question"
-
-
 class ActionKind(StrEnum):
     put = "put"
     remove = "remove"
     restore = "restore"
-    react = "react"
-    unreact = "unreact"
     comment = "comment"
     say = "say"
-    fill = "fill"
     link = "link"
     unlink = "unlink"
     move = "move"
@@ -64,22 +54,20 @@ class Restore(Model):
     id: TCardId
 
 
-class React(Model):
-    kind: Literal[ActionKind.react]
-    ref: TRef = Field(
-        description="A card id, or a card id and the number of a heading, paragraph, list item, table row or code line in it, such as plan/2"
-    )
-    reaction: Reaction
-
-
-class Unreact(Model):
-    kind: Literal[ActionKind.unreact]
-    ref: TRef
-
-
 class Comment(Model):
+    """A comment on the text that quote names in the card, or on the card as a whole; it starts a thread there, or joins the thread on the same text."""
+
     kind: Literal[ActionKind.comment]
-    ref: TRef
+    card: TCardId = Field(description="Card id, such as plan")
+    quote: TQuote = Field(
+        default="",
+        description="The words of the card the comment is on, as the card shows them, without markdown; empty for the card as a whole",
+    )
+    occurrence: int | None = Field(
+        default=None,
+        ge=0,
+        description="Which place of the quote, from 0, when the card has the quote at more than one place",
+    )
     text: TMessage
 
 
@@ -88,19 +76,13 @@ class Say(Model):
     text: TMessage
 
 
-class Fill(Model):
-    kind: Literal[ActionKind.fill]
-    ref: TRef = Field(
-        description="A cell of an input column, as the card id, row number and column number, such as plan/3/2"
-    )
-    value: TValue = Field(description="Text, a number, true or false, or one of the options; null clears the cell")
-
-
 class Link(Model):
     kind: Literal[ActionKind.link]
     id: TCardId = Field(description="Arrow id, such as why")
-    src: TRef = Field(description="The part the arrow starts at")
-    dst: TRef = Field(description="The part the arrow points to")
+    card: TCardId = Field(description="The card the arrow starts at")
+    quote: TQuote = Field(default="", description="The words of the card the arrow starts at; empty for the card")
+    occurrence: int | None = Field(default=None, ge=0, description="Which place of the quote, from 0")
+    dst: TCardId = Field(description="The card the arrow points to")
     text: str = Field(default="", description="Text on the arrow")
 
 
@@ -117,11 +99,26 @@ class Move(Model):
 
 
 class Resize(Model):
+    """The size of a card; a dimension it leaves out stays as it is."""
+
     kind: Literal[ActionKind.resize]
     id: TCardId
-    width: float = Field(
-        strict=True, gt=0, allow_inf_nan=False, description="Width of the card on the board, in pixels"
+    width: float | None = Field(
+        default=None, strict=True, gt=0, allow_inf_nan=False, description="Width of the card on the board, in pixels"
     )
+    height: float | None = Field(
+        default=None,
+        strict=True,
+        gt=0,
+        allow_inf_nan=False,
+        description="Height of the card on the board, in pixels; a card shorter than its text scrolls",
+    )
+
+    @model_validator(mode="after")
+    def _some(self) -> Self:
+        if self.width is None and self.height is None:
+            raise ValueError("resize takes a width, a height or both")
+        return self
 
 
 class Place(Model):
@@ -149,26 +146,12 @@ class Send(Model):
 
 
 type TAgentBody = Annotated[
-    Put | Remove | Restore | React | Unreact | Comment | Say | Fill | Link | Unlink | Move | Resize | Clear,
+    Put | Remove | Restore | Comment | Say | Link | Unlink | Move | Resize | Clear,
     Discriminator("kind"),
 ]
 """An action of the agent: each kind but place and send, which only the user's page sends."""
 type TBody = Annotated[
-    Put
-    | Remove
-    | Restore
-    | React
-    | Unreact
-    | Comment
-    | Say
-    | Fill
-    | Link
-    | Unlink
-    | Move
-    | Resize
-    | Place
-    | Clear
-    | Send,
+    Put | Remove | Restore | Comment | Say | Link | Unlink | Move | Resize | Place | Clear | Send,
     Discriminator("kind"),
 ]
 

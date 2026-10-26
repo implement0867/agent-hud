@@ -193,6 +193,9 @@ export const columnWidth = 640;
 /** The least width of a card, which a narrow card's content takes too. */
 export const leastCardWidth = 256;
 
+/** The least height a resize gives a card. */
+export const leastCardHeight = 64;
+
 /** The width a resize gives a card: from the least width to two columns. */
 export const clampCardWidth = (width: number) =>
   Math.min(2 * columnWidth, Math.max(leastCardWidth, width));
@@ -222,33 +225,25 @@ const pointAt = (t: number, points: [TPoint, TPoint, TPoint, TPoint]) => {
 };
 
 /**
- * A curve from the side of the source card that faces the target card, at the height of the source part,
- * to a small gap before the facing side of the target card, at the height of the target part. Cards one above the other loop out to the right.
+ * A curve from a point at the end of the source words to a small gap before the side of the target card that faces it,
+ * at the height of the start where the card spans it, and the middle of the curve, where the label goes.
  */
-export const arrowCurve = (
-  from: { card: TRect; y: number },
-  to: { card: TRect; y: number },
-) => {
-  const fromCentre = from.card.x + from.card.width / 2;
-  const toCentre = to.card.x + to.card.width / 2;
-  const apart = Math.abs(toCentre - fromCentre) > from.card.width / 2;
-  const rightward = toCentre > fromCentre;
-  const start = {
-    x: apart && !rightward ? from.card.x : from.card.x + from.card.width,
-    y: from.y,
-  };
+export const arrowCurve = (start: TPoint, to: TRect) => {
+  const rightward = to.x + to.width / 2 >= start.x;
   const gap = 4;
   const end = {
-    x: apart && rightward ? to.card.x - gap : to.card.x + to.card.width + gap,
-    y: to.y,
+    x: rightward ? to.x - gap : to.x + to.width + gap,
+    y:
+      to.height < 40
+        ? to.y + to.height / 2
+        : clamp(start.y, to.y + 20, to.y + to.height - 20),
   };
-  const reach = Math.max(48, Math.abs(end.x - start.x) / 2);
-  const out = apart && !rightward ? -reach : reach;
-  const back = apart ? -out : reach;
+  const reach = Math.max(40, Math.abs(end.x - start.x) / 2);
+  const out = rightward ? reach : -reach;
   const points: [TPoint, TPoint, TPoint, TPoint] = [
     start,
     { x: start.x + out, y: start.y },
-    { x: end.x + back, y: end.y },
+    { x: end.x - out, y: end.y },
     end,
   ];
   const [a, b, c, d] = points;

@@ -1,17 +1,20 @@
-import type { TPoint } from "~/domain/board";
-import { cardOf, isCardRef } from "~/domain/ref";
-import type { TRect, TSize } from "~/lib/geometry";
+import type { TAnchor, TPoint } from "~/domain/board";
+import { rangeOf } from "~/lib/anchor";
+import type { TRect } from "~/lib/geometry";
 
 /**
- * Measurements of the board's elements, by the data-ref that each card (article) and part carries. The world is the
- * element that the view translates and scales; its transform converts between the viewport and board coordinates.
+ * Measurements of the board's elements: each card is an article with data-card, and its words are in its text root.
+ * The world is the element that the view translates and scales; its transform converts between the viewport and board
+ * coordinates.
  */
 
-/** The element of the card or part on the board, or null when it is not there. */
-export const elementOf = (world: Element, ref: string) =>
-  world.querySelector(
-    `${isCardRef(ref) ? "article" : ""}[data-ref="${CSS.escape(ref)}"]`,
-  );
+/** The element of the card on the board, or null when it is not there. */
+export const cardElement = (world: Element, card: string) =>
+  world.querySelector(`article[data-card="${CSS.escape(card)}"]`);
+
+/** The element that holds the card's words, or null. */
+export const textRoot = (world: Element, card: string) =>
+  cardElement(world, card)?.querySelector("[data-text-root]") ?? null;
 
 /** The scale that the view shows the world at. */
 const scaleOf = (world: Element) =>
@@ -30,9 +33,8 @@ export const pointOnBoard = (
   };
 };
 
-/** The rect of the element in board coordinates. */
-export const rectOnBoard = (element: Element, world: Element): TRect => {
-  const rect = element.getBoundingClientRect();
+/** The rect of the client rect in board coordinates. */
+export const clientOnBoard = (rect: DOMRect, world: Element): TRect => {
   const origin = world.getBoundingClientRect();
   const scale = scaleOf(world);
   return {
@@ -43,59 +45,42 @@ export const rectOnBoard = (element: Element, world: Element): TRect => {
   };
 };
 
-/** The rect of the ref's card, and the height of the middle of the ref's first line, in board coordinates. */
-export const endOnBoard = (
-  world: Element,
-  ref: string,
-): { card: TRect; y: number } | null => {
-  const card = elementOf(world, cardOf(ref));
-  const part = elementOf(world, ref);
-  if (card === null || part === null) return null;
-  const rect = rectOnBoard(part, world);
-  return {
-    card: rectOnBoard(card, world),
-    y: rect.y + Math.min(14, rect.height / 2),
-  };
-};
+/** The rect of the element in board coordinates. */
+export const rectOnBoard = (element: Element, world: Element): TRect =>
+  clientOnBoard(element.getBoundingClientRect(), world);
 
-/** Where a part is in its card, and the card's size, in board units, so that what goes beside the part follows the card. */
-export type TAnchor = { card: TSize; part: TRect };
-
-/** The anchor of the ref, measured from the page, or null when the ref is not on the board. */
-export const anchorOf = (world: Element, ref: string): TAnchor | null => {
-  const card = elementOf(world, cardOf(ref));
-  const part = elementOf(world, ref);
-  if (card === null || part === null) return null;
-  const cardRect = rectOnBoard(card, world);
-  const partRect = rectOnBoard(part, world);
-  return {
-    card: { width: cardRect.width, height: cardRect.height },
-    part: {
-      ...partRect,
-      x: partRect.x - cardRect.x,
-      y: partRect.y - cardRect.y,
-    },
-  };
+/** The range of the anchor's words on the page, or null when its card or its words are not there. */
+export const anchorRange = (world: Element, anchor: TAnchor) => {
+  const root = textRoot(world, anchor.card);
+  return root === null || anchor.quote === ""
+    ? null
+    : rangeOf(root, anchor.quote, anchor.occurrence);
 };
 
 /**
- * The text of the card or part on the page, without what the page adds to it, such as its marks and a code line's
- * number, which carry data-chrome; "" when the ref is not on the board.
+ * Where an arrow from the anchor starts, in board coordinates: at the end of its words, half way up their last line,
+ * or at the right of the card's first line for the card as a whole; and the card's rect. Null when the card is not there.
  */
-export const textOf = (world: Element, ref: string) => {
-  const element = elementOf(world, ref);
-  if (element === null) return "";
-  const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let text = "";
-  for (let node = texts.nextNode(); node !== null; node = texts.nextNode())
-    if (node.parentElement?.closest("[data-chrome]") == null)
-      text += node.textContent ?? "";
-  return text;
+export const arrowStart = (
+  world: Element,
+  anchor: TAnchor,
+): { card: TRect; at: TPoint } | null => {
+  const element = cardElement(world, anchor.card);
+  if (element === null) return null;
+  const card = rectOnBoard(element, world);
+  const last = [...(anchorRange(world, anchor)?.getClientRects() ?? [])].at(-1);
+  if (last === undefined)
+    return { card, at: { x: card.x + card.width, y: card.y + 24 } };
+  const rect = clientOnBoard(last, world);
+  return {
+    card,
+    at: { x: rect.x + rect.width + 2, y: rect.y + rect.height / 2 },
+  };
 };
 
-/** The ref of the card or part under the point of the screen, or null. */
-export const refAt = (client: { clientX: number; clientY: number }) =>
+/** The id of the card under the point of the screen, or null. */
+export const cardAt = (client: { clientX: number; clientY: number }) =>
   document
     .elementFromPoint(client.clientX, client.clientY)
-    ?.closest("[data-ref]")
-    ?.getAttribute("data-ref") ?? null;
+    ?.closest("article[data-card]")
+    ?.getAttribute("data-card") ?? null;

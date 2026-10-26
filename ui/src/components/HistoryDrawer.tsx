@@ -3,53 +3,32 @@ import { X } from "lucide-react";
 import { CardBody } from "~/components/CardBody";
 import { IconButton } from "~/components/IconButton";
 import { TextButton } from "~/components/TextButton";
-import {
-  FeedbackContext,
-  ReadOnlyContext,
-  useBoard,
-  useStore,
-} from "~/data/context";
+import { useBoard, useStore } from "~/data/context";
 import { ActionKind } from "~/domain/actions";
 import { earlierVersions } from "~/domain/board";
 import type { TThread } from "~/domain/board";
-import { partTexts, rowName } from "~/domain/parts";
-import { isCardRef } from "~/domain/ref";
-import { reactionsOf } from "~/domain/reactions";
+import { short } from "~/domain/text";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
-import { reactionTones } from "~/theme";
 
-type TThreadsProps = { md: string; threads: Record<string, TThread> };
+type TThreadsProps = { threads: Record<string, TThread> };
 
-/** The name of the ref in the version's markdown: the card, or the part's text. */
-const nameIn = (texts: string[], ref: string) => {
-  if (isCardRef(ref)) return "the card";
-  const text = texts[Number(ref.slice(ref.lastIndexOf("/") + 1)) - 1];
-  return text === undefined ? ref : `“${rowName(text)}”`;
-};
-
-/** The reaction of each author and the comments of each part of an earlier version, named by the part's text. */
-const Threads = ({ md, threads }: TThreadsProps) => {
+/** The comments of each thread of an earlier version, under the words they were on. */
+const Threads = ({ threads }: TThreadsProps) => {
   const entries = Object.entries(threads);
   if (entries.length === 0) return null;
-  const texts = partTexts(md);
   return (
     <ul className="mt-2 flex flex-col gap-1.5 border-t border-divider pt-2 text-xs">
-      {entries.map(([ref, thread]) => (
-        <li key={ref}>
-          <span title={ref} className="text-ink-muted">
-            {nameIn(texts, ref)}
+      {entries.map(([id, thread]) => (
+        <li key={id}>
+          <span className="border-l-2 border-selection pl-1.5 text-ink-muted">
+            {thread.quote === "" ? "the card" : short(thread.quote)}
           </span>
-          {reactionsOf(thread).map(([author, reaction]) => (
-            <span
-              key={author}
-              className={`ml-1.5 rounded-full px-1.5 py-px ${reactionTones[reaction]}`}
-            >
-              {author}: {reaction}
-            </span>
-          ))}
           {thread.comments.map((said) => (
             <p key={said.id} className="mt-0.5 text-ink-soft">
-              <span className="text-ink-faint">{said.author}:</span> {said.text}
+              <span className="text-ink-faint">
+                {said.author === "user" ? "you" : "agent"}:
+              </span>{" "}
+              {said.text}
             </p>
           ))}
         </li>
@@ -112,7 +91,7 @@ export const HistoryDrawer = ({
             <section
               key={`${id}/${String(number)}`}
               aria-label={`${id} version ${String(number)}`}
-              className="rounded-xl px-3 pt-2 pb-3 ring-1 ring-outline"
+              className="rounded-card px-3 pt-2 pb-3 ring-1 ring-outline"
             >
               <header className="mb-1 flex justify-between font-mono text-[11px] text-ink-faint">
                 <span>
@@ -135,12 +114,8 @@ export const HistoryDrawer = ({
                   <span>replaced</span>
                 )}
               </header>
-              <ReadOnlyContext value>
-                <FeedbackContext value={version}>
-                  <CardBody id={id} md={version.card.md} />
-                </FeedbackContext>
-              </ReadOnlyContext>
-              <Threads md={version.card.md} threads={version.threads} />
+              <CardBody md={version.card.md} />
+              <Threads threads={version.threads} />
             </section>
           ),
         )}

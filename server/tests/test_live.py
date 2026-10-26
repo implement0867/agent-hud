@@ -24,10 +24,10 @@ import pytest
 from websockets.asyncio.client import connect
 
 from agent_hud.boards import board_id
-from agent_hud.models.actions import Author, Reaction
+from agent_hud.models.actions import Author
 from agent_hud.models.events import AgentState, Snapshot
 from tests.conversation import User
-from tests.factories import react, say
+from tests.factories import comment, say
 
 pytestmark = pytest.mark.skipif(not os.environ.get("AGENT_HUD_LIVE"), reason="set AGENT_HUD_LIVE to run the live check")
 
@@ -37,7 +37,7 @@ Use the board skill of the agent-hud plugin.
 1. Call the board's listen tool. Open its url with the Monitor tool's ws source, the description board, and timeout_ms as long as the tool allows.
 2. Write one card, plan, with a list of two steps, and say one line that asks the user to review it and click Send.
 3. Wait for the user's turn on the monitor. Do not poll, do not sleep, and do not use Bash. When the Monitor expires, open it again at once, in the same way.
-4. When a turn comes, write a comment on each part that the user reacted to, and say one line about what you did. Then wait for the next turn in the same way, until the user says that you are done.
+4. When a turn comes, answer each comment of the user with a comment on the same card and quote, and say one line about what you did. Then wait for the next turn in the same way, until the user says that you are done.
 """
 
 
@@ -173,7 +173,7 @@ async def test_the_agent_answers_a_turn_sent_after_the_monitors_cap(tmp_path: Pa
         async with open_page(port, token, board) as user:
             said = sum(message.author is Author.agent for message in user.board.messages)
             writes = session.writes
-            await user.act(react("plan/1", Reaction.approve))
+            await user.act(comment("plan", "The steps read well."))
             await user.act(say("The first step is fine. Add a third step."))
             sent = monotonic()
             while session.writes == writes:

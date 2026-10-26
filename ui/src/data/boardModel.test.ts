@@ -14,11 +14,10 @@ const card: TCard = { md: "1. parse", author: "agent", edited: false };
 const board = (patch: Partial<TBoard>): TBoard => ({
   cards: {},
   threads: {},
-  values: {},
   arrows: {},
   messages: [],
   positions: {},
-  widths: {},
+  sizes: {},
   history: {},
   ...patch,
 });
@@ -41,7 +40,7 @@ describe("diffBoards", () => {
     const after = board({
       cards: { a: card, c: card, d: card },
       positions: { a: { x: 0, y: 0 }, c: { x: 5, y: 0 } },
-      history: { a: [{ card, threads: {}, values: {} }] },
+      history: { a: [{ card, threads: {} }] },
     });
     expect(diffBoards(before, after)).toEqual({
       arrived: ["d"],
@@ -67,7 +66,14 @@ describe("diffBoards", () => {
   });
 
   it("finds the arrows that went, with what they were", () => {
-    const arrow = { src: "a/1", dst: "b/1", text: "", author: "user" as const };
+    const arrow = {
+      card: "a",
+      quote: "parse",
+      occurrence: 0,
+      dst: "b",
+      text: "",
+      author: "user" as const,
+    };
     const before = board({ arrows: { ab: arrow, kept: arrow } });
     const after = board({ arrows: { kept: arrow } });
     expect(diffBoards(before, after).lost).toEqual([{ id: "ab", arrow }]);
@@ -110,7 +116,7 @@ describe("afterChange", () => {
     expect(next.dropped).toEqual({ b: { x: 1, y: 1 } });
   });
 
-  it("marks what a new version changed, unless the user put it from this page, and drops the marks of a card that left", () => {
+  it("shows a new version's changes against the version before, unless the user put it from this page, and drops those of a card that left", () => {
     const old = { ...card, md: "1. parse\n2. render" };
     const after = board({
       cards: {
@@ -118,25 +124,32 @@ describe("afterChange", () => {
         b: { ...card, md: "1. parse\n2. ship" },
       },
       history: {
-        a: [{ card: old, threads: {}, values: {} }],
-        b: [{ card: old, threads: {}, values: {} }],
+        a: [{ card: old, threads: {} }],
+        b: [{ card: old, threads: {} }],
       },
     });
     const next = afterChange(
       {
         ...emptyLocal,
         expected: ["b"],
-        changed: { gone: { parts: [1], removed: [] } },
+        changed: { gone: "1. was" },
       },
       { arrived: [], left: ["gone"], revised: ["a", "b"], moved: [], lost: [] },
       after,
     );
-    expect(next.changed).toEqual({ a: { parts: [2], removed: ["render"] } });
+    expect(next.changed).toEqual({ a: "1. parse\n2. render" });
     expect(next.expected).toEqual([]);
   });
 
   it("keeps the user's arrows that went without the user's unlink, and not the agent's or the expected", () => {
-    const mine = { src: "a/1", dst: "b/1", text: "", author: "user" as const };
+    const mine = {
+      card: "a",
+      quote: "",
+      occurrence: 0,
+      dst: "b",
+      text: "",
+      author: "user" as const,
+    };
     const theirs = { ...mine, author: "agent" as const };
     const next = afterChange(
       { ...emptyLocal, expected: ["own"] },
@@ -191,5 +204,27 @@ describe("modelOf", () => {
       ["b", 1],
       ["c", 2],
     ]);
+  });
+});
+
+describe("afterChange of changes", () => {
+  it("keeps the version the user last saw when the agent puts again before the user looks", () => {
+    const v1 = { ...card, md: "1. one" };
+    const v2 = { ...card, md: "1. two" };
+    const after = board({
+      cards: { a: { ...card, md: "1. three" } },
+      history: {
+        a: [
+          { card: v1, threads: {} },
+          { card: v2, threads: {} },
+        ],
+      },
+    });
+    const next = afterChange(
+      { ...emptyLocal, changed: { a: "1. one" } },
+      { arrived: [], left: [], revised: ["a"], moved: [], lost: [] },
+      after,
+    );
+    expect(next.changed).toEqual({ a: "1. one" });
   });
 });

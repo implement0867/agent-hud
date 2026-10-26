@@ -1,5 +1,6 @@
 import asyncio
 import re
+import sqlite3
 from contextlib import aclosing, suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,12 +10,12 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from agent_hud.hud import Hud, Since, hear
-from agent_hud.models.actions import Action, ActionKind, Author, Misfit, Reaction, TBody
+from agent_hud.models.actions import Action, ActionKind, Author, Misfit, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, THeardBody, Turn
 from agent_hud.store import Store
-from tests.factories import clear, comment, fill, link, move, place, put, react, resize, say, send, unreact
-from tests.strategies import actions, item_texts, list_md, messages, table_md
+from tests.factories import clear, comment, link, move, place, put, resize, say, send
+from tests.strategies import actions, item_texts, list_md, messages
 
 
 @given(st.builds(Hud), st.lists(actions(st.sampled_from(["a", "b"])), min_size=1))
@@ -37,14 +38,14 @@ async def test_act_takes_all_the_actions_or_none(hud: Hud, batch: list[Action]) 
 
 def test_act_names_the_action_that_does_not_fit() -> None:
     """Assemble: a new hud.
-    Act: act with a put, a react to a part that the card does not have, and a say.
+    Act: act with a put, a comment on words that the card does not show, and a say.
     Assert: Misfit with the index and kind of the second action and the board's reason, which in a batch says that no action was applied."""
-    batch = [put("plan", "1. a"), react("plan/2", Reaction.approve), say("hi")]
-    reason = "no part 'plan/2': card 'plan' has parts 1 to 1"
+    batch = [put("plan", "1. a"), comment("plan", "why?", "b"), say("hi")]
+    reason = "card 'plan' does not show the words 'b': quote its text without markdown"
     with pytest.raises(Misfit, match=f"^{re.escape(reason)}$") as info:
         Hud().act([Action(id=str(n), author=Author.agent, body=body) for n, body in enumerate(batch)])
-    assert (info.value.index, info.value.kind) == (2, ActionKind.react)
-    assert info.value.in_batch() == f"action 2 (react): {reason}; no actions were applied"
+    assert (info.value.index, info.value.kind) == (2, ActionKind.comment)
+    assert info.value.in_batch() == f"action 2 (comment): {reason}; no actions were applied"
 
 
 def said(texts: list[str], author: Author) -> list[Action]:
@@ -53,7 +54,7 @@ def said(texts: list[str], author: Author) -> list[Action]:
 
 def turns(actions: list[Action]) -> list[Turn]:
     """A turn of each of the actions, as the user's messages make them."""
-    return [Turn(id=action.id, actions=(action.body,), parts={}) for action in actions]
+    return [Turn(id=action.id, actions=(action.body,)) for action in actions]
 
 
 async def take(hud: Hud, count: int, seconds: float = 1) -> list[Turn]:
@@ -87,16 +88,8 @@ async def test_an_agent_gets_the_user_actions_that_no_agent_had(
 
 
 def plain(action: Action) -> bool:
-    """Whether a turn carries the action as it is: not a clear, which compacts the state file, nor a kind a turn nets."""
-    nets = (
-        ActionKind.clear,
-        ActionKind.move,
-        ActionKind.resize,
-        ActionKind.place,
-        ActionKind.react,
-        ActionKind.unreact,
-        ActionKind.fill,
-    )
+    """Whether a turn carries the action as it is: not a clear, which compacts the state file, nor a kind a turn leaves out."""
+    nets = (ActionKind.clear, ActionKind.move, ActionKind.resize, ActionKind.place)
     return action.body.kind not in nets
 
 
@@ -141,17 +134,17 @@ async def test_the_read_position_survives_a_restart() -> None:
         hud.act([Action(id="one", author=Author.user, body=say("one"))])
         hud.act(
             [
-                Action(id="r", author=Author.user, body=react("plan/1", Reaction.approve)),
+                Action(id="r", author=Author.user, body=comment("plan", "yes", "a")),
                 Action(id="two", author=Author.user, body=say("two")),
             ]
         )
-        hud.act([Action(id="late", author=Author.user, body=comment("plan/1", "and"))])
+        hud.act([Action(id="late", author=Author.user, body=comment("plan", "and", "a"))])
         hud.close()
         again = Hud(state_file)
         assert again.snapshot().waiting == 2
         assert [list(turn.actions) for turn in await take(again, 2)] == [
             [say("one")],
-            [react("plan/1", Reaction.approve), say("two")],
+            [comment("plan", "yes", "a"), say("two")],
         ]
         assert again.snapshot().waiting == 0
         again.close()
@@ -191,65 +184,26 @@ async def test_a_turn_counts_as_had_once_the_agent_asks_for_the_next() -> None:
     assert await take(hud, 1) == [first]
 
 
-@given(st.from_type(Reaction), st.from_type(Reaction))
-async def test_a_turn_carries_the_net_of_the_users_actions(before: Reaction, after: Reaction) -> None:
-    """Assemble: a hud with a card of a list and a table, where the user reacted to a part and filled a cell before their turn.
-    Act: in the turn, the user reacts and unreacts, reacts twice, fills a cell twice, fills a cell back as it was, moves, resizes and places the card, and sends.
-    Assert: the pending list and the turn carry the last reaction on a part when it differs from the start, the last fill of a cell when it differs, and no move, resize or place."""
+async def test_a_turn_leaves_out_the_moves_resizes_and_places() -> None:
+    """Assemble: a hud with the agent's card, whose last turn an agent took.
+    Act: in the turn, the user comments, moves, places and resizes the card, comments again, and sends.
+    Assert: the pending list and the turn carry the comments alone, which read has the places and sizes for."""
     hud = Hud()
-    table = table_md([["x", "y"]], [" {number}", " {number}"])
-    hud.act(by(Author.agent, put("plan", f"1. a\n2. b\n3. c\n\n{table}")))
-    hud.act(
-        [
-            *by(Author.user, react("plan/1", before), fill("plan/4/1", 1)),
-            Action(id="s", author=Author.user, body=send()),
-        ]
-    )
-    await take(hud, 1)
+    hud.act(by(Author.agent, put("plan", "1. a\n2. b")))
     turn = [
-        Action(id="n1", author=Author.user, body=react("plan/2", after)),
-        Action(id="n2", author=Author.user, body=unreact("plan/2")),
-        Action(id="n3", author=Author.user, body=react("plan/1", after)),
-        Action(id="n4", author=Author.user, body=react("plan/3", before)),
-        Action(id="n5", author=Author.user, body=react("plan/3", after)),
-        Action(id="n6", author=Author.user, body=fill("plan/4/2", 2)),
-        Action(id="n7", author=Author.user, body=fill("plan/4/2", 3)),
-        Action(id="n8", author=Author.user, body=fill("plan/4/1", 2)),
-        Action(id="n9", author=Author.user, body=fill("plan/4/1", 1)),
-        Action(id="n10", author=Author.user, body=move("plan", 5, 5)),
-        Action(id="n11", author=Author.user, body=place("plan", 6, 6)),
-        Action(id="n12", author=Author.user, body=resize("plan", 500)),
+        Action(id="n1", author=Author.user, body=comment("plan", "why?", "a")),
+        Action(id="n2", author=Author.user, body=move("plan", 5, 5)),
+        Action(id="n3", author=Author.user, body=place("plan", 6, 6)),
+        Action(id="n4", author=Author.user, body=resize("plan", 500, 300)),
+        Action(id="n5", author=Author.user, body=comment("plan", "and?", "b")),
     ]
     hud.act(turn)
-    expected = ([] if before == after else ["n3"]) + ["n5", "n7"]
+    expected = ["n1", "n5"]
     assert [heard.id for heard in hud.snapshot().pending] == expected
     assert hud.snapshot().unsent == len(expected)
     hud.act([Action(id="e", author=Author.user, body=send())])
     [heard] = await take(hud, 1)
     assert heard.actions == tuple(action.body for action in turn if action.id in expected)
-
-
-async def test_a_fill_on_a_row_the_agent_put_in_the_turn_counts_against_the_agents_values() -> None:
-    """Assemble: a table of two rows, where the user filled the second row's cell with 1 and sent.
-    Act: the agent puts a version with a row before the second, and fills the new row's cell with 5; the user fills the
-    new row's cell with 1, which the row of that number had at the start of the turn, then with 5, then with 6.
-    Assert: the fill of 1 is pending, since the agent's put made the row; the fill of 5 is not, since the agent put 5;
-    the fill of 6 is, and the moved value of the old row stays in the board."""
-    hud = Hud()
-    hud.act(by(Author.agent, put("plan", table_md([["a"], ["b"]], [" {number}"]))))
-    hud.act([*by(Author.user, fill("plan/2/1", 1)), Action(id="s", author=Author.user, body=send())])
-    await take(hud, 1)
-    hud.act(by(Author.agent, put("plan", table_md([["a"], ["x"], ["b"]], [" {number}"])), fill("plan/2/1", 5)))
-    assert hud.board.values == {"plan/2/1": 5, "plan/3/1": 1}
-    hud.act([Action(id="n1", author=Author.user, body=fill("plan/2/1", 1))])
-    assert [heard.id for heard in hud.snapshot().pending] == ["n1"]
-    hud.act([Action(id="n2", author=Author.user, body=fill("plan/2/1", 5))])
-    assert [heard.id for heard in hud.snapshot().pending] == []
-    hud.act(
-        [Action(id="n3", author=Author.user, body=fill("plan/2/1", 6)), Action(id="e", author=Author.user, body=send())]
-    )
-    [heard] = await take(hud, 1)
-    assert heard.actions == (fill("plan/2/1", 6),)
 
 
 @given(batch=st.lists(actions(st.sampled_from(["a", "b"]))), on_clear=st.booleans())
@@ -293,40 +247,32 @@ def by(author: Author, *bodies: TBody) -> list[Action]:
     return [Action(id=f"{author}{n}", author=author, body=body) for n, body in enumerate(bodies)]
 
 
-@given(st.lists(item_texts(), min_size=2), st.from_type(Reaction), messages())
-async def test_the_agent_gets_the_users_actions_when_the_user_sends(
-    texts: list[str], reaction: Reaction, text: str
-) -> None:
+@given(st.lists(item_texts(), min_size=2, unique=True), messages())
+async def test_the_agent_gets_the_users_actions_when_the_user_sends(texts: list[str], text: str) -> None:
     """Assemble: a hud with the agent's list.
-    Act: the user reacts, comments and moves the card, the agent puts a new list, then the user sends.
-    Assert: the agent gets nothing before the send, then one turn of the user's actions but the move, with the text of each part as the user saw it."""
+    Act: the user comments on the card and on an item, and moves the card, the agent puts a new list, then the user sends.
+    Assert: the agent gets nothing before the send, then one turn of the user's actions but the move."""
     hud = Hud()
-    hud.act(by(Author.agent, put("plan", list_md("1. ", texts))))
-    feedback = by(Author.user, react("plan/2", reaction), comment("plan/1", text), move("plan", 0, 0))
+    hud.act(by(Author.agent, put("plan", list_md("1. ", ["first-item", *texts]))))
+    feedback = by(Author.user, comment("plan", text), comment("plan", text, "first-item"), move("plan", 0, 0))
     hud.act(feedback)
     hud.act(by(Author.agent, put("plan", "1. new")))
     with pytest.raises(TimeoutError):
         await take(hud, 1, seconds=0.01)
     hud.act([Action(id="end", author=Author.user, body=send())])
-    assert await take(hud, 1) == [
-        Turn(
-            id="end",
-            actions=tuple(action.body for action in feedback[:2]),
-            parts={"plan/2": texts[1], "plan/1": texts[0]},
-        )
-    ]
+    assert await take(hud, 1) == [Turn(id="end", actions=tuple(action.body for action in feedback[:2]))]
 
 
 async def test_the_snapshot_tells_the_page_the_agents_state_and_the_unsent_actions() -> None:
     """Assemble: a new hud.
-    Act: open a monitor, the user reacts and moves, the user sends and the agent gets the turn, the agent writes, then the monitor ends.
+    Act: open a monitor, the user comments and moves, the user sends and the agent gets the turn, the agent writes, then the monitor ends.
     Assert: the state goes away, waiting, working until the agent writes, waiting, away; the unsent count leaves out moves and goes to 0 on the send."""
     hud = Hud()
     hud.act(by(Author.agent, put("plan", "1. a")))
     assert (hud.snapshot().agent, hud.snapshot().unsent) == (AgentState.away, 0)
     with hud.monitor():
         assert hud.snapshot().agent is AgentState.waiting
-        hud.act(by(Author.user, react("plan/1", Reaction.approve), move("plan", 1, 1)))
+        hud.act(by(Author.user, comment("plan", "ok", "a"), move("plan", 1, 1)))
         assert hud.snapshot().unsent == 1
         hud.act([Action(id="end", author=Author.user, body=send())])
         assert (hud.snapshot().agent, hud.snapshot().unsent) == (AgentState.waiting, 0)
@@ -353,18 +299,17 @@ async def test_the_agent_hears_an_edit_of_a_card_as_a_diff(texts: list[str]) -> 
 
 
 def test_changed_since_names_the_cards_the_later_actions_touched_and_their_ids() -> None:
-    """Assemble: a hud with three cards, where after the user's send the agent puts one, the user fills a cell of another and links the third to it, and the user moves a card.
+    """Assemble: a hud with four cards, where after the user's send the agent puts one, the user comments on another and links the third to it, and the user moves a card.
     Act: ask what changed since the send, since an id the log does not have, and since the send after a clear.
-    Assert: the cards put, filled, linked and moved with the ids of those actions; None for the unknown id; and no cards, which means all, after the clear."""
+    Assert: the cards put, commented on, linked and moved with the ids of those actions; None for the unknown id; and no cards, which means all, after the clear."""
     hud = Hud()
-    table = table_md([["x"]], [" {number}"])
-    hud.act(by(Author.agent, put("a", "1. a"), put("b", table), put("c", "1. c"), put("d", "1. d")))
+    hud.act(by(Author.agent, put("a", "1. a"), put("b", "1. b"), put("c", "1. c"), put("d", "1. d")))
     hud.act([Action(id="turn", author=Author.user, body=send())])
     hud.act([Action(id="p", author=Author.agent, body=put("a", "1. a2"))])
     hud.act(
         [
-            Action(id="f", author=Author.user, body=fill("b/1/1", 3)),
-            Action(id="l", author=Author.user, body=link("arrow", "c/1", "b/1")),
+            Action(id="f", author=Author.user, body=comment("b", "why?", "b")),
+            Action(id="l", author=Author.user, body=link("arrow", "c", "b", quote="c")),
             Action(id="m", author=Author.user, body=move("d", 1, 1)),
         ]
     )
@@ -375,3 +320,25 @@ def test_changed_since_names_the_cards_the_later_actions_touched_and_their_ids()
         [Action(id="clear", author=Author.agent, body=clear()), Action(id="s", author=Author.agent, body=say("hi"))]
     )
     assert hud.changed_since("turn") == Since(None, {"p", "f", "l", "m", "clear", "s"})
+
+
+def test_a_hud_on_a_state_file_of_an_earlier_version_starts_empty() -> None:
+    """Assemble: a state file whose checkpoint and actions are of an earlier agent-hud, with values, widths and reactions.
+    Act: start a hud on it, act, and start another hud on it.
+    Assert: the first hud starts with an empty board and log, and the second has the action the first took."""
+    with TemporaryDirectory() as directory:
+        state_file = Path(directory) / "board.db"
+        Store(state_file).close()
+        old_board = '{"cards": {"plan": {"md": "1. a", "author": "agent"}}, "values": {"plan/1/2": 3}, "widths": {}}'
+        old_action = '{"id": "r", "author": "user", "body": {"kind": "react", "ref": "plan/1", "reaction": "approve"}}'
+        with sqlite3.connect(state_file) as db:
+            db.execute("UPDATE checkpoint SET board = ?", (old_board,))
+            db.execute("INSERT INTO actions (seq, action) VALUES (0, ?)", (old_action,))
+        db.close()
+        hud = Hud(state_file)
+        assert (hud.board, hud.log.actions) == (Board(), [])
+        hud.act(by(Author.agent, put("plan", "1. a")))
+        hud.close()
+        again = Hud(state_file)
+        assert list(again.board.cards) == ["plan"]
+        again.close()

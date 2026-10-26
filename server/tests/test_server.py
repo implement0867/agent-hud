@@ -11,9 +11,9 @@ from mcp.types import Tool
 
 from agent_hud.boards import Huds
 from agent_hud.hud import Hud
-from agent_hud.models.actions import Action, ActionKind, Author, Fill, Reaction, TAgentBody
+from agent_hud.models.actions import Action, ActionKind, Author, TAgentBody
 from agent_hud.server import build
-from tests.factories import as_json, comment, fill, link, put, react, read, read_board, remove, say, send, unlink
+from tests.factories import as_json, comment, link, put, read_board, remove, resize, say, send, unlink
 from tests.strategies import agent_bodies, card_ids
 
 
@@ -29,32 +29,31 @@ async def client(hud: Hud) -> AsyncIterator[Client[Any]]:
 
 
 async def test_read_returns_the_board_with_its_threads(client: Client[Any], hud: Hud) -> None:
-    """Assemble: a server where the agent put a card of a list and the user reacted and commented on its parts.
+    """Assemble: a server where the agent put a card of a list and the user commented on the card and on its words.
     Act: read.
     Assert: read returns the hud's board."""
     await client.call_tool("write", {"actions": as_json(put("plan", "1. a\n2. b"), put("risk", "locks"))})
-    feedback = react("plan", Reaction.approve), comment("plan/2", "why b?")
+    feedback = comment("plan", "fine"), comment("plan", "why b?", "b")
     hud.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate(feedback)])
     assert await read_board(client) == hud.board
 
 
 async def test_read_of_cards_returns_what_is_on_them(client: Client[Any], hud: Hud) -> None:
-    """Assemble: two cards with feedback, a value, an arrow between them, a position and a version each, and a chat message.
+    """Assemble: two cards with a thread, an arrow between them, a size and a version each, and a chat message.
     Act: read one card.
-    Assert: that card with the feedback, value, arrow, position and history on it, all the messages, and no more."""
-    first = put("plan", "1. a\n\n| n {number} |\n|---|\n| x |"), put("risk", "1. r")
-    await client.call_tool("write", {"actions": as_json(*first)})
-    again = put("plan", "1. a\n\n| n {number} |\n|---|\n| y |"), put("risk", "1. s")
-    feedback = react("plan/1", Reaction.approve), react("risk/1", Reaction.reject), link("why", "risk/1", "plan/1")
+    Assert: that card with the thread, arrow, size and history on it, all the messages, and no more."""
+    await client.call_tool("write", {"actions": as_json(put("plan", "1. a"), put("risk", "1. r"))})
+    again = put("plan", "1. a\n2. b"), put("risk", "1. s")
+    feedback = comment("plan", "ok", "a"), comment("risk", "no", "s"), link("why", "risk", "plan", quote="s")
     await client.call_tool("write", {"actions": as_json(*again, *feedback, say("hello"))})
-    hud.act([Action(id="m", author=Author.user, body=Fill(kind=ActionKind.fill, ref="plan/2/1", value=3))])
+    hud.act([Action(id="m", author=Author.user, body=resize("plan", 300, 200))])
     reading = await read_board(client, history=True, cards=["plan"])
     assert set(reading.cards) == {"plan"}
-    assert set(reading.threads) == {"plan/1"}
-    assert reading.values == {"plan/2/1": 3}
+    assert [thread.card for thread in reading.threads.values()] == ["plan"]
+    assert set(reading.sizes) == {"plan"}
     assert set(reading.arrows) == {"why"}
     assert set(reading.history) == {"plan"}
-    assert [said.text for said in reading.messages] == ["hello"]
+    assert [said.text for said in reading.messages] == ["ok", "no", "hello"]
     assert set(reading.positions) == set()
     assert set((await read_board(client, cards=["risk"])).arrows) == {"why"}
 
@@ -72,18 +71,18 @@ async def test_read_since_returns_the_messages_after_the_one_named(client: Clien
 async def test_read_since_a_turn_returns_the_cards_that_changed_after_it_and_the_messages(
     client: Client[Any], hud: Hud
 ) -> None:
-    """Assemble: two cards and a message from the agent; the user reacts on the first and sends; the agent puts a third card, comments on the second and says.
+    """Assemble: two cards and a message from the agent; the user comments on the first and sends; the agent puts a third card, comments on the second and says.
     Act: read since the send, with and without cards named; then since an id the log does not have.
     Assert: the cards the agent touched after the send, with the comment and the message after it; the first card alone when named with the third; and the whole board for the id the log does not have."""
     await client.call_tool("write", {"actions": as_json(put("a", "1. a"), put("b", "1. b"), say("review"))})
-    hud.act([Action(id="r", author=Author.user, body=react("a/1", Reaction.approve))])
+    hud.act([Action(id="r", author=Author.user, body=comment("a", "yes", "a"))])
     hud.act([Action(id="turn", author=Author.user, body=send())])
-    await client.call_tool("write", {"actions": as_json(put("c", "1. c"), comment("b/1", "fine"), say("done"))})
+    await client.call_tool("write", {"actions": as_json(put("c", "1. c"), comment("b", "fine", "b"), say("done"))})
     board = await read_board(client, since="turn")
     assert (set(board.cards), [said.text for said in board.messages]) == ({"b", "c"}, ["fine", "done"])
     assert set((await read_board(client, since="turn", cards=["a", "c"])).cards) == {"c"}
     whole = await read_board(client, since="gone")
-    assert (set(whole.cards), len(whole.messages)) == ({"a", "b", "c"}, 3)
+    assert (set(whole.cards), len(whole.messages)) == ({"a", "b", "c"}, 4)
 
 
 async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], hud: Hud) -> None:
@@ -98,8 +97,8 @@ async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], hud
 
 @pytest.mark.parametrize(
     "actions",
-    [as_json(put("b", "y"), remove("missing")), as_json(put("b", "y"), react("a/2", Reaction.reject)), []],
-    ids=["missing-card", "missing-part", "no-actions"],
+    [as_json(put("b", "y"), remove("missing")), as_json(put("b", "y"), comment("a", "why?", "nope")), []],
+    ids=["missing-card", "missing-words", "no-actions"],
 )
 async def test_rejected_write_changes_nothing(client: Client[Any], actions: list[dict[str, Any]]) -> None:
     """Assemble: a server with card a.
@@ -112,90 +111,33 @@ async def test_rejected_write_changes_nothing(client: Client[Any], actions: list
     assert await read_board(client) == before, "a rejected write must leave the board as it was"
 
 
-async def test_write_returns_the_parts_of_each_card_it_put(client: Client[Any]) -> None:
+async def test_write_returns_the_cards_it_put(client: Client[Any]) -> None:
     """Assemble: a client connected to a new server.
-    Act: write a put of a card with a nested list, a code block in an item and a table, a say, and a put of a card of one line.
-    Assert: the result names both cards as added and gives the text of each part of both by its number, as refs count them, with the line as the paragraph of the second."""
-    md = "1. a\n   - a1\n   - a2\n2. b\n\n   ```sh\n   make\n   ```\n3. c\n\n| task | size {S, M} |\n|---|---|\n| parse | |"
-    result = await client.call_tool("write", {"actions": as_json(put("plan", md), say("hi"), put("risk", "locks"))})
-    assert result.structured_content == {
-        "added": ["plan", "risk"],
-        "replaced": [],
-        "retired": [],
-        "dropped": [],
-        "parts": {
-            "plan": {"1": "a", "2": "a1", "3": "a2", "4": "b", "5": "make", "6": "c", "7": "parse | "},
-            "risk": {"1": "locks"},
-        },
-        "tables": {
-            "plan": [{"rows": ["7"], "columns": {"2": {"kind": "select", "name": "size", "options": ["S", "M"]}}}]
-        },
-        "values": {},
-    }
+    Act: write a put of a card, a say, and a put of another card.
+    Assert: the result names both cards as added, and no more."""
+    result = await client.call_tool("write", {"actions": as_json(put("plan", "1. a"), say("hi"), put("risk", "locks"))})
+    assert result.structured_content == {"added": ["plan", "risk"], "replaced": [], "retired": [], "dropped": []}
 
 
-async def test_write_reports_the_feedback_and_arrows_a_put_moves_aside(client: Client[Any], hud: Hud) -> None:
-    """Assemble: a server with a plan of two items that the user reacted to, with an arrow from each item to a note card and one from the note to the plan.
+async def test_write_reports_the_threads_and_arrows_a_put_moves_aside(client: Client[Any], hud: Hud) -> None:
+    """Assemble: a server with a plan of two items that the user commented on, with an arrow from each item to a note card and one from the note to the plan.
     Act: write a put of the plan with the second item changed, a put of a new card, an unlink of the arrow from the note, and a remove of the note.
-    Assert: the result names the plan as replaced and the new card as added, the second item as the part whose feedback went to the history, and the arrow at it as dropped, not the one unlinked."""
+    Assert: the result names the plan as replaced and the new card as added, the thread on the second item as gone to the history, and the arrow at it as dropped, not the one unlinked."""
     await client.call_tool("write", {"actions": as_json(put("plan", "1. a\n2. b"), put("note", "n"))})
-    feedback = [react("plan/1", Reaction.approve), react("plan/2", Reaction.reject)]
-    arrows = [link("one", "plan/1", "note"), link("two", "plan/2", "note"), link("back", "note", "plan")]
+    feedback = [comment("plan", "yes", "a"), comment("plan", "no", "b")]
+    arrows = [
+        link("one", "plan", "note", quote="a"),
+        link("two", "plan", "note", quote="b"),
+        link("back", "note", "plan"),
+    ]
     hud.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate([*feedback, *arrows])])
     actions = as_json(put("plan", "1. a\n2. c"), put("new", "x"), unlink("back"), remove("note"))
     result = await client.call_tool("write", {"actions": actions})
     assert result.structured_content == {
         "added": ["new"],
         "replaced": ["plan"],
-        "retired": ["plan/2"],
+        "retired": [{"card": "plan", "quote": "b"}],
         "dropped": ["one", "two"],
-        "parts": {"plan": {"1": "a", "2": "c"}, "new": {"1": "x"}},
-        "tables": {},
-        "values": {},
-    }
-
-
-async def test_write_returns_the_tables_it_put_with_their_rows_and_input_columns_and_the_values_it_fills(
-    client: Client[Any],
-) -> None:
-    """Assemble: a client connected to a new server.
-    Act: write a put of a card with a heading, a table with an owner, hours and done column, and a plain table; then fills of three cells, one to null.
-    Assert: the first result gives each table's row numbers and its input columns by their number in the table, with none for the plain table; the second gives the value of each cell filled and no tables."""
-    md = (
-        "# Tasks\n\n| Task | Owner {you, agent} | Hours {number} | Done {check} |\n|---|---|---|---|\n| parse | | | |\n"
-        "| render | | | |\n\n| a | b |\n|---|---|\n| x | y |"
-    )
-    result = (await client.call_tool("write", {"actions": as_json(put("tasks", md))})).structured_content
-    assert result is not None
-    assert result["tables"] == {
-        "tasks": [
-            {
-                "rows": ["2", "3"],
-                "columns": {
-                    "2": {"kind": "select", "name": "Owner", "options": ["you", "agent"]},
-                    "3": {"kind": "number", "name": "Hours", "options": []},
-                    "4": {"kind": "check", "name": "Done", "options": []},
-                },
-            },
-            {"rows": ["4"], "columns": {}},
-        ]
-    }
-    assert result["values"] == {}
-    fills = as_json(fill("tasks/2/2", "you"), fill("tasks/3/3", 2.5), fill("tasks/2/4", None))
-    filled = (await client.call_tool("write", {"actions": fills})).structured_content
-    assert filled is not None
-    assert (filled["tables"], filled["values"]) == ({}, {"tasks/2/2": "you", "tasks/3/3": 2.5, "tasks/2/4": None})
-
-
-async def test_read_returns_the_parts_of_each_card(client: Client[Any]) -> None:
-    """Assemble: a server where the agent put a card of a list and a card of code.
-    Act: read.
-    Assert: read gives the text of each part of each card by its number."""
-    md = "```python file=app.py start=3\nx = 1\ny = 2\n```"
-    await client.call_tool("write", {"actions": as_json(put("plan", "1. a\n2. b"), put("code", md))})
-    assert (await read(client)).parts == {
-        "plan": {"1": "a", "2": "b"},
-        "code": {"1": "app.py:3: x = 1", "2": "app.py:4: y = 2"},
     }
 
 
@@ -218,7 +160,8 @@ async def test_write_lists_one_object_for_all_kinds_of_action(client: Client[Any
     pages = (ActionKind.place, ActionKind.send)
     assert item["properties"]["kind"]["enum"] == [kind for kind in ActionKind if kind not in pages]
     assert "put {id, md, version?}" in (write.description or "")
-    assert "link {id, src, dst, text?}" in (write.description or "")
+    assert "link {id, card, quote?, occurrence?, dst, text?}" in (write.description or "")
+    assert "comment {card, quote?, occurrence?, text}" in (write.description or "")
 
 
 @given(agent_bodies(card_ids()))
@@ -236,9 +179,10 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TAge
         ({"kind": "put", "id": "a"}, "action 2 (put): md: Field required"),
         ({"kind": "remove", "id": "a", "md": "x"}, "action 2 (remove): md: not a field of remove"),
         ({"kind": "say", "text": " "}, "action 2 (say): text: String should match pattern '\\S'"),
-        ({"kind": "react", "ref": "a/1"}, "action 2 (react): reaction: Field required"),
+        ({"kind": "comment", "card": "a", "quote": "x"}, "action 2 (comment): text: Field required"),
+        ({"kind": "resize", "id": "a"}, "action 2 (resize): resize takes a width, a height or both"),
     ],
-    ids=["missing-field", "field-of-another-kind", "blank-text", "missing-reaction"],
+    ids=["missing-field", "field-of-another-kind", "blank-text", "missing-text", "resize-of-nothing"],
 )
 async def test_write_checks_each_action_against_its_kind(
     client: Client[Any], action: dict[str, Any], reason: str
@@ -278,12 +222,15 @@ async def test_write_lists_the_kinds_for_an_action_of_no_kind(
 
 async def test_write_names_the_action_that_does_not_fit_the_board(client: Client[Any]) -> None:
     """Assemble: a server with card a of one list item.
-    Act: write a say, a react to a part that card a does not have, and a say.
-    Assert: ToolError names the second action and its kind, gives the parts that the card has, and says that no action was applied."""
+    Act: write a say, a comment on words that card a does not show, and a say.
+    Assert: ToolError names the second action and its kind, says what to quote, and says that no action was applied."""
     await client.call_tool("write", {"actions": as_json(put("a", "1. x"))})
-    reason = "action 2 (react): no part 'a/2': card 'a' has parts 1 to 1; no actions were applied"
+    reason = (
+        "action 2 (comment): card 'a' does not show the words 'y': quote its text without markdown; "
+        "no actions were applied"
+    )
     with pytest.raises(ToolError, match=f"{re.escape(reason)}$"):
-        actions = as_json(say("hi"), react("a/2", Reaction.approve), say("there"))
+        actions = as_json(say("hi"), comment("a", "why?", "y"), say("there"))
         await client.call_tool("write", {"actions": actions})
 
 

@@ -18,25 +18,19 @@ from agent_hud.models.actions import (
     Action,
     ActionKind,
     Author,
-    Fill,
     Misfit,
     Put,
     TActionId,
     TAgentBody,
     TCardId,
-    TRef,
-    TValue,
+    TQuote,
     Unlink,
 )
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board, Said
-from agent_hud.models.columns import Table
-from agent_hud.models.refs import card_of
-from agent_hud.outline import outline_of
 from agent_hud.schema import compact
 
 type TActions = Annotated[list[TAgentBody], Field(min_length=1)]
-type TParts = dict[TCardId, dict[str, str]]
 
 BodyAdapter = TypeAdapter[TAgentBody](TAgentBody)
 
@@ -76,30 +70,22 @@ def turns_command(url: str) -> str:
     return f"{runner}agent-hud-turns {quote(url)}"
 
 
+class Retired(Model):
+    """A thread that went to its card's history, since the words it was on are gone."""
+
+    card: TCardId
+    quote: TQuote
+
+
 class Written(Model):
     """What a write made and what it moved aside."""
 
     added: list[TCardId] = Field(description="The cards the write put that were not on the board")
     replaced: list[TCardId] = Field(description="The cards the write put in place of the card with that id")
-    retired: list[TRef] = Field(
-        description="The parts whose feedback moved to the history, since the write changed or removed them"
+    retired: list[Retired] = Field(
+        description="The threads that moved to the history, since the write changed their words or removed their card"
     )
-    dropped: list[TCardId] = Field(
-        description="The arrows the write dropped, since an end of each was on a changed part"
-    )
-    parts: TParts = Field(description="The text of each part of each card the write put, by card id and part number")
-    tables: dict[TCardId, list[Table]] = Field(
-        description="The tables of each card the write put: the part numbers of the body rows of each, and its input columns by column number"
-    )
-    values: dict[TRef, TValue] = Field(
-        description="The value of each cell the write filled, by cell ref, as the board has it after the write"
-    )
-
-
-class Reading(Board):
-    """The board as read returns it, with the parts of each card."""
-
-    parts: TParts = Field(description="The text of each part of each card, by card id and part number")
+    dropped: list[TCardId] = Field(description="The arrows the write dropped, since their words or a card went")
 
 
 def messages_after(chat: Sequence[Said], since: TActionId) -> tuple[Said, ...]:
@@ -119,12 +105,11 @@ def selected(board: Board, cards: list[TCardId] | None, chat: Sequence[Said]) ->
     return board.model_copy(
         update={
             "cards": {k: v for k, v in board.cards.items() if k in kept},
-            "threads": {k: v for k, v in board.threads.items() if card_of(k) in kept},
-            "values": {k: v for k, v in board.values.items() if card_of(k) in kept},
-            "arrows": {k: v for k, v in board.arrows.items() if card_of(v.src) in kept or card_of(v.dst) in kept},
+            "threads": {k: v for k, v in board.threads.items() if v.card in kept},
+            "arrows": {k: v for k, v in board.arrows.items() if v.card in kept or v.dst in kept},
             "messages": tuple(chat),
             "positions": {k: v for k, v in board.positions.items() if k in kept},
-            "widths": {k: v for k, v in board.widths.items() if k in kept},
+            "sizes": {k: v for k, v in board.sizes.items() if k in kept},
             "history": {k: v for k, v in board.history.items() if k in kept},
         }
     )
@@ -138,15 +123,12 @@ def written(before: Board, after: Board, bodies: list[TAgentBody]) -> Written:
         added=[card_id for card_id in put if card_id not in before.cards],
         replaced=[card_id for card_id in put if card_id in before.cards],
         retired=[
-            ref
+            Retired(card=thread.card, quote=thread.quote)
             for card_id, versions in after.history.items()
             for version in versions[len(before.history.get(card_id, ())) :]
-            for ref in version.threads
+            for thread in version.threads.values()
         ],
         dropped=[arrow_id for arrow_id in before.arrows if arrow_id not in {*after.arrows, *unlinked}],
-        parts={card_id: after.texts_of(card_id) for card_id in put},
-        tables={card_id: tables for card_id in put if (tables := outline_of(after.cards[card_id].md).tables)},
-        values={body.ref: after.values.get(body.ref) for body in bodies if isinstance(body, Fill)},
     )
 
 
@@ -160,10 +142,10 @@ def detail(error: ErrorDetails) -> str:
             return f"kind is missing: one of {kinds}"
         case "extra_forbidden", [kind, *loc]:
             return f"{'.'.join(loc)}: not a field of {kind}"
-        case _, [_, *loc]:
+        case _, [_, *loc] if loc:
             return f"{'.'.join(loc)}: {error['msg']}"
         case _:
-            return error["msg"]
+            return error["msg"].removeprefix("Value error, ")
 
 
 def parse(actions: list[dict[str, Any]]) -> list[TAgentBody]:
@@ -203,10 +185,9 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
     async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> Written:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
-        A put replaces the card. Feedback on a part whose text is unchanged stays with it; the rest goes to the card's history.
-        A ref is a card id, a part of the card such as plan/2, or an input cell such as plan/2/3.
-        Returns the cards added and replaced, the parts whose feedback went to the history, the arrows dropped,
-        the parts of each card put, by number, the tables of each with their row numbers and input columns, and the value of each cell filled: use these numbers in refs.
+        A card is markdown; put adds it or replaces it. A comment or an arrow names a card and a quote of its words, as the card shows them.
+        A thread on words that a put keeps stays with them; the rest goes to the card's history.
+        Returns the cards added and replaced, the threads that went to the history, and the arrows dropped.
         """
         hud = hud_now()
         before = hud.board
@@ -226,9 +207,7 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
         cards: Annotated[
             list[TCardId] | None,
-            Field(
-                description="Only these cards, with the feedback, values, arrows, positions, widths and history on them"
-            ),
+            Field(description="Only these cards, with the threads, arrows, positions, sizes and history on them"),
         ] = None,
         since: Annotated[
             TActionId | None,
@@ -236,9 +215,9 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
                 description="Only the cards that changed after the action with this id, such as a turn's, and the messages after it; the whole board when the board no longer has the id"
             ),
         ] = None,
-    ) -> Reading:
+    ) -> Board:
         """
-        The board: the cards and the parts of each by number, the threads of feedback on them by ref, the values, the arrows and the chat.
+        The board: the cards, the threads of comments on their words, the arrows and the chat.
         Read it once, then follow the turns; read it again when unsure, with cards or since to read less.
         """
         hud = hud_now()
@@ -253,14 +232,13 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
                 chat = messages_after(chat, since)
             case _:
                 pass
-        board = selected(board, cards, chat)
-        return Reading(**dict(board), parts={card_id: board.texts_of(card_id) for card_id in board.cards})
+        return selected(board, cards, chat)
 
     async def listen() -> Listening:
         """
         Where the user's turns come from: a websocket URL, and a shell command that prints each turn as its lines.
         Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
-        Each turn is one event of lines: a head with the turn's id and its number of actions, then one line per action, with the text of the parts it names.
+        Each turn is one event of lines: a head with the turn's id and its number of actions, then one line per action.
         A turn with more lines than one event shows comes as several events, each with a head that counts them.
         An edit of a card on the board is a diff of its markdown.
         Also the board's id and the monitors already open on it: above 0, another session follows this board, so tell the user before you open one too.

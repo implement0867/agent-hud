@@ -1,38 +1,38 @@
 import { useCallback, useState } from "react";
-import type { RefObject } from "react";
 
 import { useBoard, useStore } from "~/data/context";
 import { versionsOf } from "~/domain/board";
 import type { TBoard } from "~/domain/board";
-import { cardOf, isCardRef } from "~/domain/ref";
 import { SelectionKind } from "~/hooks/useWhiteboard";
 import type { TSelection } from "~/hooks/useWhiteboard";
-import { anchorOf } from "~/lib/dom";
-import type { TAnchor } from "~/lib/dom";
 import { assertNever } from "~/lib/assertNever";
-import { invariant } from "~/lib/invariant";
 
-/** A selection with what select measured and counted: the anchor of a card or part, and its card's number of earlier versions. */
+/** A selection with its card's number of earlier versions when it was made, and the thread a comment just started. */
 type TChosen = {
   selection: TSelection;
-  anchor: TAnchor | null;
   versions: number;
+  awaiting: string | null;
 };
 
 /**
- * Whether the selection holds on the board. A card or arrow holds while it is on the board, and a part while its card
- * has the version it had when the user selected the part: a new version moves the part's feedback to the history.
+ * Whether the selection holds on the board. A card, a thread or an arrow holds while it is on the board, and a thread
+ * that a comment of this page just started holds until the board has it. The words of a new thread hold while their
+ * card has the version it had: a new version may not have them.
  */
-const holds = ({ selection, versions }: TChosen, board: TBoard) => {
+const holds = ({ selection, versions, awaiting }: TChosen, board: TBoard) => {
   if (selection === null) return false;
   switch (selection.kind) {
-    case SelectionKind.enum.ref: {
-      const card = cardOf(selection.ref);
+    case SelectionKind.enum.card:
+      return Object.hasOwn(board.cards, selection.id);
+    case SelectionKind.enum.thread:
       return (
-        Object.hasOwn(board.cards, card) &&
-        (isCardRef(selection.ref) || versionsOf(board, card) === versions)
+        Object.hasOwn(board.threads, selection.id) || awaiting === selection.id
       );
-    }
+    case SelectionKind.enum.draft:
+      return (
+        Object.hasOwn(board.cards, selection.anchor.card) &&
+        versionsOf(board, selection.anchor.card) === versions
+      );
     case SelectionKind.enum.arrow:
       return Object.hasOwn(board.arrows, selection.id);
     default:
@@ -40,55 +40,54 @@ const holds = ({ selection, versions }: TChosen, board: TBoard) => {
   }
 };
 
-/**
- * The user's selection, the anchor of its panel, and whether the panel is open: a click on a card's header selects
- * without it, and Esc closes it before it ends the selection.
- */
-export const useSelection = (world: RefObject<HTMLElement | null>) => {
+/** The user's selection on the board, which ends when what it names leaves the board. */
+export const useSelection = () => {
   const { model } = useBoard();
   const store = useStore();
   const [chosen, setChosen] = useState<TChosen>({
     selection: null,
-    anchor: null,
     versions: 0,
+    awaiting: null,
   });
-  const [feedbackOpen, setFeedbackOpen] = useState(true);
 
   const select = useCallback(
-    (selection: TSelection, feedback = true) => {
-      setFeedbackOpen(feedback);
-      if (selection?.kind !== SelectionKind.enum.ref) {
-        setChosen({ selection, anchor: null, versions: 0 });
-        return;
-      }
-      const root = world.current;
-      invariant(root !== null, "parts render in the world");
+    (selection: TSelection) => {
+      const card =
+        selection?.kind === SelectionKind.enum.draft
+          ? selection.anchor.card
+          : null;
       setChosen({
         selection,
-        anchor: anchorOf(root, selection.ref),
-        versions: versionsOf(store.read().board, cardOf(selection.ref)),
+        versions: card === null ? 0 : versionsOf(store.read().board, card),
+        awaiting: null,
       });
     },
-    [world, store],
+    [store],
   );
+
+  /** Opens the thread that the comment with the id started, which the board may not have yet. */
+  const started = useCallback((id: string) => {
+    setChosen({
+      selection: { kind: SelectionKind.enum.thread, id },
+      versions: 0,
+      awaiting: id,
+    });
+  }, []);
 
   /** Ends the selection of the arrow, if the user has not selected something else since, as when the arrow is removed. */
   const deselectArrow = useCallback((id: string) => {
     setChosen((current) =>
       current.selection?.kind === SelectionKind.enum.arrow &&
       current.selection.id === id
-        ? { selection: null, anchor: null, versions: 0 }
+        ? { selection: null, versions: 0, awaiting: null }
         : current,
     );
   }, []);
 
-  const holding = holds(chosen, model.board);
   return {
-    selection: holding ? chosen.selection : null,
-    anchor: holding ? chosen.anchor : null,
-    feedbackOpen,
-    setFeedbackOpen,
+    selection: holds(chosen, model.board) ? chosen.selection : null,
     select,
+    started,
     deselectArrow,
   };
 };

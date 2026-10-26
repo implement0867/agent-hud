@@ -1,5 +1,5 @@
 import { Trash2 } from "lucide-react";
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { RefObject } from "react";
 
 import { useBoard, useStore } from "~/data/context";
@@ -7,13 +7,14 @@ import { ActionKind, Author } from "~/domain/actions";
 import type { TArrow, TPoint } from "~/domain/board";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
 import type { TLinking } from "~/hooks/useWhiteboard";
-import { endOnBoard } from "~/lib/dom";
+import { arrowStart, cardElement, rectOnBoard } from "~/lib/dom";
 import { arrowCurve } from "~/lib/geometry";
 
 /** An arrow as measured on the board: its path and the middle of the path, where its label goes. */
 type TDrawn = {
   id: string;
   arrow: TArrow;
+  start: TPoint;
   path: string;
   middle: TPoint;
 };
@@ -21,13 +22,13 @@ type TDrawn = {
 type TArrowTone = "rest" | "selected" | "drawing";
 
 const strokeTones: Record<TArrowTone, string> = {
-  rest: "stroke-ink-muted",
+  rest: "stroke-draw",
   selected: "stroke-accent",
   drawing: "stroke-draw",
 };
 
 const headTones: Record<TArrowTone, string> = {
-  rest: "fill-ink-muted",
+  rest: "fill-draw",
   selected: "fill-accent",
   drawing: "fill-draw",
 };
@@ -47,7 +48,9 @@ const ArrowLabel = ({
       void store.act({
         kind: ActionKind.enum.link,
         id,
-        src: arrow.src,
+        card: arrow.card,
+        quote: arrow.quote,
+        occurrence: arrow.quote === "" ? null : arrow.occurrence,
         dst: arrow.dst,
         text,
       });
@@ -57,7 +60,7 @@ const ArrowLabel = ({
       <button
         type="button"
         aria-label={`Arrow ${id}: ${arrow.text}`}
-        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-[calc(100%+4px)] cursor-pointer rounded-full bg-surface px-2 py-0.5 text-xs whitespace-nowrap text-ink-soft shadow-sm ring-1 ring-outline hover:ring-accent-ring"
+        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-[calc(100%+4px)] cursor-pointer rounded-full bg-surface px-2 py-0.5 text-[0.6875rem] whitespace-nowrap text-ink-soft shadow-sm ring-1 ring-outline hover:ring-accent-ring"
         style={{ left: middle.x, top: middle.y }}
         onPointerDown={(event) => {
           event.stopPropagation();
@@ -72,7 +75,7 @@ const ArrowLabel = ({
     );
   return (
     <span
-      className="pointer-events-auto absolute z-10 flex -translate-x-1/2 -translate-y-[calc(100%+4px)] animate-pop items-center gap-1 rounded-full bg-surface py-0.5 pr-0.5 pl-2 shadow-md ring-2 ring-accent-ring"
+      className="pointer-events-auto absolute z-10 flex -translate-x-1/2 -translate-y-[calc(100%+4px)] animate-pop items-center gap-1 rounded-full bg-surface py-0.5 pr-0.5 pl-2 shadow-pop ring-2 ring-accent-ring"
       style={{ left: middle.x, top: middle.y }}
       onPointerDown={(event) => {
         event.stopPropagation();
@@ -124,33 +127,40 @@ type TArrowLayerProps = {
 };
 
 /**
- * The arrows between parts, measured from the cards whenever the board or a card's size changes, with each label above
- * the middle of its arrow. A click on an arrow or its label selects it, to label or remove it. The arrows and their
- * labels paint under the cards, so that neither covers a card's controls; the selected label paints over them, with
- * its input.
+ * The arrows from words of a card to another card, measured from the cards whenever the board or a card's size changes, with each label above
+ * the middle of its arrow. A click on an arrow or its label selects it, to label or remove it. The arrows paint over
+ * the cards, from the end of their words to the card they point to.
  */
 export const ArrowLayer = ({ world, linking }: TArrowLayerProps) => {
   const { model } = useBoard();
   const { selection, select } = useWhiteboard();
   const [drawn, setDrawn] = useState<TDrawn[]>([]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const root = world.current;
     if (root === null) return;
     const measure = () => {
       setDrawn(
         Object.entries(model.board.arrows).flatMap(([id, arrow]) => {
-          const from = endOnBoard(root, arrow.src);
-          const to = endOnBoard(root, arrow.dst);
-          return from === null || to === null
+          const from = arrowStart(root, arrow);
+          const target = cardElement(root, arrow.dst);
+          return from === null || target === null
             ? []
-            : [{ id, arrow, ...arrowCurve(from, to) }];
+            : [
+                {
+                  id,
+                  arrow,
+                  start: from.at,
+                  ...arrowCurve(from.at, rectOnBoard(target, root)),
+                },
+              ];
         }),
       );
     };
     measure();
     const observer = new ResizeObserver(measure);
-    for (const card of root.querySelectorAll("article")) observer.observe(card);
+    for (const card of root.querySelectorAll("article[data-card]"))
+      observer.observe(card);
     return () => {
       observer.disconnect();
     };
@@ -159,10 +169,7 @@ export const ArrowLayer = ({ world, linking }: TArrowLayerProps) => {
   const band =
     linking === null
       ? null
-      : arrowCurve(linking.start, {
-          card: { ...linking.to, width: 0, height: 0 },
-          y: linking.to.y,
-        }).path;
+      : arrowCurve(linking.start, { ...linking.to, width: 0, height: 0 }).path;
 
   const selectedId =
     selection?.kind === SelectionKind.enum.arrow ? selection.id : null;
@@ -188,7 +195,7 @@ export const ArrowLayer = ({ world, linking }: TArrowLayerProps) => {
             </marker>
           ))}
         </defs>
-        {drawn.map(({ id, arrow, path }) => {
+        {drawn.map(({ id, arrow, path, start }) => {
           const tone: TArrowTone = id === selectedId ? "selected" : "rest";
           return (
             <g key={id}>
@@ -207,24 +214,38 @@ export const ArrowLayer = ({ world, linking }: TArrowLayerProps) => {
               <path
                 d={path}
                 className={`fill-none ${strokeTones[tone]}`}
-                strokeWidth={tone === "selected" ? 2.5 : 1.75}
+                strokeWidth={tone === "selected" ? 2.5 : 1.5}
                 strokeDasharray={
                   arrow.author === Author.enum.agent ? "6 5" : undefined
                 }
                 strokeLinecap="round"
                 markerEnd={`url(#head-${tone})`}
               />
+              <circle
+                cx={start.x}
+                cy={start.y}
+                r={3.5}
+                className={headTones[tone]}
+              />
             </g>
           );
         })}
-        {band !== null && (
-          <path
-            d={band}
-            className={`fill-none ${strokeTones.drawing}`}
-            strokeWidth={2}
-            strokeDasharray="4 4"
-            markerEnd="url(#head-drawing)"
-          />
+        {band !== null && linking !== null && (
+          <>
+            <path
+              d={band}
+              className={`fill-none ${strokeTones.drawing}`}
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              markerEnd="url(#head-drawing)"
+            />
+            <circle
+              cx={linking.start.x}
+              cy={linking.start.y}
+              r={3.5}
+              className={headTones.drawing}
+            />
+          </>
         )}
       </svg>
       {drawn.map((item) => (

@@ -4,10 +4,9 @@ from typing import Any
 
 from pydantic import Field
 
-from agent_hud.models.actions import Put, TActionId, TRef
+from agent_hud.models.actions import TActionId
 from agent_hud.models.base import Model
-from agent_hud.models.events import Edit, HeardBodyAdapter, THeardBody, Turn
-from agent_hud.models.refs import named_refs
+from agent_hud.models.events import HeardBodyAdapter, THeardBody, Turn
 
 
 class Head(Model):
@@ -20,27 +19,12 @@ class Head(Model):
 
 
 def lines(turn: Turn) -> list[str]:
-    """
-    The lines of the turn after its head: one action each, as JSON with the action's fields and, in the first line
-    that names a part, the part's text under parts.
-    """
-    seen: set[TRef] = set()
-    out: list[str] = []
-    for action in turn.actions:
-        match action:
-            case Edit():
-                refs, line = [], action.model_dump(mode="json")
-            case Put():
-                # A note of the user has no version, which the line leaves out; a fill's value stays, as null clears the cell.
-                refs, line = [], action.model_dump(mode="json", exclude_none=True)
-            case _:
-                refs = [ref for ref in named_refs(action) if ref in turn.parts and ref not in seen]
-                line = action.model_dump(mode="json")
-        seen.update(refs)
-        if refs:
-            line["parts"] = {ref: turn.parts[ref] for ref in refs}
-        out.append(json.dumps(line, separators=(",", ":"), ensure_ascii=False))
-    return out
+    """The lines of the turn after its head: one action each, as JSON with the action's fields."""
+    # A field that is none, such as the version of a note or the occurrence of a quote at one place, stays out.
+    return [
+        json.dumps(action.model_dump(mode="json", exclude_none=True), separators=(",", ":"), ensure_ascii=False)
+        for action in turn.actions
+    ]
 
 
 def frames(turn: Turn, chars: int) -> list[str]:
@@ -82,12 +66,10 @@ def turn_of(frames: Sequence[str]) -> Turn:
             f"not the frames of one turn, in order: {[(head.turn, head.frame, head.of) for head in heads]}"
         )
     actions: list[THeardBody] = []
-    parts: dict[TRef, str] = {}
     for frame in frames:
         for line in frame.split("\n")[1:]:
             data: dict[str, Any] = json.loads(line)
-            parts |= data.pop("parts", {})
             actions.append(HeardBodyAdapter.validate_python(data))
     if len(actions) != heads[0].actions:
         raise ValueError(f"the head counts {heads[0].actions} actions, the frames hold {len(actions)}")
-    return Turn(id=heads[0].turn, actions=tuple(actions), parts=parts)
+    return Turn(id=heads[0].turn, actions=tuple(actions))

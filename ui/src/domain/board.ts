@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-import { Author, Reaction, valueSchema } from "~/domain/actions";
-import { cardOf, rowOf } from "~/domain/ref";
+import { Author } from "~/domain/actions";
 
 const cardSchema = z.strictObject({
   md: z.string().min(1).describe("Markdown shown on the card"),
@@ -18,26 +17,38 @@ const saidSchema = z
     id: z.string().describe("The id of the action that said it"),
     author: Author,
     text: z.string().describe("What was said"),
-    ref: z
+    thread: z
       .string()
       .nullable()
-      .describe("The card or part a comment is on; null for a chat message"),
+      .describe("The thread of a comment; null for a chat message"),
     at: z.string().nullable().describe("When it was said, as an ISO time"),
   })
-  .describe("A chat message, or a comment on the part that ref names");
+  .describe("A chat message, or a comment in the thread that thread names");
+
+const anchorFields = {
+  card: z.string().describe("The card the words are in"),
+  quote: z
+    .string()
+    .describe(
+      "The words, as the card shows them; empty for the card as a whole",
+    ),
+  occurrence: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("Which place of the quote in the card's text, from 0"),
+};
 
 const threadSchema = z
   .strictObject({
-    reactions: z
-      .partialRecord(Author, Reaction)
-      .describe("The reaction of each author"),
+    ...anchorFields,
     comments: z.array(saidSchema).describe("The comments, oldest first"),
   })
-  .describe("The reaction of each author and the comments on one ref");
+  .describe("The comments on one place of a card");
 
 const arrowSchema = z.strictObject({
-  src: z.string().describe("The card or part the arrow starts at"),
-  dst: z.string().describe("The card or part the arrow points to"),
+  ...anchorFields,
+  dst: z.string().describe("The card the arrow points to"),
   text: z.string().describe("Text on the arrow"),
   author: Author,
 });
@@ -47,36 +58,43 @@ const pointSchema = z.strictObject({
   y: z.number().describe("Top edge on the board, in pixels"),
 });
 
+const sizeSchema = z.strictObject({
+  width: z
+    .number()
+    .nullable()
+    .describe("Width in pixels; null fits the content"),
+  height: z
+    .number()
+    .nullable()
+    .describe("Height in pixels; null fits the content"),
+});
+
 const versionSchema = z
   .strictObject({
     card: cardSchema,
-    threads: z.record(z.string(), threadSchema).describe("Threads by ref"),
-    values: z
-      .record(z.string(), valueSchema)
-      .describe("Values of input cells by cell ref"),
+    threads: z
+      .record(z.string(), threadSchema)
+      .describe("The threads it had, by id"),
   })
   .describe(
-    "A card as it was before a put replaced it or a remove took it away, with its feedback",
+    "A card as it was before a put replaced it or a remove took it away, with its threads",
   );
 
 export const boardSchema = z.strictObject({
   cards: z.record(z.string(), cardSchema).describe("Cards by id"),
-  threads: z.record(z.string(), threadSchema).describe("Threads by ref"),
-  values: z
-    .record(z.string(), valueSchema)
-    .describe("Values of input cells by cell ref"),
+  threads: z
+    .record(z.string(), threadSchema)
+    .describe("Threads by the id of the comment that started each"),
   arrows: z.record(z.string(), arrowSchema).describe("Arrows by id"),
   messages: z
     .array(saidSchema)
-    .describe("The chat, and each comment on a part, in order"),
+    .describe("The chat, and each comment, in order"),
   positions: z
     .record(z.string(), pointSchema)
     .describe("The place of each card that has one"),
-  widths: z
-    .record(z.string(), z.number())
-    .describe(
-      "The width of each card that the user or the agent resized, in pixels",
-    ),
+  sizes: z
+    .record(z.string(), sizeSchema)
+    .describe("The size of each card that the user or the agent resized"),
   history: z
     .record(z.string(), z.array(versionSchema))
     .describe("The earlier versions of each card, oldest first"),
@@ -85,19 +103,14 @@ export const boardSchema = z.strictObject({
 export type TCard = z.infer<typeof cardSchema>;
 export type TArrow = z.infer<typeof arrowSchema>;
 export type TPoint = z.infer<typeof pointSchema>;
+export type TSize = z.infer<typeof sizeSchema>;
 export type TSaid = z.infer<typeof saidSchema>;
 export type TThread = z.infer<typeof threadSchema>;
 export type TVersion = z.infer<typeof versionSchema>;
 export type TBoard = z.infer<typeof boardSchema>;
 
-/** The threads and values that the parts of a card show: the board's, or an earlier version's. */
-export type TFeedback = Pick<TBoard, "threads" | "values">;
-
-const emptyThread: TThread = { reactions: {}, comments: [] };
-
-/** The thread on the ref; a ref without reactions or comments has an empty one. */
-export const threadOf = (feedback: TFeedback, ref: string): TThread =>
-  feedback.threads[ref] ?? emptyThread;
+/** A place in a card: words at one of the places they occur, or the card as a whole when the quote is empty. */
+export type TAnchor = { card: string; quote: string; occurrence: number };
 
 /** An id for a card, an arrow or a draft that the user makes. */
 export const newId = (prefix: string) =>
@@ -107,32 +120,23 @@ export const newId = (prefix: string) =>
 export const versionsOf = (board: TBoard, card: string) =>
   board.history[card]?.length ?? 0;
 
-/**
- * The refs on the card that have reactions, comments, values or arrow ends: the feedback that a change of their text
- * moves to the history.
- */
-export const refsWithFeedback = (board: TBoard, card: string): string[] => {
-  const refs = new Set([
-    ...Object.entries(board.threads)
-      .filter(
-        ([, thread]) =>
-          thread.comments.length > 0 ||
-          Object.keys(thread.reactions).length > 0,
-      )
-      .map(([ref]) => ref),
-    ...Object.keys(board.values).map(rowOf),
-    ...Object.values(board.arrows).flatMap((arrow) => [arrow.src, arrow.dst]),
-  ]);
-  return [...refs].filter((ref) => cardOf(ref) === card);
-};
+/** The threads of the card, by id, in the board's order. */
+export const threadsOn = (
+  threads: Record<string, TThread>,
+  card: string,
+): [string, TThread][] =>
+  Object.entries(threads).filter(([, thread]) => thread.card === card);
 
-/** Whether an earlier version of the card holds reactions or comments, which the board's parts do not show. */
+/** The anchors on the card with feedback: its threads and the arrows that start at it, which a change of their words moves to the history. */
+export const anchorsOn = (board: TBoard, card: string): TAnchor[] => [
+  ...threadsOn(board.threads, card).map(([, thread]) => thread),
+  ...Object.values(board.arrows).filter((arrow) => arrow.card === card),
+];
+
+/** Whether an earlier version of the card holds threads, which the board does not show. */
 export const historyHasFeedback = (board: TBoard, card: string) =>
-  (board.history[card] ?? []).some((version) =>
-    Object.values(version.threads).some(
-      (thread) =>
-        thread.comments.length > 0 || Object.keys(thread.reactions).length > 0,
-    ),
+  (board.history[card] ?? []).some(
+    (version) => Object.keys(version.threads).length > 0,
   );
 
 /** An earlier version of a card, numbered from 1; the last version of a card that is not on the board is removed. */

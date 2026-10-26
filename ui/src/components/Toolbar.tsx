@@ -3,12 +3,15 @@ import {
   Keyboard,
   Maximize2,
   Minus,
+  Palette,
   Plus,
   RotateCcw,
   StickyNote,
 } from "lucide-react";
 
 import { IconButton } from "~/components/IconButton";
+import { LookMenu } from "~/components/LookMenu";
+import type { TLook } from "~/lib/look";
 
 const Divider = () => <span className="mx-1 h-5 w-px bg-outline" />;
 
@@ -25,12 +28,16 @@ type TToolbarProps = {
   toggleHistory: () => void;
   shortcuts: boolean;
   toggleShortcuts: () => void;
+  look: TLook;
+  changeLook: (patch: Partial<TLook>) => void;
+  lookOpen: boolean;
+  toggleLook: () => void;
   /** Takes the toolbar's element, so that the chat sits above it on a narrow screen; returns what to do when it goes. */
   measure: (element: HTMLElement) => () => void;
 };
 
 /**
- * The board's tools at the bottom, each with a visible label: a note, the history, the shortcuts and the view, where
+ * The board's tools at the bottom, each with a visible label: a note, the history, the shortcuts, the look and the view, where
  * Fit shows every card and the zoom button, which reads the zoom, resets the view. Its controls are the same whatever
  * the board holds, so that none of them moves. Send is in the chat beside the message box, and Clear in the board menu.
  */
@@ -45,6 +52,10 @@ export const Toolbar = ({
   toggleHistory,
   shortcuts,
   toggleShortcuts,
+  look,
+  changeLook,
+  lookOpen,
+  toggleLook,
   measure,
 }: TToolbarProps) => (
   <nav
@@ -81,6 +92,19 @@ export const Toolbar = ({
       <Keyboard className="size-4" />
       Shortcuts
     </IconButton>
+    <IconButton
+      variant="tool"
+      label="Look"
+      title="Look: theme, accent, density, radius"
+      pressed={lookOpen}
+      onClick={toggleLook}
+    >
+      <Palette className="size-4" />
+      Look
+    </IconButton>
+    {lookOpen ? (
+      <LookMenu look={look} change={changeLook} close={toggleLook} />
+    ) : null}
     <Divider />
     <IconButton
       variant="tool"

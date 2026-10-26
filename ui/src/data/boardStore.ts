@@ -34,7 +34,7 @@ export type TConnection =
     };
 
 /** Resolves true when the server takes the action, and false when it refuses it or the server is away. */
-export type TAct = (body: TBody) => Promise<boolean>;
+export type TAct = (body: TBody, id?: string) => Promise<boolean>;
 
 export type TBoardStore = {
   subscribe: (listener: () => void) => () => void;
@@ -57,8 +57,10 @@ export type TBoardStore = {
   place: (id: string, sizes: ReadonlyMap<string, TSize>) => void;
   /** The view showed the cards: they are not fresh any more. */
   saw: (ids: string[]) => void;
-  /** The user looked at the card: the marks of the agent's last version go. */
+  /** The user hides the changes the card shows, or edited it. */
   sawChanges: (id: string) => void;
+  /** The user asks to see what the card's last version changed against the version before it. */
+  showChanges: (id: string) => void;
   /** The user dismissed the loss of the arrow, or put it back. */
   forgetLostArrow: (id: string) => void;
 };
@@ -103,7 +105,7 @@ export const createBoardStore = (): TBoardStore => {
   };
 
   /** Acts on the board; a put or an unlink by the user is expected, so that the change it brings is no news. */
-  const act: TAct = async (body) => {
+  const act: TAct = async (body, id) => {
     if (!live || socket === null) return false;
     const expected =
       body.kind === ActionKind.enum.put || body.kind === ActionKind.enum.unlink
@@ -114,7 +116,7 @@ export const createBoardStore = (): TBoardStore => {
         ...current,
         expected: [...current.expected, expected],
       }));
-    const taken = await socket.act(body);
+    const taken = await socket.act(body, id);
     if (!taken && expected !== null)
       update((current) => ({
         ...current,
@@ -217,6 +219,15 @@ export const createBoardStore = (): TBoardStore => {
       update(({ changed: { [id]: _seen, ...rest }, ...current }) => ({
         ...current,
         changed: rest,
+      }));
+    },
+    showChanges: (id) => {
+      if (snapshot === null) return;
+      const before = snapshot.board.history[id]?.at(-1)?.card.md;
+      if (before === undefined) return;
+      update((current) => ({
+        ...current,
+        changed: { ...current.changed, [id]: before },
       }));
     },
     forgetLostArrow: (id) => {

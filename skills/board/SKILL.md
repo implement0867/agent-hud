@@ -1,6 +1,6 @@
 ---
 name: board
-description: Show plans, options, tables and questions to the user on the agent-hud board in the browser, and read the user's feedback. Use when a plan, a choice between options, or a table of values needs the user's review, or when the user asks for the board.
+description: Show plans, options, tables and questions to the user on the agent-hud board in the browser, and read the user's feedback. Use when a plan, a choice between options, or a table needs the user's review, or when the user asks for the board.
 ---
 
 # Board
@@ -9,55 +9,37 @@ The board is a page in the browser that you and the user share. Its MCP tools ar
 
 ## Show content
 
+A card is markdown, and only markdown. Write it as you would write a document; the board numbers nothing and reads no other structure.
+
 Call `write` with a list of actions. They run in order, all or nothing.
 
-- `put {id, md, version?}` adds a card of markdown, or replaces the card with that id. The feedback, values and arrows on the parts whose text is unchanged stay with them, so fix one step without losing the user's reactions on the others. The feedback on the parts that changed goes to the card's history, and the arrows at them drop. A replaced card keeps its first author, and `edited` is true on it when the other author put the latest version. With `version`, the number of earlier versions the card has, the put is refused when the card changed since you read it.
+- `put {id, md, version?}` adds a card of markdown, or replaces the card with that id. A thread on words that the new text still has stays with them, at the place nearest to where it was. A thread on words that are gone goes to the card's history, and an arrow from them drops. A replaced card keeps its first author, and `edited` is true on it when the other author put the latest version. With `version`, the number of earlier versions the card has, the put is refused when the card changed since you read it.
   - A fenced code block with a language name, such as ```` ```python ````, shows in colour. A block with an unknown language shows as plain text.
-  - Put `file=` and `start=` after the language, such as ```` ```python file=src/app.py start=40 ````, to show the file name and the line numbers. Then the user's feedback on a code line names its file and line.
+  - Put `file=` and `start=` after the language, such as ```` ```python file=src/app.py start=40 ````, to show the file name and the line numbers.
   - A ```` ```diff ```` block tints its added and removed lines.
+  - A task item, `- [ ] step`, and a table cell of a box alone, `[ ]` or `[x]`, show as a checkbox. When the user clicks one, you get an edit of the card's markdown. Put the box column first, with an empty header cell.
 - `remove {id}` removes a card. `restore {id}` puts a removed card back as its last version was.
-- `clear` starts over: every card goes to its history with its feedback, and the board, its arrows and the chat empty. Use it when the user moves to a new task, rather than a `remove` per card.
+- `clear` starts over: every card goes to its history with its threads, and the board, its arrows and the chat empty. Use it when the user moves to a new task, rather than a `remove` per card.
 - `say {text}` sends a message to the user. It shows in the chat on the page.
+- `comment {card, quote?, occurrence?, text}` comments on words of a card, or on the card as a whole when `quote` is empty. It joins the thread on the same words, or starts one there.
+- `link {id, card, quote?, occurrence?, dst, text?}` draws an arrow from words of a card to the card `dst`.
 - `move {id, x, y}` places a card on the board, in pixels. A card with no place goes to the free space below the others, on a grid of three columns 688 pixels apart, once the page shows it, and `read` has its place. A new card lands clear of every card; after that cards may cross, and the card last touched, by a `move` or a new version too, shows on top.
-- `resize {id, width}` sets the width of a card, in pixels. A card that no one resized is as wide as its content needs, between 256 pixels and a column of the grid, 640.
-- `react {ref, reaction}`, `comment {ref, text}`, `fill {ref, value}` and `link {id, src, dst, text}` act on cards as the user does. A comment also shows in the chat, with a link to its part.
+- `resize {id, width?, height?}` sets the width, the height or both of a card, in pixels, and keeps a dimension you leave out. A card that no one resized is as wide as its content needs, between 256 pixels and a column of the grid, 640, and as tall as its text. A card shorter than its text scrolls.
 
-`write` returns the cards it added and replaced, the parts whose feedback went to the history, the arrows it dropped, the parts of each card it put, by number, the tables of each card it put, with the part numbers of their rows and their input columns, and the value of each cell it filled: `{"added": ["plan"], "replaced": [], "retired": [], "dropped": [], "parts": {"plan": {"1": "parse", "2": "render"}}, "tables": {}, "values": {}}`. Take the numbers for refs from there, not from the markdown. Put each card at most once in a batch.
+`write` returns the cards it added and replaced, the threads that went to the history, as their card and quote, and the arrows it dropped: `{"added": ["plan"], "replaced": [], "retired": [], "dropped": []}`. Put each card at most once in a batch.
 
-When an action does not fit the board or its kind, `write` applies none of the actions, and its error names the action by number and kind, and the valid choices: the cards on the board, the parts of the card, the input columns of the row, or the values the column takes. Fix that action and send the list again.
+When an action does not fit the board or its kind, `write` applies none of the actions, and its error names the action by number and kind, and the valid choices: the cards on the board, or how many places the card shows the quote at. Fix that action and send the list again.
 
-Put one subject on each card, with a short id such as `plan` or `risks`. Write each step or option as a list item or a table body row, so that the user can give feedback on it; a paragraph of prose takes feedback as a whole.
+Put one subject on each card, with a short id such as `plan` or `risks`. Write each step or option on a line of its own, as a list item or a table row, so that the user can select it and comment on it.
 
-## Refs
+## Quotes
 
-A ref is a card id (`plan`), a part of a card (`plan/2`), or an input cell (`plan/2/3`). Parts are the headings, paragraphs, list items, table body rows and code lines of the card, counted together from 1 in document order. Nested list items and the code lines inside a list item count too, and a paragraph inside a list item is text of the item, so in `# Plan`, then `1. a` with sub-items `a1` and `a2`, then `2. b`, the item `b` is part 5. The cell ref counts the row as a part and the column by its place in the table, with the plain columns, so the input column `size` of a table after three list items and a row is `plan/4/2`. In a card of `# Tasks` and the table below, the heading is `tasks/1`, the header row is no part, the rows `parse` and `render` are `tasks/2` and `tasks/3`, and the cells are `tasks/2/2` for the size of `parse` and `tasks/3/3` for whether `render` is done: the text column is column 1. `write` and `read` return the text of each part by its number, and `write` returns each table with the numbers of its rows and its input columns, so take the numbers from there. A ref such as `plan/2` in a message or comment shows as a link to that part.
-
-## Ask for values
-
-A table header with a spec makes an input column that the user fills:
-
-| Spec | Value |
-|---|---|
-| `{text}` | text |
-| `{check}` | true or false |
-| `{number}` | a number |
-| `{S, M, L}` | one of the options |
-
-```markdown
-| Task | Size {S, M, L} | Done {check} |
-|---|---|---|
-| parse | | |
-| render | | |
-```
-
-`write` returns the table under `tables`, so that you see the columns it made; for a card `tasks` of `# Tasks` and this table: `{"tasks": [{"rows": ["2", "3"], "columns": {"2": {"kind": "select", "name": "Size", "options": ["S", "M", "L"]}, "3": {"kind": "check", "name": "Done", "options": []}}}]}`; a header without a spec makes no input column, and a spec the board cannot read is an error that names it. A `fill` returns the cell and its value under `values`, such as `{"tasks/1/2": "M"}`.
-
-Write the options and the text as the user reads them: an owner column names the user as they name themselves, or "you", not `user`, and a column of numbers names its unit in its title, such as `Hours {number}`, which the page shows as the cell's placeholder. The page names a part to the user by its text, not its ref, so the ref is for you.
+A quote names words of a card as the page shows them: the text without markdown, so `**the** board` shows as `the board`, a link shows its text, and a code line shows its code. A quote may run across lines and blocks. White space does not count, so `tag  the\nrelease` matches `tag the release`. When the card shows the quote at more than one place, give `occurrence`, from 0 for the first place, or quote more words so that the quote is at one place. Write the user's words in a table cell or a list item as the user reads them: an owner column names the user as they name themselves, or "you", not `user`, and a column of numbers names its unit in its title, such as `Hours`.
 
 ## Read feedback
 
-- `read` returns the board: the cards and the parts of each by number, the threads by ref, each with the reaction of each author and the comments, the values by cell ref, the arrows, the chat messages and comments, and the card positions and widths. `read` with `history` true also returns the earlier versions of each card with their feedback. `read` with `cards` returns those cards alone, with what is on them, and with `since`, the id of a turn, message or comment, only the cards that changed after it and the messages after it; an id the board no longer has, such as one from before a clear, gives the whole board. Use them to read less when the board is large. Cards with the author `user` are notes from the user; a card with `edited` true has its latest version from the other author, so the user edited your card or you edited the user's note. Cards that the user placed near each other belong together for the user.
-- `listen` returns the websocket `url` of the user's turns on this session's board, a shell `command` that prints each turn as its lines, the `board` id and the `monitors` already open on the board, your own included. When `monitors` counts one you did not open, another session already follows this board and would get each turn too: tell the user so before you open a monitor, and open one only when they want this session to take the turns. Open the `url` with the Monitor tool's `ws` source, or, when your Monitor tool takes a command only, run the `command` with it. Set the description `board` and nothing more, and `timeout_ms` as long as the tool allows. Without a monitor, the user's sends wait, and the page tells the user to run `/agent-hud:open`. The user's reactions, comments, fills and edits collect until the user clicks Send or sends a chat message. Then the monitor gets one turn with all of them. A turn carries the net of the user's actions: the last reaction on a part and the last value of a cell, only when they differ from the start of the turn, and no moves or resizes; `read` has the positions and widths. The page lists what the next turn carries, in the user's words, and marks each change as unsent until Send, so the user sees what you get. A turn sent while no monitor was open waits for the next monitor, across restarts, and the page says so.
+- `read` returns the board: the cards, the threads by id, each with its card, its quote, its occurrence and its comments, the arrows, the chat messages and comments, and the card positions and sizes. `read` with `history` true also returns the earlier versions of each card with their threads. `read` with `cards` returns those cards alone, with what is on them, and with `since`, the id of a turn, message or comment, only the cards that changed after it and the messages after it; an id the board no longer has, such as one from before a clear, gives the whole board. Use them to read less when the board is large. Cards with the author `user` are notes from the user; a card with `edited` true has its latest version from the other author, so the user edited your card or you edited the user's note. Cards that the user placed near each other belong together for the user.
+- `listen` returns the websocket `url` of the user's turns on this session's board, a shell `command` that prints each turn as its lines, the `board` id and the `monitors` already open on the board, your own included. When `monitors` counts one you did not open, another session already follows this board and would get each turn too: tell the user so before you open a monitor, and open one only when they want this session to take the turns. Open the `url` with the Monitor tool's `ws` source, or, when your Monitor tool takes a command only, run the `command` with it. Set the description `board` and nothing more, and `timeout_ms` as long as the tool allows. Without a monitor, the user's sends wait, and the page tells the user to run `/agent-hud:open`. The user's comments, arrows, edits and checked boxes collect until the user clicks Send or sends a chat message. Then the monitor gets one turn with all of them, without moves or resizes; `read` has the positions and sizes. The page lists what the next turn carries, in the user's words, and marks each change as unsent until Send, so the user sees what you get. A turn sent while no monitor was open waits for the next monitor, across restarts, and the page says so.
 
 ## Keep one monitor open
 
@@ -67,7 +49,7 @@ While your monitor is open, the page shows the user that an agent is connected. 
 
 ## Read a turn
 
-A turn is one event of lines. The first is its head, `{"turn": "9f2c…", "actions": 3}`: the id of the send or chat message that ended the turn, and its number of actions. Then one line per action, in order, as JSON with the action's fields, such as `{"kind": "react", "ref": "plan/2", "reaction": "reject", "parts": {"plan/2": "rewrite the cache"}}`; `parts` has the text of each part that the line is the first in the turn to name, as the user saw it. A `put` of the user on a card that was on the board comes as an `edit` with a unified diff of the card's markdown; a `put` of a new card is a note of the user. Each turn has only the changes, as an edit of a file has only a diff. Read the board once, then follow the turns, and read it again only when you are not sure what the board shows.
+A turn is one event of lines. The first is its head, `{"turn": "9f2c…", "actions": 3}`: the id of the send or chat message that ended the turn, and its number of actions. Then one line per action, in order, as JSON with the action's fields, such as `{"kind": "comment", "card": "plan", "quote": "tag the release", "text": "after the smoke test"}`. Answer a comment with a `comment` on the same card and quote, which joins its thread. A `put` of the user on a card that was on the board, such as a checked box, comes as an `edit` with a unified diff of the card's markdown; a `put` of a new card is a note of the user. Each turn has only the changes, as an edit of a file has only a diff. Read the board once, then follow the turns, and read it again only when you are not sure what the board shows.
 
 The Monitor shows 3000 characters of an event and 500 of a line. A turn with more lines than one event holds comes as several events, half a second apart, each with a head that counts them, `{"turn": "9f2c…", "actions": 24, "frame": 2, "of": 3}`; the actions keep their order across them, so wait for the last frame before you act. A line longer than 500 characters, such as a long message or a long diff, shows cut at its end: `read` has the message whole in the chat and the card whole.
 

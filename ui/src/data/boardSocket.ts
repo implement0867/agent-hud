@@ -7,7 +7,7 @@ import type { TSnapshot } from "~/domain/events";
 
 export type TBoardSocket = {
   /** Resolves true when the server takes the action, or false when it rejects it or the connection closes first. */
-  act: (body: TBody) => Promise<boolean>;
+  act: (body: TBody, id?: string) => Promise<boolean>;
   close: () => void;
 };
 
@@ -61,8 +61,8 @@ export const openBoardSocket = (
     { signal },
   );
   return {
-    act: (body) => {
-      const request = requestSchema.parse({ id: crypto.randomUUID(), body });
+    act: (body, id = crypto.randomUUID().replaceAll("-", "")) => {
+      const request = requestSchema.parse({ id, body });
       socket.send(JSON.stringify(request));
       return new Promise((resolve) => {
         pending.set(request.id, resolve);

@@ -19,15 +19,25 @@ const groups: { title: string; rows: [string, string][] }[] = [
     ],
   },
   {
-    title: "Selection",
+    title: "Cards",
     rows: [
-      ["Click a part or a card header", "Select it and open its feedback"],
-      ["A / R / Q", "Approve, reject, question"],
-      ["C or Enter", "Comment"],
-      ["E", "Edit the card"],
+      ["Click a card", "Select it"],
+      ["Drag a card's padding", "Move it"],
+      ["Arrow keys, Shift for more", "Move the selected card"],
+      ["Drag an edge or a corner", "Resize the card"],
+      ["Double-click, E or Enter", "Edit the card's markdown"],
       [`${mod} + Enter, in an editor`, "Save"],
       ["Delete", "Remove the card or arrow, with undo"],
-      ["Drag the dot on a part", "Draw an arrow"],
+      ["Click a box", "Check it, as an edit"],
+    ],
+  },
+  {
+    title: "Words",
+    rows: [
+      ["Select words in a card", "Show the comment and arrow buttons"],
+      ["C", "Comment on the selected words"],
+      ["Arrow button, then click a card", "Draw an arrow to that card"],
+      ["Click a bubble", "Open its thread"],
       ["Esc", "Close"],
     ],
   },
@@ -64,9 +74,7 @@ export const ShortcutSheet = ({ close }: TShortcutSheetProps) => (
           {rows.map(([keys, does]) => (
             <div key={keys} className="contents">
               <dt>
-                <kbd className="rounded bg-surface-sunken px-1.5 py-px font-mono text-[11px] text-ink-soft">
-                  {keys}
-                </kbd>
+                <kbd className="kbd">{keys}</kbd>
               </dt>
               <dd className="text-ink-soft">{does}</dd>
             </div>

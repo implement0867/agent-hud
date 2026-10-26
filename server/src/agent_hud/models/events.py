@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Discriminator, Field, TypeAdapter
 
-from agent_hud.models.actions import Author, TActionId, TBody, TCardId, TRef
+from agent_hud.models.actions import Author, TActionId, TBody, TCardId
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board
 
@@ -41,9 +41,6 @@ class Heard(Model):
     id: TActionId
     author: Author
     body: THeardBody
-    parts: dict[TRef, str] = Field(
-        description="The text of each part that the action names, as it was when the user acted"
-    )
 
 
 class Snapshot(Model):
@@ -82,24 +79,14 @@ HeardBodyAdapter = TypeAdapter[THeardBody](THeardBody)
 
 
 class Turn(Model):
-    """
-    The changes that the user made from one send to the next, as the agent's monitor gets them: the user's actions in
-    order, and the text of each part that an action names, as it was when the user acted.
-    """
+    """The changes that the user made from one send to the next, as the agent's monitor gets them: the user's actions in order."""
 
     id: TActionId = Field(
         description="The id of the send or chat message that ended the turn; the same id from two monitors is one turn"
     )
     actions: tuple[THeardBody, ...]
-    parts: dict[TRef, str] = Field(
-        description="The text of each part that an action names, as it was when the user acted"
-    )
 
     @classmethod
     def of(cls, turn_id: TActionId, heard: Iterable[Heard]) -> Self:
-        """The turn of the actions as the agent hears them, with each part's text as the first action that names it had it."""
-        actions = tuple(heard)
-        parts: dict[TRef, str] = {}
-        for action in actions:
-            parts = {**action.parts, **parts}
-        return cls(id=turn_id, actions=tuple(action.body for action in actions), parts=parts)
+        """The turn of the actions as the agent hears them."""
+        return cls(id=turn_id, actions=tuple(action.body for action in heard))

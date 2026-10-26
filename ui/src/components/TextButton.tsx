@@ -4,7 +4,8 @@ export type TTextButtonVariant = "link" | "onDark";
 
 const variants: Record<TTextButtonVariant, string> = {
   link: "font-semibold text-accent-strong hover:underline",
-  onDark: "font-semibold text-accent-on-dark hover:underline",
+  onDark:
+    "font-semibold text-surface underline decoration-surface/40 underline-offset-2 hover:decoration-surface",
 };
 
 type TTextButtonProps = {

@@ -1,7 +1,10 @@
+import logging
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from agent_hud.models.actions import Action
 from agent_hud.models.board import Board
@@ -39,7 +42,16 @@ class Store:
         seq, board = self._db.execute("SELECT seq, board FROM checkpoint").fetchone()
         rows = self._db.execute("SELECT action FROM actions WHERE seq >= ? ORDER BY seq", (seq,)).fetchall()
         (read,) = self._db.execute("SELECT seq FROM agent").fetchone()
-        return seq, Board.model_validate_json(board), [Action.model_validate_json(row) for (row,) in rows], read
+        try:
+            return seq, Board.model_validate_json(board), [Action.model_validate_json(row) for (row,) in rows], read
+        except ValidationError:
+            # A board of an earlier agent-hud, whose cards had parts and inputs, does not fit this one: start empty.
+            logging.getLogger("agent_hud").warning(
+                "the board in the state file is of an earlier version: starting empty"
+            )
+            self.compact(0, Board(), 0)
+            self._db.execute("DELETE FROM actions")
+            return 0, Board(), [], 0
 
     def append(self, seq: int, actions: list[Action]) -> None:
         """Keep the actions, the first at the sequence number."""

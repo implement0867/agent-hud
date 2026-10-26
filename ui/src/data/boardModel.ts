@@ -2,8 +2,6 @@ import { Author } from "~/domain/actions";
 import type { TArrow, TBoard, TCard, TPoint } from "~/domain/board";
 import { versionsOf } from "~/domain/board";
 import type { TAgentState, THeard, TSnapshot } from "~/domain/events";
-import { changesBetween } from "~/domain/parts";
-import type { TChanges } from "~/domain/parts";
 import { unsentOf } from "~/domain/pending";
 import type { TUnsent } from "~/domain/pending";
 import { invariant } from "~/lib/invariant";
@@ -16,6 +14,8 @@ export type TCardView = {
   at: TPoint | null;
   /** The width the user or the agent set; null makes the card as wide as its content needs, up to a column. */
   width: number | null;
+  /** The height the user or the agent set; null makes the card as tall as its text, and a shorter card scrolls. */
+  height: number | null;
   /** The number of earlier versions. */
   versions: number;
   /** The card's layer from 1: a higher one shows over the cards it crosses. */
@@ -34,8 +34,8 @@ export type TLocal = {
   dropped: Record<string, TPoint>;
   /** The places that the page gave cards that had none, until the server has them. */
   placed: Record<string, TPoint>;
-  /** What the agent's last version of each card changed, until the user looks at the card. */
-  changed: Record<string, TChanges>;
+  /** The markdown of each card before the changes it shows, until the user hides them or edits the card. */
+  changed: Record<string, string>;
   /** The user's arrows that the agent removed, until the user dismisses each or puts it back. */
   lostArrows: { id: string; arrow: TArrow }[];
   /** The cards the user put and the arrows the user removed from this page, whose next change is no news. */
@@ -63,7 +63,7 @@ export type TBoardModel = {
   waiting: number;
   cards: TCardView[];
   fresh: string[];
-  changed: Record<string, TChanges>;
+  changed: Record<string, string>;
   lostArrows: { id: string; arrow: TArrow }[];
 };
 
@@ -112,22 +112,20 @@ const without = <T>(
     Object.entries(record).filter(([id, value]) => !drop(id, value)),
   );
 
-/** What the card's new version changed against the version before it, or null when it has none or changed no part. */
-const changesOf = (after: TBoard, id: string): TChanges | null => {
-  const previous = after.history[id]?.at(-1);
+/** The markdown of the card's version before its last, or null when it has none or the same text. */
+const previousOf = (after: TBoard, id: string): string | null => {
+  const previous = after.history[id]?.at(-1)?.card.md;
   const card = after.cards[id];
-  if (previous === undefined || card === undefined) return null;
-  const changes = changesBetween(previous.card.md, card.md);
-  return changes.parts.length === 0 && changes.removed.length === 0
+  return previous === undefined || card === undefined || previous === card.md
     ? null
-    : changes;
+    : previous;
 };
 
 /**
  * The page's state after the board changed: an arrival is fresh, and an arrival, a new version or a move puts the card
  * on top, as a touch by the user does. A card that left loses its place and its freshness; a drop the server confirmed
- * and a place the server has are done. A new version that the user did not put from this page marks what it changed,
- * and a user's arrow that went without the user's unlink from this page is lost; the expected ones are consumed.
+ * and a place the server has are done. A new version that the user did not put from this page shows its changes
+ * against the version the user last saw, and a user's arrow that went without the user's unlink from this page is lost; the expected ones are consumed.
  */
 export const afterChange = (
   local: TLocal,
@@ -144,11 +142,19 @@ export const afterChange = (
   return {
     ...local,
     changed: {
-      ...without(local.changed, (id) => left(id) || news.includes(id)),
+      ...without(
+        local.changed,
+        (id) =>
+          left(id) ||
+          (change.revised.includes(id) && !news.includes(id)) ||
+          after.cards[id]?.md === local.changed[id],
+      ),
       ...Object.fromEntries(
         news.flatMap((id) => {
-          const changes = changesOf(after, id);
-          return changes === null ? [] : [[id, changes]];
+          const before = local.changed[id] ?? previousOf(after, id);
+          return before === null || before === after.cards[id]?.md
+            ? []
+            : [[id, before]];
         }),
       ),
     },
@@ -199,7 +205,8 @@ export const modelOf = (snapshot: TSnapshot, local: TLocal): TBoardModel => {
             board.positions[id] ??
             local.placed[id] ??
             null),
-      width: board.widths[id] ?? null,
+      width: board.sizes[id]?.width ?? null,
+      height: board.sizes[id]?.height ?? null,
       versions: versionsOf(board, id),
       layer: order.indexOf(id) + 1,
     })),

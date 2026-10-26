@@ -1,31 +1,30 @@
-import { Bot, MessageCircle, Pencil, Trash2, User } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
 import { CardBody } from "~/components/CardBody";
-import { IconButton } from "~/components/IconButton";
-import { Connector, Marks } from "~/components/Marks";
+import { ThreadMarks } from "~/components/Marks";
 import { MarkdownEditor } from "~/components/MarkdownEditor";
 import type { TCardView } from "~/data/boardModel";
 import { useBoard, useStore } from "~/data/context";
-import { ActionKind, Author } from "~/domain/actions";
-import { historyHasFeedback } from "~/domain/board";
+import { ActionKind } from "~/domain/actions";
 import type { TPoint } from "~/domain/board";
+import { toggledBox } from "~/domain/text";
+import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
 import {
-  SelectionKind,
-  isSelected,
-  useWhiteboard,
-} from "~/hooks/useWhiteboard";
-import { clampCardWidth, columnWidth, leastCardWidth } from "~/lib/geometry";
+  clampCardWidth,
+  columnWidth,
+  leastCardHeight,
+  leastCardWidth,
+} from "~/lib/geometry";
+import type { TRect } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
-import { unsentTone } from "~/theme";
 
 type TPointerDragArgs = {
   scale: number;
-  /** Where the drag starts from, found when the button goes down. */
-  from: () => TPoint;
-  move: (to: TPoint) => void;
-  drop: (to: TPoint) => void;
+  /** Where the drag starts from, found when the button goes down; null declines the drag. */
+  from: (event: PointerEvent<HTMLElement>) => TPoint | null;
+  move: (to: TPoint, by: TPoint) => void;
+  drop: (to: TPoint, by: TPoint) => void;
   click: () => void;
 };
 
@@ -42,20 +41,25 @@ const usePointerDrag = ({
   const target = (
     event: PointerEvent,
     origin: { x: number; y: number; at: TPoint },
-  ) => ({
-    x: origin.at.x + (event.clientX - origin.x) / scale,
-    y: origin.at.y + (event.clientY - origin.y) / scale,
-  });
+  ) => {
+    const by = {
+      x: (event.clientX - origin.x) / scale,
+      y: (event.clientY - origin.y) / scale,
+    };
+    return [{ x: origin.at.x + by.x, y: origin.at.y + by.y }, by] as const;
+  };
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
       if (event.button !== 0) return;
+      const at = from(event);
+      if (at === null) return;
       event.preventDefault();
       event.stopPropagation();
       // The press takes the focus from an input, as a click elsewhere does, so that the keys act on the selection.
       if (document.activeElement instanceof HTMLElement)
         document.activeElement.blur();
       event.currentTarget.setPointerCapture(event.pointerId);
-      start.current = { x: event.clientX, y: event.clientY, at: from() };
+      start.current = { x: event.clientX, y: event.clientY, at };
       moved.current = false;
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) => {
@@ -63,16 +67,196 @@ const usePointerDrag = ({
       if (origin === null) return;
       moved.current ||=
         Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 3;
-      if (moved.current) move(target(event, origin));
+      if (moved.current) move(...target(event, origin));
     },
     onPointerUp: (event: PointerEvent<HTMLElement>) => {
       const origin = start.current;
       start.current = null;
       if (origin === null) return;
-      if (moved.current) drop(target(event, origin));
+      if (moved.current) drop(...target(event, origin));
       else click();
     },
   };
+};
+
+/** A handle of the frame: the edges it moves, north, east, south and west. */
+type THandle = {
+  name: string;
+  n?: true;
+  e?: true;
+  s?: true;
+  w?: true;
+  cursor: string;
+  left: string;
+  top: string;
+};
+
+const handles: THandle[] = [
+  {
+    name: "top left",
+    n: true,
+    w: true,
+    cursor: "cursor-nwse-resize",
+    left: "0%",
+    top: "0%",
+  },
+  { name: "top", n: true, cursor: "cursor-ns-resize", left: "50%", top: "0%" },
+  {
+    name: "top right",
+    n: true,
+    e: true,
+    cursor: "cursor-nesw-resize",
+    left: "100%",
+    top: "0%",
+  },
+  {
+    name: "right",
+    e: true,
+    cursor: "cursor-ew-resize",
+    left: "100%",
+    top: "50%",
+  },
+  {
+    name: "bottom right",
+    s: true,
+    e: true,
+    cursor: "cursor-nwse-resize",
+    left: "100%",
+    top: "100%",
+  },
+  {
+    name: "bottom",
+    s: true,
+    cursor: "cursor-ns-resize",
+    left: "50%",
+    top: "100%",
+  },
+  {
+    name: "bottom left",
+    s: true,
+    w: true,
+    cursor: "cursor-nesw-resize",
+    left: "0%",
+    top: "100%",
+  },
+  { name: "left", w: true, cursor: "cursor-ew-resize", left: "0%", top: "50%" },
+];
+
+/** The card's rect after a drag of the handle by the distance, kept at least as big as the least card. */
+const resized = (rect: TRect, handle: THandle, by: TPoint): TRect => {
+  const width = clampCardWidth(
+    rect.width + (handle.e ? by.x : handle.w ? -by.x : 0),
+  );
+  const height = Math.max(
+    leastCardHeight,
+    rect.height + (handle.s ? by.y : handle.n ? -by.y : 0),
+  );
+  return {
+    x: handle.w ? rect.x + rect.width - width : rect.x,
+    y: handle.n ? rect.y + rect.height - height : rect.y,
+    width,
+    height,
+  };
+};
+
+type TResizeHandleProps = {
+  id: string;
+  handle: THandle;
+  scale: number;
+  rect: () => TRect;
+  active: boolean;
+  show: (rect: TRect | null, handle: string | null) => void;
+  commit: (rect: TRect, handle: THandle) => void;
+};
+
+/** A handle on the frame: a drag sets the card's width, height or both, from that edge or corner. */
+const ResizeHandle = ({
+  id,
+  handle,
+  scale,
+  rect,
+  active,
+  show,
+  commit,
+}: TResizeHandleProps) => {
+  const start = useRef<TRect | null>(null);
+  const drag = usePointerDrag({
+    scale,
+    from: () => {
+      start.current = rect();
+      return { x: 0, y: 0 };
+    },
+    move: (_to, by) => {
+      invariant(start.current !== null, "a drag starts before it moves");
+      show(resized(start.current, handle, by), handle.name);
+    },
+    drop: (_to, by) => {
+      invariant(start.current !== null, "a drag starts before it drops");
+      commit(resized(start.current, handle, by), handle);
+    },
+    click: () => undefined,
+  });
+  return (
+    <span
+      role="separator"
+      aria-label={`Resize ${id} from the ${handle.name}`}
+      className={`absolute z-10 grid size-4 -translate-1/2 place-items-center ${handle.cursor}`}
+      style={{ left: handle.left, top: handle.top }}
+      {...drag}
+    >
+      <span
+        className={`size-2 rounded-full shadow-[0_0_0_1.5px_var(--accent-ring)] ${active ? "bg-accent shadow-[0_0_0_1.5px_var(--accent)]" : "bg-surface"}`}
+      />
+    </span>
+  );
+};
+
+type TChangeLinksProps = { id: string; changed: boolean };
+
+/** The links at the right of the card's title line: hide or show the changes of the last version, and the history. */
+const ChangeLinks = ({ id, changed }: TChangeLinksProps) => {
+  const store = useStore();
+  const { openHistory } = useWhiteboard();
+  const link =
+    "cursor-pointer text-ink-muted hover:text-ink-soft hover:underline";
+  return (
+    <span
+      data-chrome=""
+      className="absolute top-[calc(var(--pad-y)+4px)] right-11 z-10 flex gap-1.5 text-[0.6875rem] leading-4 text-ink-muted"
+      onPointerDown={(event) => {
+        event.stopPropagation();
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+      }}
+    >
+      <button
+        type="button"
+        className={link}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (changed) store.sawChanges(id);
+          else store.showChanges(id);
+        }}
+      >
+        {changed ? "Hide changes" : "Show changes"}
+      </button>
+      <span aria-hidden className="text-ink-ghost">
+        ·
+      </span>
+      <button
+        type="button"
+        aria-label={`History of ${id}`}
+        className={link}
+        onClick={(event) => {
+          event.stopPropagation();
+          openHistory(id);
+        }}
+      >
+        History
+      </button>
+    </span>
+  );
 };
 
 type TCardFrameProps = {
@@ -83,19 +267,19 @@ type TCardFrameProps = {
 };
 
 /**
- * A card at its place on the board, as wide as its content needs up to a column of the grid unless someone set its width,
- * which looks the same for each author but for the icon. A drag on the card's header moves it, a drag on its bottom
- * right corner sets its width, a click selects it, and a double click on its text edits the markdown. Cards may cross
- * after their first place; a touch puts the card on top of the others. A card without a place is hidden until the
- * page gives it one, which needs its size.
+ * A card at its place on the board: its markdown from the first line, with no strip above it. A drag on the card's
+ * padding moves it; the frame that shows on hover has a handle at each edge and corner, which sets the width, the height
+ * or both. A click selects the card, a selection of its words opens the toolbar of the selection, and a double click
+ * edits the markdown. A card shorter than its text scrolls, with fades at its ends. Cards may cross after their first
+ * place; a touch puts the card on top of the others. A card without a place is hidden until the page gives it one.
  */
 export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   const { id, card, at, versions, layer } = view;
   const store = useStore();
   const { model } = useBoard();
-  const { selection, select, editing, edit, openHistory, remove } =
-    useWhiteboard();
+  const { selection, select, editing, edit, linking, look } = useWhiteboard();
   const frame = useRef<HTMLElement | null>(null);
+  const body = useRef<HTMLDivElement | null>(null);
   const article = useCallback(
     (element: HTMLElement) => {
       frame.current = element;
@@ -107,44 +291,54 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     },
     [id, mount],
   );
-  const mine = card.author === Author.enum.user;
-  const AuthorIcon = mine ? User : Bot;
-  const changes = model.changed[id];
-  const archived = historyHasFeedback(model.board, id);
-  /** The width that a resize shows before the server has it, over the width the card had when the resize started. */
+  const before = model.changed[id] ?? null;
+  /** The rect that a resize shows before the server has it, and the handle that makes it. */
   const [resizing, setResizing] = useState<{
-    width: number;
-    over: number | null;
+    rect: TRect;
+    handle: string | null;
+    over: string;
   } | null>(null);
-  const width =
-    resizing !== null && resizing.over === view.width
-      ? resizing.width
-      : view.width;
-  const resize = usePointerDrag({
-    scale,
-    from: () => {
-      invariant(frame.current !== null, "the handle is in the card");
-      return { x: width ?? frame.current.offsetWidth, y: 0 };
-    },
-    move: (to) => {
-      setResizing({ width: clampCardWidth(to.x), over: view.width });
-    },
-    drop: (to) => {
-      const next = clampCardWidth(to.x);
-      setResizing({ width: next, over: view.width });
-      void store
-        .act({ kind: ActionKind.enum.resize, id, width: next })
-        .then((taken) => {
-          if (!taken) setResizing(null);
-        });
-    },
-    click: () => undefined,
-  });
+  const [ends, setEnds] = useState({ top: false, bottom: false });
+  const sizeKey = `${String(view.width)}x${String(view.height)}`;
+  const live = resizing !== null && resizing.over === sizeKey ? resizing : null;
+  const width = live?.rect.width ?? view.width;
+  const height = live?.rect.height ?? view.height;
+  const place = live === null ? at : { x: live.rect.x, y: live.rect.y };
+  const rect = (): TRect => {
+    invariant(
+      frame.current !== null && at !== null,
+      "a placed card takes a resize",
+    );
+    return {
+      ...at,
+      width: frame.current.offsetWidth,
+      height: frame.current.offsetHeight,
+    };
+  };
+  const commit = (next: TRect, handle: THandle) => {
+    setResizing({ rect: next, handle: null, over: sizeKey });
+    if (at !== null && (next.x !== at.x || next.y !== at.y))
+      store.drop(id, { x: next.x, y: next.y });
+    const sides = {
+      ...(handle.e || handle.w ? { width: next.width } : {}),
+      ...(handle.n || handle.s ? { height: next.height } : {}),
+    };
+    void store
+      .act({ kind: ActionKind.enum.resize, id, ...sides })
+      .then((taken) => {
+        if (!taken) setResizing(null);
+      });
+  };
   const drag = usePointerDrag({
     scale,
-    from: () => {
-      invariant(at !== null, "only a placed card shows and takes a drag");
-      return at;
+    // The padding of the card and its frame move it; its words take a selection instead.
+    from: (event) => {
+      const target = event.target;
+      if (at === null || !(target instanceof Element)) return null;
+      return target.closest("[data-text-root], button, input, textarea, a") ===
+        null
+        ? at
+        : null;
     },
     move: (to) => {
       store.drag(id, to);
@@ -152,9 +346,8 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     drop: (to) => {
       store.drop(id, to);
     },
-    // A click on the header selects the card alone; its feedback opens from its marks, or with C.
     click: () => {
-      select({ kind: SelectionKind.enum.ref, ref: id }, false);
+      select({ kind: SelectionKind.enum.card, id });
     },
   });
   const editor = editing?.card === id ? editing : null;
@@ -164,142 +357,103 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     if (await store.act({ kind: ActionKind.enum.put, id, md, ...version }))
       edit(null);
   };
+  const toggle = useCallback(
+    (start: number, end: number) => {
+      const current = store.read().board.cards[id];
+      if (current === undefined) return;
+      void store.act({
+        kind: ActionKind.enum.put,
+        id,
+        md: toggledBox(current.md, start, end),
+        version: store.read().board.history[id]?.length ?? 0,
+      });
+    },
+    [store, id],
+  );
+  const selected =
+    selection?.kind === SelectionKind.enum.card && selection.id === id;
+  const dropTarget = linking?.over === id && linking.from.card !== id;
+  const ring =
+    editor !== null
+      ? "shadow-[var(--shadow-card),0_0_0_2px_var(--accent-ring)]"
+      : dropTarget
+        ? "shadow-[var(--shadow-card),0_0_0_2px_var(--draw)]"
+        : selected
+          ? "shadow-[var(--shadow-card),0_0_0_1.5px_var(--accent-ring)]"
+          : "shadow-[var(--shadow-card),0_0_0_1px_var(--edge-faint)]";
+  const measureEnds = () => {
+    const element = body.current;
+    if (element === null) return;
+    const next = {
+      top: element.scrollTop > 1,
+      bottom:
+        element.scrollHeight - element.scrollTop - element.clientHeight > 1,
+    };
+    if (next.top !== ends.top || next.bottom !== ends.bottom) setEnds(next);
+  };
   return (
     <article
       ref={article}
-      data-ref={id}
+      data-card={id}
+      aria-label={`Card ${id}`}
       style={{
-        left: at?.x ?? 0,
-        top: at?.y ?? 0,
+        left: place?.x ?? 0,
+        top: place?.y ?? 0,
         width: width ?? "max-content",
+        // The editor shows the whole markdown, whatever height the card has.
+        height: editor === null ? (height ?? undefined) : undefined,
         minWidth: leastCardWidth,
         maxWidth: width === null ? columnWidth : undefined,
         zIndex: layer,
         visibility: at === null ? "hidden" : "visible",
       }}
-      className={`group/card card pointer-events-auto absolute flex animate-rise flex-col transition-shadow ${isSelected(selection, id) ? "ring-2 ring-accent-ring" : "ring-1 ring-edge-faint"}`}
+      className={`group/card pointer-events-auto absolute flex animate-rise flex-col rounded-card bg-surface transition-shadow ${ring}`}
       onPointerDownCapture={() => {
         store.touch(id);
       }}
       onClick={(event) => {
         event.stopPropagation();
+        if (window.getSelection()?.isCollapsed !== false)
+          select({ kind: SelectionKind.enum.card, id });
       }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        window.getSelection()?.removeAllRanges();
+        edit(id);
+      }}
+      {...drag}
     >
-      <header
-        className="group/part relative flex cursor-grab items-center gap-2 px-4 pt-2.5 pb-1 active:cursor-grabbing"
-        {...drag}
-      >
-        <span
-          role="img"
-          aria-label={mine ? "By you" : "By the agent"}
-          title={mine ? "you" : "agent"}
-          className={`grid size-5 shrink-0 place-items-center rounded-full text-white ${mine ? "bg-accent" : "bg-ink"}`}
-        >
-          <AuthorIcon className="size-3" />
-        </span>
-        {mine ? null : (
-          <span className="truncate font-mono text-[11px] tracking-wide text-ink-faint">
-            {id}
-          </span>
-        )}
-        {card.edited ? (
-          <span className="pill bg-accent-faint text-accent-strong">
-            {mine ? "edited by the agent" : "edited by you"}
-          </span>
-        ) : null}
-        {model.unsent.refs.has(id) ? (
-          <span
-            title="The agent does not have this card yet: Send"
-            data-unsent=""
-            className={`pill text-warning-strong ${unsentTone} -outline-offset-1`}
-          >
-            unsent
-          </span>
-        ) : null}
-        {changes !== undefined && (
-          <span
-            data-changed-by-agent=""
-            title="The agent's last version; a click on the card clears the marks"
-            className="pill bg-success-soft text-success-strong"
-          >
-            agent: {changes.parts.length} new
-            {changes.removed.length > 0
-              ? `, ${String(changes.removed.length)} removed`
-              : ""}
-          </span>
-        )}
-        {versions > 0 && (
-          <button
-            type="button"
-            aria-label={`History of ${id}`}
-            title={`Version ${String(versions + 1)}: show the earlier versions${archived ? ", with feedback in the history" : " and their feedback"}`}
-            className="pill flex items-center gap-0.5 bg-surface-sunken text-ink-muted hover:bg-accent-soft hover:text-accent-strong"
-            onPointerDown={(event) => {
-              event.stopPropagation();
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              openHistory(id);
-            }}
-          >
-            v{versions + 1}
-            {archived ? <MessageCircle className="size-2.5" /> : null}
-          </button>
-        )}
-        <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover/card:opacity-100">
-          <IconButton
-            variant="ghost"
-            label={`Edit ${id}`}
-            onClick={() => {
-              edit(id);
-            }}
-          >
-            <Pencil className="size-3.5" />
-          </IconButton>
-          <IconButton
-            variant="ghost"
-            label={`Remove ${id}`}
-            onClick={() => {
-              remove(id);
-            }}
-          >
-            <Trash2 className="size-3.5" />
-          </IconButton>
-        </span>
-        <Marks target={id} placement="header" />
-        <Connector target={id} />
-      </header>
       <div
-        className="px-4 pb-4"
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          edit(id);
-        }}
+        ref={body}
+        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-card py-[var(--pad-y)] pr-11 pb-[var(--pad)] pl-[var(--pad)] [scrollbar-color:var(--ink-ghost)_transparent] [scrollbar-width:thin]"
+        onScroll={measureEnds}
+        onPointerEnter={measureEnds}
       >
         {editor === null ? (
-          <div key={versions} className="animate-pop">
-            <CardBody id={id} md={card.md} />
-            {changes !== undefined && changes.removed.length > 0 ? (
-              <ul
-                aria-label={`Removed from ${id} by the agent`}
-                className="mt-2 border-t border-divider pt-2 text-xs text-ink-muted"
-              >
-                {changes.removed.map((text, index) => (
-                  <li
-                    key={`${String(index)} ${text}`}
-                    className="line-through decoration-danger/60"
-                  >
-                    {text}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
+          <>
+            {versions > 0 && <ChangeLinks id={id} changed={before !== null} />}
+            <div
+              key={versions}
+              className={`animate-pop ${versions > 0 ? "[&_.markdown>:first-child]:pr-36" : ""}`}
+            >
+              <CardBody
+                md={card.md}
+                before={before}
+                diffStyle={look.diff}
+                toggle={toggle}
+              />
+            </div>
+            <ThreadMarks
+              card={id}
+              body={body}
+              version={`${card.md}|${String(before)}|${String(width)}|${look.diff}`}
+            />
+          </>
         ) : (
           <MarkdownEditor
             md={card.md}
             label={`Markdown of ${id}`}
-            marked={editor.marked}
+            quotes={editor.quotes}
             changed={editor.versions !== versions}
             save={(md, over) => {
               void save(md, over);
@@ -310,23 +464,44 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
           />
         )}
       </div>
-      <span
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={`Width of ${id}`}
-        aria-valuenow={width === null ? undefined : Math.round(width)}
-        className="absolute right-0 bottom-0 size-4 cursor-ew-resize rounded-br-xl text-ink-ghost hover:text-ink-muted"
-        {...resize}
-      >
-        <svg viewBox="0 0 16 16" className="size-full" aria-hidden>
-          <path
-            d="M13 7 7 13M13 10.5 10.5 13"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-      </span>
+      {height !== null && ends.top ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-7 rounded-t-card bg-linear-to-b from-surface to-transparent"
+        />
+      ) : null}
+      {height !== null && ends.bottom ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-7 rounded-b-card bg-linear-to-t from-surface to-transparent"
+        />
+      ) : null}
+      {editor === null && at !== null && (
+        <span
+          className={`pointer-events-none absolute inset-0 rounded-card shadow-[0_0_0_1.5px_var(--accent-ring)] ${live !== null || selected ? "block" : "hidden group-hover/card:block"}`}
+        >
+          <span className="pointer-events-auto">
+            {handles.map((handle) => (
+              <ResizeHandle
+                key={handle.name}
+                id={id}
+                handle={handle}
+                scale={scale}
+                rect={rect}
+                active={live?.handle === handle.name}
+                show={(next, name) => {
+                  setResizing(
+                    next === null
+                      ? null
+                      : { rect: next, handle: name, over: sizeKey },
+                  );
+                }}
+                commit={commit}
+              />
+            ))}
+          </span>
+        </span>
+      )}
     </article>
   );
 };
