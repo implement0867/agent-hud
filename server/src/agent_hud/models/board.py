@@ -23,10 +23,10 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.base import Model
-from agent_hud.text import places, squeeze, text_of
+from agent_hud.text import quote_offsets, strip_whitespace, visible_text
 
 
-def one_line(error: ValidationError) -> str:
+def join_error_messages(error: ValidationError) -> str:
     """The messages of a validation error on one line, without pydantic's prefix and footer."""
     return ", ".join(str(detail["msg"]).removeprefix("Value error, ") for detail in error.errors())
 
@@ -42,7 +42,7 @@ class Card(Model):
     @field_validator("md")
     @classmethod
     def _readable(cls, md: str) -> str:
-        text_of(md)
+        visible_text(md)
         return md
 
 
@@ -70,8 +70,8 @@ class Anchor(Model):
         """
         if not self.quote:
             return self
-        was = places(before, self.quote)
-        found = places(after, self.quote)
+        was = quote_offsets(before, self.quote)
+        found = quote_offsets(after, self.quote)
         if not found:
             return None
         at = was[min(self.occurrence, len(was) - 1)] if was else 0
@@ -137,7 +137,7 @@ class Board(Model):
                 try:
                     card = Card(md=md, author=action.author)
                 except ValidationError as error:
-                    raise ValueError(f"card '{card_id}': {one_line(error)}") from error
+                    raise ValueError(f"card '{card_id}': {join_error_messages(error)}") from error
                 return self._revise(card_id, card)
             case Restore(id=card_id):
                 if card_id in self.cards:
@@ -162,7 +162,7 @@ class Board(Model):
                     kept.occurrence
                     if kept is not None
                     and occurrence is None
-                    and (kept.card, squeeze(kept.quote)) == (card_id, squeeze(quote))
+                    and (kept.card, strip_whitespace(kept.quote)) == (card_id, strip_whitespace(quote))
                     else self._occurrence(card_id, quote, occurrence)
                 )
                 self._check_card(dst)
@@ -222,7 +222,7 @@ class Board(Model):
         self._check_card(card_id)
         if not quote:
             return 0
-        count = len(places(self.cards[card_id].md, quote))
+        count = len(quote_offsets(self.cards[card_id].md, quote))
         match count, occurrence:
             case 0, _:
                 raise ValueError(f"card '{card_id}' does not show the words '{quote}': quote its text without markdown")
@@ -246,7 +246,7 @@ class Board(Model):
                 thread_id
                 for thread_id, thread in self.threads.items()
                 if thread.card == card_id
-                and squeeze(thread.quote) == squeeze(quote)
+                and strip_whitespace(thread.quote) == strip_whitespace(quote)
                 and occurrence in (None, thread.occurrence)
             ),
             None,

@@ -26,12 +26,12 @@ from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
-from agent_hud.boards import Huds
-from agent_hud.frames import head_of, turn_of
+from agent_hud.boards import BoardRegistry
+from agent_hud.frames import join_frames, parse_frame_head
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
-from agent_hud.server import build
+from agent_hud.server import build_mcp_server
 from agent_hud.settings import get_settings
 from agent_hud.store import Store
 from agent_hud.web import create_app, send_turns
@@ -88,7 +88,7 @@ async def listeners(address: tuple[str, int], hud: Hud) -> AsyncIterator[list[Cl
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def agent(hud: Hud) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same hud as the app. MCP over HTTP is slower per call."""
-    async with Client(build(Huds(None, shared=hud))) as client:
+    async with Client(build_mcp_server(BoardRegistry(None, default_hud=hud))) as client:
         yield client
 
 
@@ -240,8 +240,8 @@ async def test_the_turns_command_prints_each_turn_as_a_line(address: tuple[str, 
             assert isinstance(await user.act(say("hello")), Accepted)
             async with asyncio.timeout(5):
                 head = await turns.stdout.readline()
-                lines = [await turns.stdout.readline() for _ in range(head_of(head.decode()).actions)]
-        assert turn_of(["".join([head.decode(), *(line.decode() for line in lines)]).rstrip("\n")]).actions == (
+                lines = [await turns.stdout.readline() for _ in range(parse_frame_head(head.decode()).actions)]
+        assert join_frames(["".join([head.decode(), *(line.decode() for line in lines)]).rstrip("\n")]).actions == (
             say("hello"),
         )
     finally:
@@ -417,11 +417,11 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
         await user.send()
         frames: list[str] = []
         async with asyncio.timeout(10):
-            while not frames or (head := head_of(frames[-1])).of is None or head.frame != head.of:
+            while not frames or (head := parse_frame_head(frames[-1])).of is None or head.frame != head.of:
                 frames.append(str(await agent.monitor.recv()))
     assert len(frames) > 1
     assert all(len(frame) <= 300 for frame in frames)
-    turn = turn_of(frames)
+    turn = join_frames(frames)
     assert list(turn.actions) == comments
 
 
@@ -448,6 +448,6 @@ async def test_the_sender_leaves_the_gap_between_the_frames_of_a_turn_and_none_b
 
     recorder = Recorder()
     await send_turns(cast(WebSocket, recorder), turns(), 200, 0.2)
-    assert [head_of(text).of for _, text in recorder.sent] == [3, 3, 3, None]
+    assert [parse_frame_head(text).of for _, text in recorder.sent] == [3, 3, 3, None]
     gaps = [later - earlier for (earlier, _), (later, _) in itertools.pairwise(recorder.sent)]
     assert all(gap >= 0.19 for gap in gaps[:2]) and gaps[2] < 0.1, gaps

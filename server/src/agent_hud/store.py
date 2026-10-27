@@ -1,7 +1,5 @@
 import logging
 import sqlite3
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -19,7 +17,8 @@ class Store:
 
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(path, isolation_level=None, timeout=0.5)
+        # Each "with self._db:" block is one transaction, committed at its end or rolled back on an error.
+        self._db = sqlite3.connect(path, isolation_level="EXCLUSIVE", timeout=0.5)
         try:
             self._db.execute("PRAGMA locking_mode = EXCLUSIVE")
             self._db.execute("BEGIN EXCLUSIVE")
@@ -29,13 +28,13 @@ class Store:
                 f"another agent-hud holds {path}: the board lives in one process, so run one worker, "
                 "or give this one its own AGENT_HUD_STATE_DIR"
             ) from error
-        self._db.execute("CREATE TABLE IF NOT EXISTS checkpoint (seq INTEGER NOT NULL, board TEXT NOT NULL)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS actions (seq INTEGER PRIMARY KEY, action TEXT NOT NULL)")
-        self._db.execute("CREATE TABLE IF NOT EXISTS agent (seq INTEGER NOT NULL)")
-        if self._db.execute("SELECT count(*) FROM checkpoint").fetchone() == (0,):
-            self._db.execute("INSERT INTO checkpoint (seq, board) VALUES (0, ?)", (Board().model_dump_json(),))
-            self._db.execute("INSERT INTO agent (seq) VALUES (0)")
-        self._db.execute("COMMIT")
+        with self._db:
+            self._db.execute("CREATE TABLE IF NOT EXISTS checkpoint (seq INTEGER NOT NULL, board TEXT NOT NULL)")
+            self._db.execute("CREATE TABLE IF NOT EXISTS actions (seq INTEGER PRIMARY KEY, action TEXT NOT NULL)")
+            self._db.execute("CREATE TABLE IF NOT EXISTS agent (seq INTEGER NOT NULL)")
+            if self._db.execute("SELECT count(*) FROM checkpoint").fetchone() == (0,):
+                self._db.execute("INSERT INTO checkpoint (seq, board) VALUES (0, ?)", (Board().model_dump_json(),))
+                self._db.execute("INSERT INTO agent (seq) VALUES (0)")
 
     def load(self) -> tuple[int, Board, list[Action], int]:
         """The checkpoint's sequence number and board, the actions from there on, and the agent's sequence number."""
@@ -50,12 +49,13 @@ class Store:
                 "the board in the state file is of an earlier version: starting empty"
             )
             self.compact(0, Board(), 0)
-            self._db.execute("DELETE FROM actions")
+            with self._db:
+                self._db.execute("DELETE FROM actions")
             return 0, Board(), [], 0
 
     def append(self, seq: int, actions: list[Action]) -> None:
         """Keep the actions, the first at the sequence number."""
-        with self._write():
+        with self._db:
             self._db.executemany(
                 "INSERT INTO actions (seq, action) VALUES (?, ?)",
                 [(seq + n, action.model_dump_json()) for n, action in enumerate(actions)],
@@ -63,26 +63,15 @@ class Store:
 
     def compact(self, seq: int, board: Board, read: int) -> None:
         """Make the board, which the actions before the sequence number made, the checkpoint; drop those actions; keep the agent's sequence number."""
-        with self._write():
+        with self._db:
             self._db.execute("UPDATE checkpoint SET seq = ?, board = ?", (seq, board.model_dump_json()))
             self._db.execute("DELETE FROM actions WHERE seq < ?", (seq,))
             self._db.execute("UPDATE agent SET seq = ?", (read,))
 
     def keep_read(self, read: int) -> None:
         """Keep the sequence number up to which an agent has had the actions."""
-        with self._write():
+        with self._db:
             self._db.execute("UPDATE agent SET seq = ?", (read,))
 
     def close(self) -> None:
         self._db.close()
-
-    @contextmanager
-    def _write(self) -> Generator[None]:
-        """One transaction: all of the writes, or none."""
-        self._db.execute("BEGIN")
-        try:
-            yield
-        except BaseException:
-            self._db.execute("ROLLBACK")
-            raise
-        self._db.execute("COMMIT")

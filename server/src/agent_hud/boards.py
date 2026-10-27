@@ -1,86 +1,98 @@
 import re
 from hashlib import sha1
 from pathlib import Path
+from typing import Annotated, ClassVar, NewType
 
-from pydantic import Field
+from pydantic import AfterValidator, Field
 
 from agent_hud.hud import Hud
 from agent_hud.models.base import Model
 from agent_hud.models.events import AgentState
 
-type TBoardId = str
+BoardId = NewType("BoardId", str)
+"""The name of one board: 1 to 64 letters, digits, `_` or `-`. It is also the stem of the board's state file."""
 
 
-def board_id(key: str) -> TBoardId:
-    """
-    The id of the board of a key. A plain id, of letters, digits, _ and -, is its own. Any other key, such as the
-    directory of the agent's project, gives its last name and a short hash of the whole, so that two directories of
-    one name have two boards, and the id names the project.
-    """
-    if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", key):
-        return key
-    last = next((part for part in reversed(re.split(r"[\\/]+", key)) if part), "")
-    name = re.sub(r"[^A-Za-z0-9_-]+", "-", last).strip("-")[:32] or "board"
-    return f"{name}-{sha1(key.encode()).hexdigest()[:6]}"
+def is_board_id(text: str) -> bool:
+    return re.fullmatch(r"[A-Za-z0-9_-]{1,64}", text) is not None
 
 
-class BoardInfo(Model):
-    """A board, for the page's list of boards."""
+def parse_board_id(text: str) -> BoardId:
+    """Return text as a BoardId. Raise ValueError if it is not 1 to 64 letters, digits, `_` or `-`."""
+    if not is_board_id(text):
+        raise ValueError(f"{text!r} is not a board id: use 1 to 64 letters, digits, _ or -")
+    return BoardId(text)
 
-    id: TBoardId
+
+def board_id_for_project(project: str) -> BoardId:
+    """Return a valid project key as is, and for a path, its last part plus a 6-digit hash of the full path."""
+    if is_board_id(project):
+        return BoardId(project)
+    last_part = next((part for part in reversed(re.split(r"[\\/]+", project)) if part), "")
+    name = re.sub(r"[^A-Za-z0-9_-]+", "-", last_part).strip("-")[:32] or "board"
+    return parse_board_id(f"{name}-{sha1(project.encode()).hexdigest()[:6]}")
+
+
+class BoardSummary(Model):
+    """One row of the page's list of boards."""
+
+    id: Annotated[BoardId, AfterValidator(parse_board_id)]
     cards: int = Field(description="The number of cards on the board")
     agent: AgentState
 
 
-class Huds:
+class BoardRegistry:
     """
-    The boards, one hud each, by the key that the agent sends with its requests: the directory of its project, or the
-    shared board without one. With a directory, each board keeps its state in its own file there, named by its id, and
-    every board with a file opens at the start, so that one process holds the directory and the page can open each.
+    Maps each board id to the open Hud of that board.
+    With a directory, each board keeps its state in `<directory>/<board id>.db`, and every such file opens at the start.
     """
 
-    shared: TBoardId = "shared"
+    default_board_id: ClassVar[BoardId] = BoardId("shared")
 
-    def __init__(self, directory: Path | None, shared: Hud | None = None) -> None:
+    def __init__(self, directory: Path | None, default_hud: Hud | None = None) -> None:
         self._directory = directory
-        self._huds: dict[TBoardId, Hud] = {}
-        if shared is not None:
-            self._huds[self.shared] = shared
+        self._huds_by_board_id: dict[BoardId, Hud] = {}
+        if default_hud is not None:
+            self._huds_by_board_id[self.default_board_id] = default_hud
         if directory is not None:
-            for file in sorted(directory.glob("*.db")):
-                if file.stem != self.shared or shared is None:
-                    self._huds[file.stem] = Hud(file)
-        if self.shared not in self._huds:
-            self._huds[self.shared] = self._open(self.shared)
+            for state_file in sorted(directory.glob("*.db")):
+                board_id = state_file.stem
+                if is_board_id(board_id) and board_id not in self._huds_by_board_id:
+                    self._huds_by_board_id[BoardId(board_id)] = Hud(state_file)
+        if self.default_board_id not in self._huds_by_board_id:
+            self._huds_by_board_id[self.default_board_id] = self._open(self.default_board_id)
 
-    def _open(self, board: TBoardId) -> Hud:
-        return Hud(None if self._directory is None else self._directory / f"{board}.db")
+    def _open(self, board_id: BoardId) -> Hud:
+        return Hud(None if self._directory is None else self._directory / f"{board_id}.db")
 
-    def of(self, key: str | None) -> Hud:
-        """The hud of the board of the key, opened if it is new; the shared board without a key."""
-        board = board_id(key) if key else self.shared
-        if board not in self._huds:
-            self._huds[board] = self._open(board)
-        return self._huds[board]
+    def board_id_for(self, project: str | None) -> BoardId:
+        """The board id of the project, or the default board id without a project."""
+        return board_id_for_project(project) if project else self.default_board_id
 
-    def id_of(self, key: str | None) -> TBoardId:
-        return board_id(key) if key else self.shared
+    def hud_for(self, project: str | None) -> Hud:
+        """The Hud of the project's board, opened if it is new."""
+        board_id = self.board_id_for(project)
+        if board_id not in self._huds_by_board_id:
+            self._huds_by_board_id[board_id] = self._open(board_id)
+        return self._huds_by_board_id[board_id]
 
-    def get(self, board: TBoardId) -> Hud | None:
-        """The hud of the board with the id, if there is one."""
-        return self._huds.get(board)
+    def find(self, board_id: str) -> Hud | None:
+        """The Hud of an open board, or None."""
+        return self._huds_by_board_id.get(BoardId(board_id)) if is_board_id(board_id) else None
 
-    def boards(self) -> list[BoardInfo]:
-        """Each board by id, with its card count and the state of its agent, the shared board first."""
+    def summaries(self) -> list[BoardSummary]:
+        """A summary of each open board, the default board first."""
         return [
-            BoardInfo(id=board, cards=len(hud.board.cards), agent=hud.snapshot().agent)
-            for board, hud in sorted(self._huds.items(), key=lambda item: (item[0] != self.shared, item[0]))
+            BoardSummary(id=board_id, cards=len(hud.board.cards), agent=hud.snapshot().agent)
+            for board_id, hud in sorted(
+                self._huds_by_board_id.items(), key=lambda item: (item[0] != self.default_board_id, item[0])
+            )
         ]
 
     def compact(self) -> None:
-        for hud in self._huds.values():
+        for hud in self._huds_by_board_id.values():
             hud.compact()
 
     def close(self) -> None:
-        for hud in self._huds.values():
+        for hud in self._huds_by_board_id.values():
             hud.close()

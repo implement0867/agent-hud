@@ -18,14 +18,14 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardInfo, Huds, TBoardId
+from agent_hud.boards import BoardRegistry, BoardSummary
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
-from agent_hud.frames import frames
+from agent_hud.frames import split_into_frames
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.base import Model
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
-from agent_hud.server import build
+from agent_hud.server import build_mcp_server
 from agent_hud.settings import get_settings
 
 
@@ -41,7 +41,7 @@ async def send_turns(websocket: WebSocket, turns: AsyncIterator[Turn], chars: in
     the monitor shows each frame as an event of its own.
     """
     async for turn in turns:
-        for n, frame in enumerate(frames(turn, chars)):
+        for n, frame in enumerate(split_into_frames(turn, chars)):
             if n:
                 await asyncio.sleep(gap)
             await websocket.send_text(frame)
@@ -139,10 +139,10 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
     uvicorn worker would.
     """
     settings = get_settings()
-    huds = Huds(settings.board_files, shared=hud)
+    boards = BoardRegistry(settings.board_files, default_hud=hud)
     token = settings.token or token_urlsafe(32)
     keep_token(token, settings.state_dir)
-    mcp_app = build(huds, token).http_app(path="/")
+    mcp_app = build_mcp_server(boards, token).http_app(path="/")
     activity = Activity()
 
     @asynccontextmanager
@@ -159,15 +159,15 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
         finally:
             if watch is not None:
                 watch.cancel()
-            huds.compact()
-            huds.close()
+            boards.compact()
+            boards.close()
 
     def require_board(websocket: WebSocket) -> Hud:
         """The hud of the board that the socket's board query parameter names; the shared board without one."""
-        board: TBoardId = websocket.query_params.get("board", Huds.shared)
-        hud = huds.get(board)
+        board_id = websocket.query_params.get("board", BoardRegistry.default_board_id)
+        hud = boards.find(board_id)
         if hud is None:
-            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
+            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board_id}'")
         return hud
 
     app = FastAPI(lifespan=lifespan)
@@ -182,11 +182,11 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
         return {"app": "agent-hud", "version": version("agent-hud"), "build": settings.build}
 
     @app.get("/boards")
-    def boards(request: HttpRequest) -> list[BoardInfo]:
+    def board_summaries(request: HttpRequest) -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
         if request.query_params.get("token") != token:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "the token is missing or wrong")
-        return huds.boards()
+        return boards.summaries()
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
     async def page(websocket: WebSocket, hud: Annotated[Hud, Depends(require_board)]) -> None:

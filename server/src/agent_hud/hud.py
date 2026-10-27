@@ -28,23 +28,23 @@ from agent_hud.models.events import AgentState, Edit, EventKind, Heard, Snapshot
 from agent_hud.store import Store
 
 
-def hear(board: Board, action: Action) -> Heard:
-    """The action as the agent hears it on the board before it: a put on a card of the board as a diff."""
+def to_agent_message(board: Board, action: Action) -> Heard:
+    """The action as the agent receives it, given the board before it: a put that replaces a card becomes a diff."""
     match action.body:
         case Put(id=card_id, md=md) if card_id in board.cards:
-            lines = unified_diff(board.cards[card_id].md.splitlines(), md.splitlines(), lineterm="", n=1)
-            body = Edit(kind="edit", id=card_id, diff="\n".join(list(lines)[2:]))
+            diff_lines = unified_diff(board.cards[card_id].md.splitlines(), md.splitlines(), lineterm="", n=1)
+            body = Edit(kind="edit", id=card_id, diff="\n".join(list(diff_lines)[2:]))
         case _:
             body = action.body
     return Heard(id=action.id, author=action.author, body=body)
 
 
-def net(actions: list[Action]) -> list[Action]:
-    """The actions as a turn carries them: without the moves, resizes and places, which read has."""
+def without_layout_actions(actions: list[Action]) -> list[Action]:
+    """The actions without moves, resizes, places and sends: a turn does not carry them, and read returns the layout."""
     return [action for action in actions if not isinstance(action.body, Move | Resize | Place | Send)]
 
 
-class Since(NamedTuple):
+class ChangesSince(NamedTuple):
     """What came after an action: the cards that changed, or None when every card counts, and the ids of the actions."""
 
     cards: set[TCardId] | None
@@ -163,7 +163,7 @@ class Hud:
         finally:
             self._positions.remove(position)
 
-    def changed_since(self, action_id: TActionId) -> Since | None:
+    def changed_since(self, action_id: TActionId) -> ChangesSince | None:
         """
         What came after the action with the id: the cards that the actions after it touched, put, removed, restored,
         moved or resized, or with a comment or an arrow on it, or every card when a clear came after it;
@@ -198,14 +198,14 @@ class Hud:
                     changed.update((card_id, dst))
                 case _:
                     pass
-        return Since(changed, {action.id for action in after})
+        return ChangesSince(changed, {action.id for action in after})
 
     def _turn(self, start: int, end: int) -> tuple[Heard, ...]:
         """
         The user's actions from the turn start to the end, as the agent hears them.
         """
         actions = [action for action in self.log.actions[start:end] if action.author is Author.user]
-        return tuple(self._heard[action.id] for action in net(actions))
+        return tuple(self._heard[action.id] for action in without_layout_actions(actions))
 
     def _mark_read(self, end: int) -> None:
         if end <= self._agent_read:
@@ -233,7 +233,7 @@ class Hud:
             except ValueError as error:
                 raise Misfit(n, action.body.kind, str(error)) from error
         self._heard |= {
-            action.id: hear(board, action)
+            action.id: to_agent_message(board, action)
             for action, board in zip(actions, boards[:-1], strict=True)
             if action.author is Author.user
         }
