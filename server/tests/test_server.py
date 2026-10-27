@@ -10,6 +10,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 from hypothesis import given
 from mcp.client.subscriptions import ServerEvent, Subscription, listen
+from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.subscriptions import ResourcesListChanged, ResourceUpdated
 from mcp.types import TextResourceContents, Tool
 
@@ -17,12 +18,12 @@ from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, TAgentBody
 from agent_hud.models.board import Board
 from agent_hud.server import build_mcp_server
+from agent_hud.settings import Settings
 from tests.factories import (
     BOARD,
     as_json,
     comment,
     link,
-    memory_hud,
     put,
     read_board,
     remove,
@@ -41,7 +42,8 @@ async def listed_write(client: Client[Any]) -> Tool:
 @pytest.fixture
 async def client(hud: Hud, tmp_path: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the test's hud as their one board, with new boards in the test's directory."""
-    async with Client(build_mcp_server({BOARD: hud}, tmp_path)) as client:
+    settings = Settings(state_dir=tmp_path, static_dir=tmp_path)
+    async with Client(build_mcp_server(settings, {BOARD: hud}, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -201,7 +203,7 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TAge
     """Assemble: a client connected to a new server.
     Act: check an action of each kind against the listed schema of write.
     Assert: the schema takes it, so that a client that checks the schema sends each action that the server takes."""
-    async with Client(build_mcp_server({BOARD: memory_hud()}, Path("unused"))) as client:
+    async with Client(build_mcp_server(Settings(state_dir=Path("unused")), {}, InMemorySubscriptionBus())) as client:
         jsonschema.validate({"name": BOARD, "actions": as_json(body)}, (await listed_write(client)).input_schema)
 
 

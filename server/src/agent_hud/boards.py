@@ -24,8 +24,21 @@ class BoardSummary(Model):
     agent: AgentState
 
 
-def open_boards(directory: Path) -> dict[TBoardName, Hud]:
-    return {BoardNameAdapter.validate_python(path.stem): Hud(path) for path in sorted(directory.glob("*.db"))}
+def board_names(directory: Path) -> list[TBoardName]:
+    """The name of each board: the stem of each state file in the directory. ValidationError when one is not a name."""
+    return sorted(BoardNameAdapter.validate_python(path.stem) for path in directory.glob("*.db"))
+
+
+def open_hud(huds: dict[TBoardName, Hud], directory: Path, name: TBoardName) -> Hud:
+    """The hud of the board, opened into huds on first use. ValueError when the directory has no state file for it."""
+    if name not in huds:
+        path = directory / f"{name}.db"
+        if not path.exists():
+            raise ValueError(
+                f"no board '{name}': the boards are {', '.join(board_names(directory)) or 'none'}; create_board makes one"
+            )
+        huds[name] = Hud(path)
+    return huds[name]
 
 
 def summarize(name: TBoardName, hud: Hud) -> BoardSummary:

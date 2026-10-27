@@ -639,14 +639,14 @@ async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
     hud = Hud(state_file)
     hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. parse"))])
     hud.close()
-    async with serve(None, static_dir, tmp_path) as (host, port):
+    async with serve({}, static_dir, tmp_path) as (host, port):
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
         await page.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
         await expect(card(page, "plan")).to_be_visible()
         await page.get_by_label("Message the agent").fill("half a thought")
     await expect(page.get_by_role("alert")).to_contain_text("not reachable")
     await expect(card(page, "plan")).to_be_visible()
-    async with serve(None, static_dir, tmp_path, port=port):
+    async with serve({}, static_dir, tmp_path, port=port):
         await expect(page.get_by_role("alert")).to_have_count(0, timeout=15000)
         await expect(page.get_by_label("Message the agent")).to_have_value("half a thought")
         await page.get_by_label("Message the agent").press("Enter")

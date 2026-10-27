@@ -2,6 +2,7 @@ import os
 from functools import lru_cache
 from importlib.resources import as_file, files
 from pathlib import Path
+from secrets import token_urlsafe
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,7 +35,11 @@ class Settings(BaseSettings):
     )
     token: str | None = Field(
         default=None,
-        description="The token that /mcp/ needs as a bearer token and the sockets as a query parameter; none makes one for the sockets only",
+        description="The token that /mcp/ needs as a bearer token, and the sockets and /boards as a query parameter; none leaves /mcp/ open",
+    )
+    socket_token: str = Field(
+        default_factory=lambda data: data["token"] or token_urlsafe(32),
+        description="The token that the sockets and /boards need as a query parameter: the token, or a new one",
     )
     idle_seconds: float = Field(
         default=3600,

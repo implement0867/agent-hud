@@ -63,7 +63,7 @@ start() {
   [ -d .venv ] || echo "agent-hud: starting, the first run installs its dependencies" >&2
   export AGENT_HUD_STATE_DIR="$state_dir"
   export AGENT_HUD_BUILD="$build"
-  nohup uv run --no-dev --frozen --quiet uvicorn agent_hud.web:create_app --factory --port "$port" >>"$log" 2>&1 &
+  nohup uv run --no-dev --frozen --quiet uvicorn agent_hud.web:app_factory --factory --port "$port" >>"$log" 2>&1 &
   pid=$!
   echo "$pid" >"$pid_file"
   n=0

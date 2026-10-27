@@ -1,6 +1,4 @@
-import asyncio
-from collections.abc import AsyncGenerator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from shlex import quote
@@ -15,7 +13,7 @@ from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, Res
 from mcp.types import SubscriptionsListenRequestParams, ToolAnnotations
 from pydantic import AfterValidator, Field
 
-from agent_hud.boards import BoardSummary, TBoardName, summarize
+from agent_hud.boards import BoardSummary, TBoardName, board_names, open_hud, summarize
 from agent_hud.hud import ChangesSince, Hud
 from agent_hud.models.actions import (
     Action,
@@ -31,6 +29,7 @@ from agent_hud.models.actions import (
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board, Said
 from agent_hud.schema import compact_actions_schema
+from agent_hud.settings import Settings
 
 
 def check_each_card_put_once(bodies: list[TAgentBody]) -> list[TAgentBody]:
@@ -138,86 +137,57 @@ def board_uri(name: TBoardName) -> str:
     return f"board://{name}"
 
 
-def build_mcp_server(boards: dict[TBoardName, Hud], directory: Path, token: str | None = None) -> FastMCP:
+def build_mcp_server(settings: Settings, huds: dict[TBoardName, Hud], bus: InMemorySubscriptionBus) -> FastMCP:
     """
-    The MCP server whose tools create, list and delete the boards and act on the board that each call names.
-    Each board is the resource board://<name>: a subscriber gets an update at each change of the board, and a listener
-    on the list gets a change at each board created or deleted. A new board keeps its state in <directory>/<name>.db.
-    With a token, the URL that listen returns carries it.
+    The MCP server whose tools create, list and delete the boards in the settings' boards dir, and act on the board
+    that each call names; huds holds each board that is open. Each board is the resource board://<name>, and bus
+    carries an update of it at each write, and a change of the list at each create and delete.
     """
-    bus = InMemorySubscriptionBus()
-    watchers: dict[TBoardName, asyncio.Task[None]] = {}
+    mcp = FastMCP("agent-hud")
+    # FastMCP serves no subscriptions/listen of its own, and has no public way to add a request handler.
+    mcp._mcp_server.add_request_handler(  # pyright: ignore[reportPrivateUsage]
+        "subscriptions/listen", SubscriptionsListenRequestParams, ListenHandler(bus)
+    )
 
-    async def publish_updates(name: TBoardName, hud: Hud) -> None:
-        """Publish an update of the board's resource at each change of the board or of its agents."""
-        async for _ in hud.snapshots():
-            await bus.publish(ResourceUpdated(uri=board_uri(name)))
-
-    def add_resource(name: TBoardName, hud: Hud) -> None:
-        """Serve the board as its resource."""
-
+    def add_resource(name: TBoardName) -> None:
         def board_json() -> str:
-            return hud.board.model_dump_json()
+            return open_hud(huds, settings.boards_dir, name).board.model_dump_json()
 
         mcp.add_resource(
             Resource.from_function(
                 board_json,
                 uri=board_uri(name),
                 name=name,
-                description=f"The board {name}: its cards, threads, arrows, chat and history, as JSON",
+                description=f"The board {name} as JSON",
                 mime_type="application/json",
             )
         )
 
-    @asynccontextmanager
-    async def lifespan(server: FastMCP) -> AsyncGenerator[None]:
-        """Publish the changes of each board while the server runs."""
-        for name, hud in boards.items():
-            watchers[name] = asyncio.create_task(publish_updates(name, hud))
-        try:
-            yield
-        finally:
-            for watcher in watchers.values():
-                watcher.cancel()
-
-    mcp = FastMCP("agent-hud", lifespan=lifespan)
-    # FastMCP serves no subscriptions/listen of its own, and has no public way to add a request handler.
-    mcp._mcp_server.add_request_handler(  # pyright: ignore[reportPrivateUsage]
-        "subscriptions/listen", SubscriptionsListenRequestParams, ListenHandler(bus)
-    )
-
-    def board_named(name: TBoardName) -> Hud:
-        """The hud of the board. ValueError when no board has the name."""
-        if name not in boards:
-            raise ValueError(f"no board '{name}': the boards are {', '.join(boards) or 'none'}; create_board makes one")
-        return boards[name]
-
     async def create_board(name: TBoardName) -> BoardSummary:
         """Create an empty board with the name. ValueError when a board has the name."""
-        if name in boards:
+        path = settings.boards_dir / f"{name}.db"
+        if path.exists():
             raise ValueError(f"a board '{name}' exists")
-        boards[name] = Hud(directory / f"{name}.db")
-        add_resource(name, boards[name])
-        watchers[name] = asyncio.create_task(publish_updates(name, boards[name]))
+        huds[name] = Hud(path)
+        add_resource(name)
         await bus.publish(ResourcesListChanged())
-        return summarize(name, boards[name])
+        return summarize(name, huds[name])
 
     async def list_boards() -> list[BoardSummary]:
         """Each board with its number of cards and whether an agent follows it."""
-        return [summarize(name, hud) for name, hud in sorted(boards.items())]
+        return [summarize(name, open_hud(huds, settings.boards_dir, name)) for name in board_names(settings.boards_dir)]
 
     async def delete_board(name: TBoardName) -> None:
         """
         Delete the board and its state file, for good.
         ValueError when no board has the name, or when a monitor is open on it.
         """
-        hud = board_named(name)
+        hud = open_hud(huds, settings.boards_dir, name)
         if hud.monitors:
             raise ValueError(f"the board '{name}' has {hud.monitors} open monitors: stop them first")
         hud.close()
-        (directory / f"{name}.db").unlink(missing_ok=True)
-        del boards[name]
-        watchers.pop(name).cancel()
+        del huds[name]
+        (settings.boards_dir / f"{name}.db").unlink()
         mcp.local_provider.remove_resource(board_uri(name))
         await bus.publish(ResourcesListChanged())
 
@@ -228,13 +198,14 @@ def build_mcp_server(boards: dict[TBoardName, Hud], directory: Path, token: str 
         A thread on words that a put keeps stays with them; the rest goes to the card's history.
         Returns the cards added and replaced, the threads that went to the history, and the arrows dropped.
         """
-        hud = board_named(name)
+        hud = open_hud(huds, settings.boards_dir, name)
         before = hud.board
         now = datetime.now(UTC)
         try:
             hud.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in actions])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
+        await bus.publish(ResourceUpdated(uri=board_uri(name)))
         return summarize_write(before, hud.board, actions)
 
     async def read(
@@ -256,7 +227,7 @@ def build_mcp_server(boards: dict[TBoardName, Hud], directory: Path, token: str 
         The board: the cards, the threads of comments on their words, the arrows and the chat.
         Read it once, then follow the turns; read it again when unsure, with cards or since to read less.
         """
-        hud = board_named(name)
+        hud = open_hud(huds, settings.boards_dir, name)
         board = hud.board if history else hud.board.model_copy(update={"history": {}})
         chat: Sequence[Said] = board.messages
         match None if since is None else hud.changed_since(since):
@@ -279,9 +250,9 @@ def build_mcp_server(boards: dict[TBoardName, Hud], directory: Path, token: str 
         An edit of a card on the board is a diff of its markdown.
         Also the monitors already open on the board: above 0, another session follows this board, so tell the user before you open one too.
         """
-        hud = board_named(name)
-        url = get_http_request().url.replace(scheme="ws", path="/agent").include_query_params(board=name)
-        url = str(url if token is None else url.include_query_params(token=token))
+        hud = open_hud(huds, settings.boards_dir, name)
+        request_url = get_http_request().url.replace(scheme="ws", path="/agent")
+        url = str(request_url.include_query_params(board=name, token=settings.socket_token))
         return Listening(url=url, command=turns_command(url), board=name, monitors=hud.monitors)
 
     tool = FunctionTool.from_function(write)
@@ -294,6 +265,6 @@ def build_mcp_server(boards: dict[TBoardName, Hud], directory: Path, token: str 
     mcp.tool(delete_board, annotations=ToolAnnotations(destructive_hint=True))
     mcp.tool(read, annotations=ToolAnnotations(read_only_hint=True))
     mcp.tool(listen, annotations=ToolAnnotations(read_only_hint=True))
-    for name, hud in boards.items():
-        add_resource(name, hud)
+    for name in board_names(settings.boards_dir):
+        add_resource(name)
     return mcp
