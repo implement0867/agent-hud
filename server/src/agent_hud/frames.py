@@ -49,16 +49,11 @@ def split_into_frames(turn: Turn, chars: int) -> list[str]:
     ]
 
 
-def parse_frame_head(frame: str) -> FrameHead:
-    """The head of the frame."""
-    return FrameHead.model_validate_json(frame.partition("\n")[0])
-
-
 def join_frames(frames: Sequence[str]) -> Turn:
     """
     The turn from its frames, in order. ValueError when the frames are not all the frames of one turn.
     """
-    heads = [parse_frame_head(frame) for frame in frames]
+    heads = [FrameHead.model_validate_json(frame.partition("\n")[0]) for frame in frames]
     if len({head.turn for head in heads}) != 1 or [head.frame for head in heads] != (
         [None] if len(heads) == 1 else list(range(1, len(heads) + 1))
     ):

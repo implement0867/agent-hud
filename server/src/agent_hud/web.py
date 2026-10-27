@@ -10,15 +10,14 @@ from secrets import token_urlsafe
 from time import monotonic
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketException, status
-from fastapi import Request as HttpRequest
+from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketException, status
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardRegistry, BoardSummary
+from agent_hud.boards import BoardSummary, TBoardName, open_boards, summarize
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
 from agent_hud.frames import split_into_frames
 from agent_hud.hud import Hud
@@ -128,21 +127,21 @@ def keep_token(token: str, state_dir: Path) -> None:
     path.write_text(token)
 
 
-def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) -> FastAPI:
+def create_app(boards: dict[TBoardName, Hud] | None = None, stop: Callable[[], None] = stop_process) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
-    the boards in the settings' directory, with the hud as the shared board when one is given. The agent's requests
-    name their board in the X-Agent-Hud-Board header, and the sockets in the board query parameter.
+    the boards by name, or on those in the settings' boards dir when none are given; a new board goes in that dir.
+    The agent's tools name their board in an argument, and the sockets in the board query parameter.
     The sockets and /boards need the token as a query parameter; /mcp/ needs it as a bearer token when the settings give one.
     After the settings' idle seconds with no page or monitor connected and no request, the app calls stop, which stops
     the process unless the caller gives another. RuntimeError when another process holds a board's file, as a second
     uvicorn worker would.
     """
     settings = get_settings()
-    boards = BoardRegistry(settings.board_files, default_hud=hud)
+    boards = open_boards(settings.boards_dir) if boards is None else boards
     token = settings.token or token_urlsafe(32)
     keep_token(token, settings.state_dir)
-    mcp_app = build_mcp_server(boards, token).http_app(path="/")
+    mcp_app = build_mcp_server(boards, settings.boards_dir, token).http_app(path="/")
     activity = Activity()
 
     @asynccontextmanager
@@ -159,16 +158,15 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
         finally:
             if watch is not None:
                 watch.cancel()
-            boards.compact()
-            boards.close()
+            for hud in boards.values():
+                hud.compact()
+                hud.close()
 
-    def require_board(websocket: WebSocket) -> Hud:
-        """The hud of the board that the socket's board query parameter names; the shared board without one."""
-        board_id = websocket.query_params.get("board", BoardRegistry.default_board_id)
-        hud = boards.find(board_id)
-        if hud is None:
-            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board_id}'")
-        return hud
+    def require_board(board: Annotated[TBoardName, Query()]) -> Hud:
+        """The hud of the board that the socket's board query parameter names. A policy violation when there is none."""
+        if board not in boards:
+            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
+        return boards[board]
 
     app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
@@ -181,12 +179,10 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
         """The app, its version and the build fingerprint it was started with, for the hook that starts it: any other answer on the port is another program."""
         return {"app": "agent-hud", "version": version("agent-hud"), "build": settings.build}
 
-    @app.get("/boards")
-    def board_summaries(request: HttpRequest) -> list[BoardSummary]:
+    @app.get("/boards", dependencies=[with_token])
+    def board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
-        if request.query_params.get("token") != token:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "the token is missing or wrong")
-        return boards.summaries()
+        return [summarize(name, hud) for name, hud in sorted(boards.items())]
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
     async def page(websocket: WebSocket, hud: Annotated[Hud, Depends(require_board)]) -> None:

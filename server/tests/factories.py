@@ -1,7 +1,9 @@
+from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
 
+from agent_hud.hud import Hud
 from agent_hud.models.actions import (
     ActionKind,
     Clear,
@@ -19,6 +21,14 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.board import Board
+
+# The board that the tests' tools and sockets name.
+BOARD = "test"
+
+
+def memory_hud() -> Hud:
+    """A hud whose state file is in memory, so that it keeps nothing after the test."""
+    return Hud(Path(":memory:"))
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:
@@ -74,10 +84,8 @@ def as_json(*bodies: TBody) -> list[dict[str, Any]]:
     return [body.model_dump(mode="json") for body in bodies]
 
 
-async def read(client: Client[Any], *, history: bool = False) -> Board:
-    return Board.model_validate((await client.call_tool("read", {"history": history})).structured_content)
-
-
 async def read_board(client: Client[Any], *, history: bool = False, **params: Any) -> Board:
     """The board that read returns."""
-    return Board.model_validate((await client.call_tool("read", {"history": history, **params})).structured_content)
+    return Board.model_validate(
+        (await client.call_tool("read", {"name": BOARD, "history": history, **params})).structured_content
+    )

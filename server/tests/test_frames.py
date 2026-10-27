@@ -4,7 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from agent_hud.frames import action_lines, join_frames, parse_frame_head, split_into_frames
+from agent_hud.frames import FrameHead, action_lines, join_frames, split_into_frames
 from agent_hud.models.events import Edit, THeardBody, Turn
 from tests.factories import comment, link, put, say
 from tests.strategies import action_ids, agent_bodies, card_ids
@@ -54,7 +54,12 @@ def test_a_turn_that_fits_is_one_frame_with_a_head_that_names_it_and_counts_its_
     turn = a_turn()
     [frame] = split_into_frames(turn, 3000)
     assert frame.split("\n") == ['{"turn":"end","actions":7}', *action_lines(turn)]
-    assert parse_frame_head(frame).model_dump() == {"turn": "end", "actions": 7, "frame": None, "of": None}
+    assert FrameHead.model_validate_json(frame.partition("\n")[0]).model_dump() == {
+        "turn": "end",
+        "actions": 7,
+        "frame": None,
+        "of": None,
+    }
 
 
 def test_a_turn_that_does_not_fit_comes_in_frames_of_the_size_with_numbered_heads() -> None:

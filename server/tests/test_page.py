@@ -6,8 +6,6 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport
 from playwright.async_api import Browser, Locator, Page, async_playwright, expect
 
 from agent_hud.hud import Hud
@@ -17,6 +15,7 @@ from agent_hud.models.events import Edit
 from agent_hud.settings import find_static_dir
 from tests.conversation import TOKEN, Agent, open_agent, open_page, serve
 from tests.factories import (
+    BOARD,
     as_json,
     comment,
     link,
@@ -59,7 +58,7 @@ async def page(browser: Browser, address: tuple[str, int], agent: Agent) -> Asyn
     """The board page in the browser, live on the agent's board."""
     host, port = address
     page = await browser.new_page(viewport={"width": 1440, "height": 900})
-    await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+    await page.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
     await expect(page.get_by_label("Message the agent")).to_be_visible()
     yield page
     await page.close()
@@ -476,7 +475,7 @@ async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them
 
         host, port = address
         other = await browser.new_page(viewport={"width": 1440, "height": 900})
-        await other.goto(f"http://{host}:{port}/?token={TOKEN}")
+        await other.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
         for card_id in "abcd":
             await expect(card(other, card_id)).to_be_visible()
         assert await boxes(other, "a", "b", "c", "d") == first
@@ -636,22 +635,26 @@ async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
     Act: stop the server; then start it again on the same port.
     Assert: while the server is away the page shows a banner and still the card; once it is back the banner goes,
     the draft is still in the box, and a message reaches the board."""
-    hud = Hud()
+    state_file = tmp_path / "boards" / f"{BOARD}.db"
+    hud = Hud(state_file)
     hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. parse"))])
-    async with serve(hud, static_dir, tmp_path) as (host, port):
+    hud.close()
+    async with serve(None, static_dir, tmp_path) as (host, port):
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
-        await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+        await page.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
         await expect(card(page, "plan")).to_be_visible()
         await page.get_by_label("Message the agent").fill("half a thought")
     await expect(page.get_by_role("alert")).to_contain_text("not reachable")
     await expect(card(page, "plan")).to_be_visible()
-    async with serve(hud, static_dir, tmp_path, port=port):
+    async with serve(None, static_dir, tmp_path, port=port):
         await expect(page.get_by_role("alert")).to_have_count(0, timeout=15000)
         await expect(page.get_by_label("Message the agent")).to_have_value("half a thought")
         await page.get_by_label("Message the agent").press("Enter")
         await expect(page.get_by_label("Chat with the agent")).to_contain_text("half a thought")
-        assert [said.text for said in hud.board.messages] == ["half a thought"]
     await page.close()
+    again = Hud(state_file)
+    assert [said.text for said in again.board.messages] == ["half a thought"]
+    again.close()
 
 
 async def test_the_shortcut_sheet_names_the_keys_for_the_platform(page: Page) -> None:
@@ -674,7 +677,7 @@ async def test_a_narrow_screen_shows_the_toolbar_whole_above_the_chat(
     host, port = address
     await agent.write(put("plan", "1. parse"), say("hello"))
     page = await browser.new_page(viewport={"width": 390, "height": 800})
-    await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+    await page.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
     await expect(card(page, "plan")).to_be_visible()
     send_box = await page.get_by_label("Send to the agent").bounding_box()
     toolbar = await page.get_by_role("navigation", name="Tools").bounding_box()
@@ -934,7 +937,7 @@ async def test_fit_all_takes_a_card_that_the_resize_observer_has_not_measured_ye
         " entries.some((entry) => entry.target.matches('article[data-card]'))"
         " ? setTimeout(() => report(entries, observer), 400) : report(entries, observer)); } }"
     )
-    await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+    await page.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
     await expect(page.get_by_label("Message the agent")).to_be_visible()
     await agent.write(put("a", "1. one"), put("b", "1. two"), move("a", 0, 0), move("b", 2600, 1800))
     await expect(card(page, "b")).to_be_attached()
@@ -965,30 +968,36 @@ async def test_the_user_drags_the_chat_to_a_width_that_the_browser_keeps(page: P
     assert again is not None and round(again["width"]) == round(after["width"])
 
 
-async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Agent, address: tuple[str, int]) -> None:
-    """Assemble: an agent in a project puts a card on the project's board, while the page shows the shared board.
-    Act: the user opens the menu of boards and clicks the project's board.
-    Assert: the menu names the shared board as the page's, and the project's board with one card; the page then shows
-    the project's board with the card, and names it."""
-    host, port = address
-    project = StreamableHttpTransport(
-        f"http://{host}:{port}/mcp/", headers={"X-Agent-Hud-Board": "/home/me/demo"}, auth=TOKEN
-    )
-    async with Client(project) as tools:
-        await tools.call_tool("write", {"actions": as_json(put("plan", "1. a"))})
-        board = str((await tools.call_tool("listen", {})).structured_content["board"])  # type: ignore[index]
-    await agent.write(put("shared-note", "1. b"))
-    await expect(card(page, "shared-note")).to_be_visible()
+async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Agent) -> None:
+    """Assemble: the agent creates a board demo and puts a card on it, and puts another card on the page's board.
+    Act: the user opens the menu of boards and clicks demo.
+    Assert: the menu names the page's board as the page's, and demo with one card; the page then shows demo with its
+    card, and names it."""
+    await agent.tools.call_tool("create_board", {"name": "demo"})
+    await agent.tools.call_tool("write", {"name": "demo", "actions": as_json(put("plan", "1. a"))})
+    await agent.write(put("here", "1. b"))
+    await expect(card(page, "here")).to_be_visible()
     await page.get_by_label("Boards").click()
     menu = page.get_by_role("menu", name="Other boards")
-    await expect(menu.get_by_role("menuitem", name=re.compile("^shared"))).to_have_attribute("aria-current", "page")
-    item = menu.get_by_role("menuitem", name=re.compile(f"^{board} 1 card$"))
+    await expect(menu.get_by_role("menuitem", name=re.compile(f"^{BOARD}"))).to_have_attribute("aria-current", "page")
+    item = menu.get_by_role("menuitem", name=re.compile("^demo 1 card$"))
     await expect(item).to_be_visible()
     await item.click()
     await expect(card(page, "plan")).to_be_visible()
-    await expect(card(page, "shared-note")).to_have_count(0)
-    assert f"board={board}" in page.url
-    await expect(page.get_by_label("Boards")).to_have_text(board)
+    await expect(card(page, "here")).to_have_count(0)
+    assert "board=demo" in page.url
+    await expect(page.get_by_label("Boards")).to_have_text("demo")
+
+
+async def test_the_page_without_a_board_lists_the_boards(page: Page, address: tuple[str, int]) -> None:
+    """Act: open the page with the token and no board.
+    Assert: the page lists the boards, and a click on one opens its page."""
+    host, port = address
+    await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+    boards = page.get_by_role("region", name="Boards")
+    await boards.get_by_role("link", name=re.compile(f"^{BOARD}")).click()
+    assert f"board={BOARD}" in page.url
+    await expect(page.get_by_label("Boards")).to_have_text(BOARD)
 
 
 async def positions_once(agent: Agent, check: Callable[[dict[str, Point]], bool]) -> dict[str, Point]:
@@ -1210,7 +1219,7 @@ async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
     await page.get_by_role("button", name="Boards").click()
     await page.get_by_role("menuitem", name="Clear this board").click()
     dialog = page.get_by_role("dialog", name="Clear this board?")
-    await expect(dialog).to_contain_text("Clear shared?")
+    await expect(dialog).to_contain_text("Clear test?")
     await expect(dialog).to_contain_text(
         "2 cards go to the history with their feedback. 1 arrow and 0 messages go for good."
     )

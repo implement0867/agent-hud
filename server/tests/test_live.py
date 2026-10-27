@@ -23,7 +23,6 @@ from time import monotonic
 import pytest
 from websockets.asyncio.client import connect
 
-from agent_hud.boards import board_id_for_project
 from agent_hud.models.actions import Author
 from agent_hud.models.events import AgentState, Snapshot
 from tests.conversation import User
@@ -34,7 +33,7 @@ pytestmark = pytest.mark.skipif(not os.environ.get("AGENT_HUD_LIVE"), reason="se
 BRIEF = """\
 You are the agent on the agent-hud board. The user is a person at a browser, who reaches you only through the board.
 Use the board skill of the agent-hud plugin.
-1. Call the board's listen tool. Open its url with the Monitor tool's ws source, the description board, and timeout_ms as long as the tool allows.
+1. Call the board's create_board tool with the name live, then its listen tool with the name live. Open its url with the Monitor tool's ws source, the description board, and timeout_ms as long as the tool allows.
 2. Write one card, plan, with a list of two steps, and say one line that asks the user to review it and click Send.
 3. Wait for the user's turn on the monitor. Do not poll, do not sleep, and do not use Bash. When the Monitor expires, open it again at once, in the same way.
 4. When a turn comes, answer each comment of the user with a comment on the same card and quote, and say one line about what you did. Then wait for the next turn in the same way, until the user says that you are done.
@@ -158,7 +157,7 @@ async def test_the_agent_answers_a_turn_sent_after_the_monitors_cap(tmp_path: Pa
         await session.until("cap", 180)
         assert session.cap is not None and session.opened is not None
         await session.until("writes", 180)
-        board = board_id_for_project(str(tmp_path / "project"))
+        board = "live"
         async with open_page(port, token, board) as user:
             deadline = monotonic() + 120
             while "plan" not in user.board.cards or user.snapshot.agent is AgentState.away:

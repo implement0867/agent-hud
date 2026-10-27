@@ -1,22 +1,24 @@
-from collections.abc import Sequence
+import asyncio
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from shlex import quote
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import uuid4
 
 from fastmcp import FastMCP
+from fastmcp.resources import Resource
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.tools import FunctionTool
-from mcp.types import ToolAnnotations
-from pydantic import Field, TypeAdapter, ValidationError
-from pydantic_core import ErrorDetails
+from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, ResourcesListChanged, ResourceUpdated
+from mcp.types import SubscriptionsListenRequestParams, ToolAnnotations
+from pydantic import AfterValidator, Field
 
-from agent_hud.boards import BoardRegistry
+from agent_hud.boards import BoardSummary, TBoardName, summarize
 from agent_hud.hud import ChangesSince, Hud
 from agent_hud.models.actions import (
     Action,
-    ActionKind,
     Author,
     Misfit,
     Put,
@@ -30,14 +32,22 @@ from agent_hud.models.base import Model
 from agent_hud.models.board import Board, Said
 from agent_hud.schema import compact_actions_schema
 
-type TActions = Annotated[list[TAgentBody], Field(min_length=1)]
 
-BodyAdapter = TypeAdapter[TAgentBody](TAgentBody)
+def check_each_card_put_once(bodies: list[TAgentBody]) -> list[TAgentBody]:
+    """The actions as they are. ValueError when one puts a card that an earlier one puts."""
+    puts: dict[TCardId, int] = {}
+    for n, body in enumerate(bodies, start=1):
+        match body:
+            case Put(id=card_id) if card_id in puts:
+                raise ValueError(f"action {n} (put): card '{card_id}' is already put by action {puts[card_id]}")
+            case Put(id=card_id):
+                puts[card_id] = n
+            case _:
+                pass
+    return bodies
 
 
-def agent_action_kinds() -> list[ActionKind]:
-    """The kinds of action the agent writes: each kind but send, which is the page's."""
-    return [kind for kind in ActionKind if kind is not ActionKind.send]
+type TActions = Annotated[list[TAgentBody], Field(min_length=1), AfterValidator(check_each_card_put_once)]
 
 
 class Listening(Model):
@@ -47,18 +57,10 @@ class Listening(Model):
     command: str = Field(
         description="A shell command that prints each turn as its lines, for a monitor that takes a command"
     )
-    board: str = Field(description="The id of this session's board, which the URL names")
+    board: TBoardName = Field(description="The name of the board, which the URL names")
     monitors: int = Field(
         description="The monitors already open on the board: above 0, another session follows it, and both would get each turn"
     )
-
-
-def project_from_request() -> str | None:
-    """The board that the agent's request names in its X-Agent-Hud-Board header; none in memory or without the header."""
-    try:
-        return get_http_request().headers.get("x-agent-hud-board") or None
-    except RuntimeError:
-        return None
 
 
 def turns_command(url: str) -> str:
@@ -132,77 +134,111 @@ def summarize_write(before: Board, after: Board, bodies: list[TAgentBody]) -> Wr
     )
 
 
-def describe_validation_error(error: ErrorDetails) -> str:
-    """One validation error on an action, in a line: the field and what is wrong with it, or the kind that is not one."""
-    kinds = ", ".join(agent_action_kinds())
-    match error["type"], [str(part) for part in error["loc"]]:
-        case "union_tag_invalid", _:
-            return f"kind '{error.get('ctx', {}).get('tag')}' is not one of {kinds}"
-        case "union_tag_not_found", _:
-            return f"kind is missing: one of {kinds}"
-        case "extra_forbidden", [kind, *loc]:
-            return f"{'.'.join(loc)}: not a field of {kind}"
-        case _, [_, *loc] if loc:
-            return f"{'.'.join(loc)}: {error['msg']}"
-        case _:
-            return error["msg"].removeprefix("Value error, ")
+def board_uri(name: TBoardName) -> str:
+    return f"board://{name}"
 
 
-def parse_agent_actions(actions: list[dict[str, Any]]) -> list[TAgentBody]:
+def build_mcp_server(boards: dict[TBoardName, Hud], directory: Path, token: str | None = None) -> FastMCP:
     """
-    The actions as the model of their kind takes them.
-    Misfit, with the index of the action, if one does not fit its kind, or puts a card that an earlier one puts.
-    """
-    bodies: list[TAgentBody] = []
-    puts: dict[TCardId, int] = {}
-    for n, action in enumerate(actions, start=1):
-        try:
-            bodies.append(BodyAdapter.validate_python(action))
-        except ValidationError as error:
-            kind = action.get("kind")
-            reasons = ", ".join(describe_validation_error(found) for found in error.errors())
-            raise Misfit(n, ActionKind(kind) if kind in agent_action_kinds() else None, reasons) from error
-        match bodies[-1]:
-            case Put(id=card_id) if card_id in puts:
-                raise Misfit(n, ActionKind.put, f"card '{card_id}' is already put by action {puts[card_id]}")
-            case Put(id=card_id):
-                puts[card_id] = n
-            case _:
-                pass
-    return bodies
-
-
-def build_mcp_server(boards: BoardRegistry, token: str | None = None) -> FastMCP:
-    """
-    The MCP server whose tools act on the board that each request names, or on the shared board.
+    The MCP server whose tools create, list and delete the boards and act on the board that each call names.
+    Each board is the resource board://<name>: a subscriber gets an update at each change of the board, and a listener
+    on the list gets a change at each board created or deleted. A new board keeps its state in <directory>/<name>.db.
     With a token, the URL that listen returns carries it.
     """
-    mcp = FastMCP("agent-hud")
+    bus = InMemorySubscriptionBus()
+    watchers: dict[TBoardName, asyncio.Task[None]] = {}
 
-    def current_hud() -> Hud:
-        return boards.hud_for(project_from_request())
+    async def publish_updates(name: TBoardName, hud: Hud) -> None:
+        """Publish an update of the board's resource at each change of the board or of its agents."""
+        async for _ in hud.snapshots():
+            await bus.publish(ResourceUpdated(uri=board_uri(name)))
 
-    async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> WriteResult:
+    def add_resource(name: TBoardName, hud: Hud) -> None:
+        """Serve the board as its resource."""
+
+        def board_json() -> str:
+            return hud.board.model_dump_json()
+
+        mcp.add_resource(
+            Resource.from_function(
+                board_json,
+                uri=board_uri(name),
+                name=name,
+                description=f"The board {name}: its cards, threads, arrows, chat and history, as JSON",
+                mime_type="application/json",
+            )
+        )
+
+    @asynccontextmanager
+    async def lifespan(server: FastMCP) -> AsyncGenerator[None]:
+        """Publish the changes of each board while the server runs."""
+        for name, hud in boards.items():
+            watchers[name] = asyncio.create_task(publish_updates(name, hud))
+        try:
+            yield
+        finally:
+            for watcher in watchers.values():
+                watcher.cancel()
+
+    mcp = FastMCP("agent-hud", lifespan=lifespan)
+    # FastMCP serves no subscriptions/listen of its own, and has no public way to add a request handler.
+    mcp._mcp_server.add_request_handler(  # pyright: ignore[reportPrivateUsage]
+        "subscriptions/listen", SubscriptionsListenRequestParams, ListenHandler(bus)
+    )
+
+    def board_named(name: TBoardName) -> Hud:
+        """The hud of the board. ValueError when no board has the name."""
+        if name not in boards:
+            raise ValueError(f"no board '{name}': the boards are {', '.join(boards) or 'none'}; create_board makes one")
+        return boards[name]
+
+    async def create_board(name: TBoardName) -> BoardSummary:
+        """Create an empty board with the name. ValueError when a board has the name."""
+        if name in boards:
+            raise ValueError(f"a board '{name}' exists")
+        boards[name] = Hud(directory / f"{name}.db")
+        add_resource(name, boards[name])
+        watchers[name] = asyncio.create_task(publish_updates(name, boards[name]))
+        await bus.publish(ResourcesListChanged())
+        return summarize(name, boards[name])
+
+    async def list_boards() -> list[BoardSummary]:
+        """Each board with its number of cards and whether an agent follows it."""
+        return [summarize(name, hud) for name, hud in sorted(boards.items())]
+
+    async def delete_board(name: TBoardName) -> None:
+        """
+        Delete the board and its state file, for good.
+        ValueError when no board has the name, or when a monitor is open on it.
+        """
+        hud = board_named(name)
+        if hud.monitors:
+            raise ValueError(f"the board '{name}' has {hud.monitors} open monitors: stop them first")
+        hud.close()
+        (directory / f"{name}.db").unlink(missing_ok=True)
+        del boards[name]
+        watchers.pop(name).cancel()
+        mcp.local_provider.remove_resource(board_uri(name))
+        await bus.publish(ResourcesListChanged())
+
+    async def write(name: TBoardName, actions: TActions) -> WriteResult:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
         A card is markdown; put adds it or replaces it. A comment or an arrow names a card and a quote of its words, as the card shows them.
         A thread on words that a put keeps stays with them; the rest goes to the card's history.
         Returns the cards added and replaced, the threads that went to the history, and the arrows dropped.
         """
-        hud = current_hud()
+        hud = board_named(name)
         before = hud.board
+        now = datetime.now(UTC)
         try:
-            bodies = parse_agent_actions(actions)
-            now = datetime.now(UTC)
-            hud.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in bodies])
+            hud.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in actions])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
-        return summarize_write(before, hud.board, bodies)
-
-    def write_schema_stub(actions: TActions) -> None:
-        """The signature of write with the model of each kind of action, for the listed schema."""
+        return summarize_write(before, hud.board, actions)
 
     async def read(
+        name: TBoardName,
         *,
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
         cards: Annotated[
@@ -220,7 +256,7 @@ def build_mcp_server(boards: BoardRegistry, token: str | None = None) -> FastMCP
         The board: the cards, the threads of comments on their words, the arrows and the chat.
         Read it once, then follow the turns; read it again when unsure, with cards or since to read less.
         """
-        hud = current_hud()
+        hud = board_named(name)
         board = hud.board if history else hud.board.model_copy(update={"history": {}})
         chat: Sequence[Said] = board.messages
         match None if since is None else hud.changed_since(since):
@@ -234,26 +270,30 @@ def build_mcp_server(boards: BoardRegistry, token: str | None = None) -> FastMCP
                 pass
         return select_cards(board, cards, chat)
 
-    async def listen() -> Listening:
+    async def listen(name: TBoardName) -> Listening:
         """
-        Where the user's turns come from: a websocket URL, and a shell command that prints each turn as its lines.
+        Where the user's turns on the board come from: a websocket URL, and a shell command that prints each turn as its lines.
         Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
         Each turn is one event of lines: a head with the turn's id and its number of actions, then one line per action.
         A turn with more lines than one event shows comes as several events, each with a head that counts them.
         An edit of a card on the board is a diff of its markdown.
-        Also the board's id and the monitors already open on it: above 0, another session follows this board, so tell the user before you open one too.
+        Also the monitors already open on the board: above 0, another session follows this board, so tell the user before you open one too.
         """
-        project = project_from_request()
-        board_id = boards.board_id_for(project)
-        url = get_http_request().url.replace(scheme="ws", path="/agent").include_query_params(board=board_id)
+        hud = board_named(name)
+        url = get_http_request().url.replace(scheme="ws", path="/agent").include_query_params(board=name)
         url = str(url if token is None else url.include_query_params(token=token))
-        return Listening(url=url, command=turns_command(url), board=board_id, monitors=boards.hud_for(project).monitors)
+        return Listening(url=url, command=turns_command(url), board=name, monitors=hud.monitors)
 
     tool = FunctionTool.from_function(write)
-    parameters, kinds = compact_actions_schema(FunctionTool.from_function(write_schema_stub).parameters)
+    parameters, kinds = compact_actions_schema(tool.parameters)
     mcp.add_tool(
         tool.model_copy(update={"parameters": parameters, "description": f"{tool.description}\nActions: {kinds}."})
     )
+    mcp.tool(create_board)
+    mcp.tool(list_boards, annotations=ToolAnnotations(read_only_hint=True))
+    mcp.tool(delete_board, annotations=ToolAnnotations(destructive_hint=True))
     mcp.tool(read, annotations=ToolAnnotations(read_only_hint=True))
     mcp.tool(listen, annotations=ToolAnnotations(read_only_hint=True))
+    for name, hud in boards.items():
+        add_resource(name, hud)
     return mcp

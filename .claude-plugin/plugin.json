@@ -11,8 +11,7 @@
       "type": "http",
       "url": "http://127.0.0.1:${AGENT_HUD_PORT:-7676}/mcp/",
       "headers": {
-        "Authorization": "Bearer ${AGENT_HUD_TOKEN:-}",
-        "X-Agent-Hud-Board": "${CLAUDE_PROJECT_DIR}"
+        "Authorization": "Bearer ${AGENT_HUD_TOKEN:-}"
       }
     }
   },
