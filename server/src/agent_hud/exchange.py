@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from difflib import unified_diff
+from typing import assert_never
 
 from agent_hud.models.actions import (
     Action,
@@ -17,9 +18,11 @@ from agent_hud.models.actions import (
     Remove,
     Resize,
     Restore,
+    Say,
     Send,
     TActionId,
     TCardId,
+    Unlink,
 )
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, EventKind, Heard, Snapshot, Turn
@@ -32,8 +35,23 @@ def to_agent_message(board: Board, action: Action) -> Heard:
         case Put(id=card_id, md=md) if card_id in board.cards:
             diff_lines = unified_diff(board.cards[card_id].md.splitlines(), md.splitlines(), lineterm="", n=1)
             body = Edit(kind="edit", id=card_id, diff="\n".join(list(diff_lines)[2:]))
-        case _:
+        case (
+            Put()
+            | Remove()
+            | Restore()
+            | Comment()
+            | Say()
+            | Link()
+            | Unlink()
+            | Move()
+            | Resize()
+            | Place()
+            | Clear()
+            | Send()
+        ):
             body = action.body
+        case _:
+            assert_never(action.body)
     return Heard(id=action.id, author=action.author, body=body)
 
 
@@ -70,32 +88,29 @@ def changes_since(actions: Sequence[Action], action_id: TActionId) -> ChangesSin
     if not found:
         return None
     after = actions[found[-1] + 1 :]
-    changed: set[TCardId] | None = set()
+    touched: set[TCardId] = set()
+    cleared = False
     for action in after:
-        match action.body, changed:
-            case Clear(), _:
-                changed = None
-            case _, None:
-                pass
+        match action.body:
+            case Clear():
+                cleared = True
             case (
-                (
-                    Put(id=card_id)
-                    | Remove(id=card_id)
-                    | Restore(id=card_id)
-                    | Move(id=card_id)
-                    | Resize(id=card_id)
-                    | Place(id=card_id)
-                ),
-                _,
+                Put(id=card_id)
+                | Remove(id=card_id)
+                | Restore(id=card_id)
+                | Move(id=card_id)
+                | Resize(id=card_id)
+                | Place(id=card_id)
+                | Comment(card=card_id)
             ):
-                changed.add(card_id)
-            case Comment(card=card_id), _:
-                changed.add(card_id)
-            case Link(card=card_id, dst=dst), _:
-                changed.update((card_id, dst))
-            case _:
+                touched.add(card_id)
+            case Link(card=card_id, dst=dst):
+                touched.update((card_id, dst))
+            case Say() | Unlink() | Send():
                 pass
-    return ChangesSince(changed, {action.id for action in after})
+            case _:
+                assert_never(action.body)
+    return ChangesSince(None if cleared else touched, {action.id for action in after})
 
 
 class Exchange:

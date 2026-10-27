@@ -27,13 +27,13 @@ from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
-from agent_hud.boards import exchange_on_file, open_exchange
+from agent_hud.boards import Boards, exchange_on_file
 from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import Action, ActionKind, Author, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
 from agent_hud.server import build_mcp_server
-from agent_hud.settings import Settings, get_settings
+from agent_hud.settings import Settings
 from agent_hud.store import SqliteStore
 from agent_hud.web import create_app, send_turns
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
@@ -91,7 +91,9 @@ async def listeners(address: tuple[str, int], exchange: Exchange) -> AsyncIterat
 async def agent(exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same exchange as the app. MCP over HTTP is slower per call."""
     settings = Settings(state_dir=state_dir, static_dir=state_dir)
-    async with Client(build_mcp_server(settings, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(
+        build_mcp_server(settings, Boards(settings, {BOARD: exchange}), InMemorySubscriptionBus())
+    ) as client:
         yield client
 
 
@@ -114,19 +116,12 @@ async def test_tools_need_the_token_when_the_settings_give_one(address: tuple[st
             await remote.list_tools()
 
 
-async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(tmp_path: Path) -> None:
     """Assemble: settings with a state dir and no token.
     Act: create the app.
     Assert: the token file in the state dir has the token of the URL that listen returns, readable by the user only."""
-    monkeypatch.setenv("AGENT_HUD_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.delenv("AGENT_HUD_TOKEN", raising=False)
-    get_settings.cache_clear()
-    try:
-        create_app({}, lambda: None)
-    finally:
-        get_settings.cache_clear()
+    settings = Settings(state_dir=tmp_path / "state", token=None)
+    create_app(settings, Boards(settings, {}), lambda: None)
     path = tmp_path / "state" / "token"
     assert path.stat().st_mode & 0o777 == 0o600
     assert len(path.read_text()) >= 32
@@ -163,8 +158,8 @@ async def test_a_second_app_on_the_state_dir_does_not_open_a_board_the_first_hol
     state_file = tmp_path / "boards" / "plan.db"
     async with serve({"plan": exchange_on_file(state_file)}, static_dir, tmp_path):
         with pytest.raises(RuntimeError, match=re.escape(str(state_file))):
-            open_exchange({}, tmp_path / "boards", "plan")
-    open_exchange({}, tmp_path / "boards", "plan").close()
+            Boards(Settings(state_dir=tmp_path), {}).get("plan")
+    Boards(Settings(state_dir=tmp_path), {}).get("plan").close()
 
 
 def list_boards(address: tuple[str, int]) -> dict[str, dict[str, Any]]:

@@ -14,6 +14,7 @@ from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.subscriptions import ResourcesListChanged, ResourceUpdated
 from mcp.types import TextResourceContents, Tool
 
+from agent_hud.boards import Boards
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import Action, ActionKind, Author, TAgentBody
 from agent_hud.models.board import Board
@@ -43,7 +44,9 @@ async def listed_write(client: Client[Any]) -> Tool:
 async def client(exchange: Exchange, tmp_path: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the test's exchange as their one board, with new boards in the test's directory."""
     settings = Settings(state_dir=tmp_path, static_dir=tmp_path)
-    async with Client(build_mcp_server(settings, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(
+        build_mcp_server(settings, Boards(settings, {BOARD: exchange}), InMemorySubscriptionBus())
+    ) as client:
         yield client
 
 
@@ -203,7 +206,8 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TAge
     """Assemble: a client connected to a new server.
     Act: check an action of each kind against the listed schema of write.
     Assert: the schema takes it, so that a client that checks the schema sends each action that the server takes."""
-    async with Client(build_mcp_server(Settings(state_dir=Path("unused")), {}, InMemorySubscriptionBus())) as client:
+    unused = Settings(state_dir=Path("unused"))
+    async with Client(build_mcp_server(unused, Boards(unused, {}), InMemorySubscriptionBus())) as client:
         jsonschema.validate({"name": BOARD, "actions": as_json(body)}, (await listed_write(client)).input_schema)
 
 

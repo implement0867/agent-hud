@@ -7,18 +7,17 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import pytest
 import uvicorn
 from fastmcp import Client
 from websockets.asyncio.client import ClientConnection, connect
 
-from agent_hud.boards import TBoardName
+from agent_hud.boards import Boards, TBoardName
 from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, THeardBody, Turn
-from agent_hud.settings import get_settings
+from agent_hud.settings import Settings
 from agent_hud.web import create_app
 from tests.factories import BOARD, as_json, send
 
@@ -148,18 +147,17 @@ async def serve(
     they are above 0, the app calls on_idle instead of stopping its process. The monitor's frames are at most
     monitor_chars when given, with no gap between the frames of a turn unless one is given.
     """
-    with pytest.MonkeyPatch.context() as env:
-        env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
-        env.setenv("AGENT_HUD_STATE_DIR", str(state_dir))
-        env.setenv("AGENT_HUD_TOKEN", TOKEN)
-        env.setenv("AGENT_HUD_BUILD", build)
-        env.setenv("AGENT_HUD_IDLE_SECONDS", str(idle_seconds))
-        env.setenv("AGENT_HUD_MONITOR_GAP", str(monitor_gap))
-        if monitor_chars is not None:
-            env.setenv("AGENT_HUD_MONITOR_CHARS", str(monitor_chars))
-        get_settings.cache_clear()
-        app = create_app(exchanges, on_idle)
-    get_settings.cache_clear()
+    settings = Settings(
+        static_dir=static_dir,
+        state_dir=state_dir,
+        token=TOKEN,
+        build=build,
+        idle_seconds=idle_seconds,
+        monitor_gap=monitor_gap,
+    )
+    if monitor_chars is not None:
+        settings = settings.model_copy(update={"monitor_chars": monitor_chars})
+    app = create_app(settings, Boards(settings, exchanges), on_idle)
     # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -1,5 +1,4 @@
 import os
-from functools import lru_cache
 from importlib.resources import as_file, files
 from pathlib import Path
 from secrets import token_urlsafe
@@ -57,8 +56,3 @@ class Settings(BaseSettings):
         ge=0,
         description="Seconds between the events of one turn, so that the Monitor shows them apart: it joins events closer than 0.2 s",
     )
-
-
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    return Settings()
