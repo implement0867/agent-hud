@@ -6,6 +6,8 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastmcp import FastMCP
+from fastmcp.dependencies import CallArgument, Depends
+from fastmcp.exceptions import ToolError
 from fastmcp.resources import Resource
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.tools import FunctionTool
@@ -13,8 +15,8 @@ from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, Res
 from mcp.types import SubscriptionsListenRequestParams, ToolAnnotations
 from pydantic import AfterValidator, Field
 
-from agent_hud.boards import BoardSummary, TBoardName, board_names, open_hud, summarize
-from agent_hud.hud import ChangesSince, Hud
+from agent_hud.boards import BoardSummary, TBoardName, board_names, exchange_on_file, open_exchange, summarize
+from agent_hud.exchange import ChangesSince, Exchange, changes_since
 from agent_hud.models.actions import (
     Action,
     Author,
@@ -137,10 +139,12 @@ def board_uri(name: TBoardName) -> str:
     return f"board://{name}"
 
 
-def build_mcp_server(settings: Settings, huds: dict[TBoardName, Hud], bus: InMemorySubscriptionBus) -> FastMCP:
+def build_mcp_server(
+    settings: Settings, exchanges: dict[TBoardName, Exchange], bus: InMemorySubscriptionBus
+) -> FastMCP:
     """
     The MCP server whose tools create, list and delete the boards in the settings' boards dir, and act on the board
-    that each call names; huds holds each board that is open. Each board is the resource board://<name>, and bus
+    that each call names; exchanges holds each board that is open. Each board is the resource board://<name>, and bus
     carries an update of it at each write, and a change of the list at each create and delete.
     """
     mcp = FastMCP("agent-hud")
@@ -151,7 +155,7 @@ def build_mcp_server(settings: Settings, huds: dict[TBoardName, Hud], bus: InMem
 
     def add_resource(name: TBoardName) -> None:
         def board_json() -> str:
-            return open_hud(huds, settings.boards_dir, name).board.model_dump_json()
+            return open_exchange(exchanges, settings.boards_dir, name).board.model_dump_json()
 
         mcp.add_resource(
             Resource.from_function(
@@ -163,53 +167,67 @@ def build_mcp_server(settings: Settings, huds: dict[TBoardName, Hud], bus: InMem
             )
         )
 
+    def exchange_of(name: TBoardName) -> Exchange:
+        """
+        The exchange of the board with the name, for a tool's exchange argument. ToolError when there is none, since
+        FastMCP hides any other error from a dependency.
+        """
+        try:
+            return open_exchange(exchanges, settings.boards_dir, name)
+        except ValueError as error:
+            raise ToolError(str(error)) from error
+
+    board_exchange = Depends(exchange_of, name=CallArgument())
+
     async def create_board(name: TBoardName) -> BoardSummary:
         """Create an empty board with the name. ValueError when a board has the name."""
         path = settings.boards_dir / f"{name}.db"
         if path.exists():
             raise ValueError(f"a board '{name}' exists")
-        huds[name] = Hud(path)
+        exchanges[name] = exchange_on_file(path)
         add_resource(name)
         await bus.publish(ResourcesListChanged())
-        return summarize(name, huds[name])
+        return summarize(name, exchanges[name])
 
     async def list_boards() -> list[BoardSummary]:
         """Each board with its number of cards and whether an agent follows it."""
-        return [summarize(name, open_hud(huds, settings.boards_dir, name)) for name in board_names(settings.boards_dir)]
+        return [
+            summarize(name, open_exchange(exchanges, settings.boards_dir, name))
+            for name in board_names(settings.boards_dir)
+        ]
 
-    async def delete_board(name: TBoardName) -> None:
+    async def delete_board(name: TBoardName, exchange: Exchange = board_exchange) -> None:
         """
         Delete the board and its state file, for good.
         ValueError when no board has the name, or when a monitor is open on it.
         """
-        hud = open_hud(huds, settings.boards_dir, name)
-        if hud.monitors:
-            raise ValueError(f"the board '{name}' has {hud.monitors} open monitors: stop them first")
-        hud.close()
-        del huds[name]
+        if exchange.monitors:
+            raise ValueError(f"the board '{name}' has {exchange.monitors} open monitors: stop them first")
+        exchange.close()
+        del exchanges[name]
         (settings.boards_dir / f"{name}.db").unlink()
         mcp.local_provider.remove_resource(board_uri(name))
         await bus.publish(ResourcesListChanged())
 
-    async def write(name: TBoardName, actions: TActions) -> WriteResult:
+    async def write(name: TBoardName, actions: TActions, exchange: Exchange = board_exchange) -> WriteResult:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
         A card is markdown; put adds it or replaces it. A comment or an arrow names a card and a quote of its words, as the card shows them.
         A thread on words that a put keeps stays with them; the rest goes to the card's history.
         Returns the cards added and replaced, the threads that went to the history, and the arrows dropped.
         """
-        hud = open_hud(huds, settings.boards_dir, name)
-        before = hud.board
+        before = exchange.board
         now = datetime.now(UTC)
         try:
-            hud.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in actions])
+            exchange.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in actions])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
         await bus.publish(ResourceUpdated(uri=board_uri(name)))
-        return summarize_write(before, hud.board, actions)
+        return summarize_write(before, exchange.board, actions)
 
     async def read(
         name: TBoardName,
+        exchange: Exchange = board_exchange,
         *,
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
         cards: Annotated[
@@ -227,10 +245,9 @@ def build_mcp_server(settings: Settings, huds: dict[TBoardName, Hud], bus: InMem
         The board: the cards, the threads of comments on their words, the arrows and the chat.
         Read it once, then follow the turns; read it again when unsure, with cards or since to read less.
         """
-        hud = open_hud(huds, settings.boards_dir, name)
-        board = hud.board if history else hud.board.model_copy(update={"history": {}})
+        board = exchange.board if history else exchange.board.model_copy(update={"history": {}})
         chat: Sequence[Said] = board.messages
-        match None if since is None else hud.changed_since(since):
+        match None if since is None else changes_since(exchange.actions, since):
             case ChangesSince(cards=changed, actions=ids):
                 chat = [said for said in chat if said.id in ids]
                 if changed is not None:
@@ -241,7 +258,7 @@ def build_mcp_server(settings: Settings, huds: dict[TBoardName, Hud], bus: InMem
                 pass
         return select_cards(board, cards, chat)
 
-    async def listen(name: TBoardName) -> Listening:
+    async def listen(name: TBoardName, exchange: Exchange = board_exchange) -> Listening:
         """
         Where the user's turns on the board come from: a websocket URL, and a shell command that prints each turn as its lines.
         Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
@@ -250,10 +267,9 @@ def build_mcp_server(settings: Settings, huds: dict[TBoardName, Hud], bus: InMem
         An edit of a card on the board is a diff of its markdown.
         Also the monitors already open on the board: above 0, another session follows this board, so tell the user before you open one too.
         """
-        hud = open_hud(huds, settings.boards_dir, name)
         request_url = get_http_request().url.replace(scheme="ws", path="/agent")
         url = str(request_url.include_query_params(board=name, token=settings.socket_token))
-        return Listening(url=url, command=turns_command(url), board=name, monitors=hud.monitors)
+        return Listening(url=url, command=turns_command(url), board=name, monitors=exchange.monitors)
 
     tool = FunctionTool.from_function(write)
     parameters, kinds = compact_actions_schema(tool.parameters)

@@ -14,7 +14,7 @@ from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.subscriptions import ResourcesListChanged, ResourceUpdated
 from mcp.types import TextResourceContents, Tool
 
-from agent_hud.hud import Hud
+from agent_hud.exchange import Exchange
 from agent_hud.models.actions import Action, ActionKind, Author, TAgentBody
 from agent_hud.models.board import Board
 from agent_hud.server import build_mcp_server
@@ -40,26 +40,26 @@ async def listed_write(client: Client[Any]) -> Tool:
 
 
 @pytest.fixture
-async def client(hud: Hud, tmp_path: Path) -> AsyncIterator[Client[Any]]:
-    """The MCP tools in memory, on the test's hud as their one board, with new boards in the test's directory."""
+async def client(exchange: Exchange, tmp_path: Path) -> AsyncIterator[Client[Any]]:
+    """The MCP tools in memory, on the test's exchange as their one board, with new boards in the test's directory."""
     settings = Settings(state_dir=tmp_path, static_dir=tmp_path)
-    async with Client(build_mcp_server(settings, {BOARD: hud}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
 
-async def test_read_returns_the_board_with_its_threads(client: Client[Any], hud: Hud) -> None:
+async def test_read_returns_the_board_with_its_threads(client: Client[Any], exchange: Exchange) -> None:
     """Assemble: a server where the agent put a card of a list and the user commented on the card and on its words.
     Act: read.
-    Assert: read returns the hud's board."""
+    Assert: read returns the exchange's board."""
     await client.call_tool(
         "write", {"name": BOARD, "actions": as_json(put("plan", "1. a\n2. b"), put("risk", "locks"))}
     )
     feedback = comment("plan", "fine"), comment("plan", "why b?", "b")
-    hud.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate(feedback)])
-    assert await read_board(client) == hud.board
+    exchange.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate(feedback)])
+    assert await read_board(client) == exchange.board
 
 
-async def test_read_of_cards_returns_what_is_on_them(client: Client[Any], hud: Hud) -> None:
+async def test_read_of_cards_returns_what_is_on_them(client: Client[Any], exchange: Exchange) -> None:
     """Assemble: two cards with a thread, an arrow between them, a size and a version each, and a chat message.
     Act: read one card.
     Assert: that card with the thread, arrow, size and history on it, all the messages, and no more."""
@@ -67,7 +67,7 @@ async def test_read_of_cards_returns_what_is_on_them(client: Client[Any], hud: H
     again = put("plan", "1. a\n2. b"), put("risk", "1. s")
     feedback = comment("plan", "ok", "a"), comment("risk", "no", "s"), link("why", "risk", "plan", quote="s")
     await client.call_tool("write", {"name": BOARD, "actions": as_json(*again, *feedback, say("hello"))})
-    hud.act([Action(id="m", author=Author.user, body=resize("plan", 300, 200))])
+    exchange.act([Action(id="m", author=Author.user, body=resize("plan", 300, 200))])
     reading = await read_board(client, history=True, cards=["plan"])
     assert set(reading.cards) == {"plan"}
     assert [thread.card for thread in reading.threads.values()] == ["plan"]
@@ -90,7 +90,7 @@ async def test_read_since_returns_the_messages_after_the_one_named(client: Clien
 
 
 async def test_read_since_a_turn_returns_the_cards_that_changed_after_it_and_the_messages(
-    client: Client[Any], hud: Hud
+    client: Client[Any], exchange: Exchange
 ) -> None:
     """Assemble: two cards and a message from the agent; the user comments on the first and sends; the agent puts a third card, comments on the second and says.
     Act: read since the send, with and without cards named; then since an id the log does not have.
@@ -98,8 +98,8 @@ async def test_read_since_a_turn_returns_the_cards_that_changed_after_it_and_the
     await client.call_tool(
         "write", {"name": BOARD, "actions": as_json(put("a", "1. a"), put("b", "1. b"), say("review"))}
     )
-    hud.act([Action(id="r", author=Author.user, body=comment("a", "yes", "a"))])
-    hud.act([Action(id="turn", author=Author.user, body=send())])
+    exchange.act([Action(id="r", author=Author.user, body=comment("a", "yes", "a"))])
+    exchange.act([Action(id="turn", author=Author.user, body=send())])
     await client.call_tool(
         "write", {"name": BOARD, "actions": as_json(put("c", "1. c"), comment("b", "fine", "b"), say("done"))}
     )
@@ -110,14 +110,14 @@ async def test_read_since_a_turn_returns_the_cards_that_changed_after_it_and_the
     assert (set(whole.cards), len(whole.messages)) == ({"a", "b", "c"}, 4)
 
 
-async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], hud: Hud) -> None:
+async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], exchange: Exchange) -> None:
     """Assemble: a server where the agent put a card, then put it again.
     Act: read, and read with the history.
-    Assert: the first has no history, and the second has the hud's whole board."""
+    Assert: the first has no history, and the second has the exchange's whole board."""
     await client.call_tool("write", {"name": BOARD, "actions": as_json(put("plan", "1. a"))})
     await client.call_tool("write", {"name": BOARD, "actions": as_json(put("plan", "1. b"))})
     assert (await read_board(client)).history == {}
-    assert await read_board(client, history=True) == hud.board
+    assert await read_board(client, history=True) == exchange.board
 
 
 @pytest.mark.parametrize(
@@ -146,7 +146,7 @@ async def test_write_returns_the_cards_it_put(client: Client[Any]) -> None:
     assert result.structured_content == {"added": ["plan", "risk"], "replaced": [], "retired": [], "dropped": []}
 
 
-async def test_write_reports_the_threads_and_arrows_a_put_moves_aside(client: Client[Any], hud: Hud) -> None:
+async def test_write_reports_the_threads_and_arrows_a_put_moves_aside(client: Client[Any], exchange: Exchange) -> None:
     """Assemble: a server with a plan of two items that the user commented on, with an arrow from each item to a note card and one from the note to the plan.
     Act: write a put of the plan with the second item changed, a put of a new card, an unlink of the arrow from the note, and a remove of the note.
     Assert: the result names the plan as replaced and the new card as added, the thread on the second item as gone to the history, and the arrow at it as dropped, not the one unlinked."""
@@ -157,7 +157,7 @@ async def test_write_reports_the_threads_and_arrows_a_put_moves_aside(client: Cl
         link("two", "plan", "note", quote="b"),
         link("back", "note", "plan"),
     ]
-    hud.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate([*feedback, *arrows])])
+    exchange.act([Action(id=str(n), author=Author.user, body=body) for n, body in enumerate([*feedback, *arrows])])
     actions = as_json(put("plan", "1. a\n2. c"), put("new", "x"), unlink("back"), remove("note"))
     result = await client.call_tool("write", {"name": BOARD, "actions": actions})
     assert result.structured_content == {

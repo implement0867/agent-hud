@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_hud.hud import Hud
+from agent_hud.exchange import Exchange
 from tests.conversation import open_page, serve
 from tests.factories import BOARD
 
@@ -22,13 +22,13 @@ async def ask_health(host: str, port: int) -> bytes:
 
 
 async def test_the_app_stops_once_idle_and_not_while_a_page_is_connected(
-    static_dir: Path, tmp_path: Path, hud: Hud
+    static_dir: Path, tmp_path: Path, exchange: Exchange
 ) -> None:
     """Assemble: the app on a board, with an idle time of half a second, and a page connected to it.
     Act: wait a second with the page connected; then close the page and wait again.
     Assert: the app does not stop while the page is connected, and stops within three seconds of its going."""
     stopped = asyncio.Event()
-    async with serve({BOARD: hud}, static_dir, tmp_path, idle_seconds=0.5, on_idle=stopped.set) as address:
+    async with serve({BOARD: exchange}, static_dir, tmp_path, idle_seconds=0.5, on_idle=stopped.set) as address:
         async with open_page(address):
             await asyncio.sleep(1.2)
             assert not stopped.is_set()
