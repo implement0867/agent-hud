@@ -609,9 +609,11 @@ export const Whiteboard = () => {
     );
   };
 
+  /** Fits the cards by their sizes as laid out now, so that a card the observer has not yet measured is not left out. */
   const fit = () => {
+    const sizes = cardSizes();
     const rects = model.cards.flatMap((card) => {
-      const size = layout.cards[card.id];
+      const size = sizes.get(card.id);
       return card.at === null || size === undefined
         ? []
         : [{ ...card.at, ...size }];

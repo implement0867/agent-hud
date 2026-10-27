@@ -909,6 +909,8 @@ async def test_fit_all_keeps_the_cards_clear_of_the_chat(page: Page, agent: Agen
     await agent.write(put("a", "1. one"), put("b", "1. two"), move("a", 0, 0), move("b", 2600, 1800))
     await expect(card(page, "b")).to_be_attached()
     await page.keyboard.press("1")
+    for card_id in "ab":
+        await expect(card(page, card_id)).to_be_in_viewport()
     await settled(page)
     chat = await page.get_by_label("Chat with the agent").bounding_box()
     assert chat is not None
@@ -916,6 +918,30 @@ async def test_fit_all_keeps_the_cards_clear_of_the_chat(page: Page, agent: Agen
         shown = await card(page, card_id).bounding_box()
         assert shown is not None
         assert inside(shown, {"x": 0, "y": 0, "width": chat["x"], "height": 900}), card_id
+
+
+async def test_fit_all_takes_a_card_that_the_resize_observer_has_not_measured_yet(
+    browser: Browser, address: tuple[str, int], agent: Agent
+) -> None:
+    """Assemble: a page whose ResizeObserver reports a card 400 ms late.
+    Act: the agent puts two cards far apart, and the user presses 1 as soon as the second card is on the page.
+    Assert: both cards come into the viewport."""
+    host, port = address
+    page = await browser.new_page(viewport={"width": 1440, "height": 900})
+    await page.add_init_script(
+        "window.ResizeObserver = class extends window.ResizeObserver {"
+        " constructor(report) { super((entries, observer) =>"
+        " entries.some((entry) => entry.target.matches('article[data-card]'))"
+        " ? setTimeout(() => report(entries, observer), 400) : report(entries, observer)); } }"
+    )
+    await page.goto(f"http://{host}:{port}/?token={TOKEN}")
+    await expect(page.get_by_label("Message the agent")).to_be_visible()
+    await agent.write(put("a", "1. one"), put("b", "1. two"), move("a", 0, 0), move("b", 2600, 1800))
+    await expect(card(page, "b")).to_be_attached()
+    await page.keyboard.press("1")
+    for card_id in "ab":
+        await expect(card(page, card_id)).to_be_in_viewport()
+    await page.close()
 
 
 async def test_the_user_drags_the_chat_to_a_width_that_the_browser_keeps(page: Page) -> None:
