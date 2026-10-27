@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 import pytest_asyncio
@@ -11,7 +12,7 @@ from agent_hud.models.actions import ActionKind, Author, TBody
 from agent_hud.models.board import Arrow, Board, Point, Version
 from agent_hud.models.events import Accepted, AgentState, Edit, EventKind, Rejected
 from tests.conversation import Agent, User, open_agent, open_page, serve
-from tests.factories import as_json, comment, link, move, put, read_board, remove, say
+from tests.factories import BOARD, as_json, comment, link, move, put, read_board, remove, say
 from tests.strategies import bodies, card_ids
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -248,32 +249,35 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
     Act: the user and the agent take turns; the page sends each of the user's actions alone, and the agent writes each turn in one call.
     Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each turn as the page listed it as pending, with the message that ended it, in order."""
     taken: list[TBody] = []
-    hud = Hud()
-    async with (
-        serve(hud, static_dir, state_dir) as address,
-        open_agent(address) as agent,
-        open_page(address) as user,
-    ):
-        for author, batch in turns:
-            match author:
-                case Author.user:
-                    for body in batch:
-                        pending = [heard.body for heard in hud.snapshot().pending]
-                        answer = await user.act(body)
-                        match answer, body.kind:
-                            case Accepted(), ActionKind.say:
-                                taken += [*pending, body]
-                            case Accepted(), ActionKind.send:
-                                taken += pending
-                            case _:
-                                pass
-                case Author.agent:
-                    await agent.tools.call_tool("write", {"actions": as_json(*batch)}, raise_on_error=False)
-            board = await read_board(agent.tools, history=True)
-            assert await user.sees(board) == board
-        taken += [heard.body for heard in hud.snapshot().pending]
-        await user.send()
-        heard: list[TBody] = []
-        while len(heard) < len(taken):
-            heard += (await agent.turn()).actions
-        assert heard == taken
+    with TemporaryDirectory() as directory:
+        hud = Hud(Path(directory) / "boards" / f"{BOARD}.db")
+        async with (
+            serve({BOARD: hud}, static_dir, Path(directory)) as address,
+            open_agent(address) as agent,
+            open_page(address) as user,
+        ):
+            for author, batch in turns:
+                match author:
+                    case Author.user:
+                        for body in batch:
+                            pending = [heard.body for heard in hud.snapshot().pending]
+                            answer = await user.act(body)
+                            match answer, body.kind:
+                                case Accepted(), ActionKind.say:
+                                    taken += [*pending, body]
+                                case Accepted(), ActionKind.send:
+                                    taken += pending
+                                case _:
+                                    pass
+                    case Author.agent:
+                        await agent.tools.call_tool(
+                            "write", {"name": BOARD, "actions": as_json(*batch)}, raise_on_error=False
+                        )
+                board = await read_board(agent.tools, history=True)
+                assert await user.sees(board) == board
+            taken += [heard.body for heard in hud.snapshot().pending]
+            await user.send()
+            heard: list[TBody] = []
+            while len(heard) < len(taken):
+                heard += (await agent.turn()).actions
+            assert heard == taken

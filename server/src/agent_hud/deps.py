@@ -1,5 +1,6 @@
-from fastapi import Depends, WebSocket, WebSocketException, status
+from fastapi import Depends, HTTPException, WebSocket, WebSocketException, status
 from fastapi.params import Depends as DependsParam
+from starlette.requests import HTTPConnection
 
 
 def same_origin(websocket: WebSocket) -> bool:
@@ -20,11 +21,19 @@ def require_agent_origin(websocket: WebSocket) -> None:
 
 
 def token_dep(token: str) -> DependsParam:
-    """A dependency that rejects a socket whose token query parameter is not the app's token."""
+    """
+    A dependency that rejects a request or a socket whose token query parameter is not the app's token:
+    403 for a request, and a close with a policy violation for a socket.
+    """
 
-    def require_token(websocket: WebSocket) -> None:
-        if websocket.query_params.get("token") != token:
-            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, "the token is missing or wrong")
+    def require_token(connection: HTTPConnection) -> None:
+        match connection.query_params.get("token") == token, connection:
+            case True, _:
+                pass
+            case False, WebSocket():
+                raise WebSocketException(status.WS_1008_POLICY_VIOLATION, "the token is missing or wrong")
+            case False, _:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "the token is missing or wrong")
 
     return Depends(require_token)
 

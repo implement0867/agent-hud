@@ -2,6 +2,7 @@ import os
 from functools import lru_cache
 from importlib.resources import as_file, files
 from pathlib import Path
+from secrets import token_urlsafe
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,8 +25,8 @@ class Settings(BaseSettings):
     state_dir: Path = Field(
         default_factory=find_state_dir, description="Directory of the token file and of the boards by default"
     )
-    boards_dir: Path | None = Field(
-        default=None,
+    boards_dir: Path = Field(
+        default_factory=lambda data: data["state_dir"] / "boards",
         description="Directory of the SQLite file of each board's state, replayed on start; boards in the state dir by default",
     )
     build: str = Field(
@@ -34,7 +35,11 @@ class Settings(BaseSettings):
     )
     token: str | None = Field(
         default=None,
-        description="The token that /mcp/ needs as a bearer token and the sockets as a query parameter; none makes one for the sockets only",
+        description="The token that /mcp/ needs as a bearer token, and the sockets and /boards as a query parameter; none leaves /mcp/ open",
+    )
+    socket_token: str = Field(
+        default_factory=lambda data: data["token"] or token_urlsafe(32),
+        description="The token that the sockets and /boards need as a query parameter: the token, or a new one",
     )
     idle_seconds: float = Field(
         default=3600,
@@ -52,10 +57,6 @@ class Settings(BaseSettings):
         ge=0,
         description="Seconds between the events of one turn, so that the Monitor shows them apart: it joins events closer than 0.2 s",
     )
-
-    @property
-    def board_files(self) -> Path:
-        return self.boards_dir or self.state_dir / "boards"
 
 
 @lru_cache(maxsize=1)

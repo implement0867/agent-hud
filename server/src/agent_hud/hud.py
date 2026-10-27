@@ -5,7 +5,8 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import NamedTuple
 
-from agent_hud.log import Log
+from pydantic import ValidationError
+
 from agent_hud.models.actions import (
     Action,
     Author,
@@ -53,37 +54,31 @@ class ChangesSince(NamedTuple):
 
 class Hud:
     """
-    The board, and the log of the actions that made it; and the agents' monitors.
-    With a state file, the log is kept there after the board at a checkpoint, with the agents' read position, and
-    compacted on a clear and on shutdown: the checkpoint takes the board at the start of the oldest turn that an agent
-    has not had, and the file keeps the turns from there. One process holds the state file: RuntimeError when another does.
+    The board, the actions that made it, and the agents' monitors, kept in the state file.
+    RuntimeError when another process holds the file. ValidationError when the file does not fit this version.
     """
 
-    def __init__(self, state_file: Path | None = None) -> None:
-        self.board = Board()
-        self.log = Log()
+    def __init__(self, state_file: Path) -> None:
         self.monitors = 0
         self.working = False
         self._heard: dict[TActionId, Heard] = {}
         self._changed = asyncio.Event()
         self._positions: list[list[int]] = []
-        self._store = None if state_file is None else Store(state_file)
-        # The sequence number in the store of the first action of the log.
-        self._base = 0
-        self._agent_read = 0
-        self._turn_boards: dict[int, Board] = {0: self.board}
-        if self._store is not None:
+        self._store = Store(state_file)
+        try:
             self._base, self.board, actions, read = self._store.load()
-            self._turn_boards = {0: self.board}
-            self._take(actions)
-            self._agent_read = min(read - self._base, self._turn_start())
+        except ValidationError:
+            self._store.close()
+            raise
+        self.actions: list[Action] = []
+        self._turn_boards: dict[int, Board] = {0: self.board}
+        self._take(actions)
+        self._agent_read = min(read - self._base, self._turn_start())
 
     def act(self, actions: list[Action]) -> None:
         """Apply the actions in order, all or nothing. Misfit, with the index of the action, if one does not fit the board."""
-        start = len(self.log.actions)
+        start = len(self.actions)
         self._take(actions)
-        if self._store is None:
-            return
         self._store.append(self._base + start, actions)
         if any(isinstance(action.body, Clear) for action in actions):
             self.compact()
@@ -93,15 +88,12 @@ class Hud:
         Make the board at the start of the oldest turn that an agent has not had, or of the user's turn, the checkpoint
         of the state file, so that it keeps the turns from there alone.
         """
-        if self._store is None:
-            return
         keep = min(self._agent_read, self._turn_start())
         self._store.compact(self._base + keep, self._turn_boards[keep], self._base + self._agent_read)
 
     def close(self) -> None:
         """Let the state file go, for another process to hold."""
-        if self._store is not None:
-            self._store.close()
+        self._store.close()
 
     def snapshot(self) -> Snapshot:
         match self.monitors, self.working:
@@ -111,8 +103,8 @@ class Hud:
                 agent = AgentState.working
             case _:
                 agent = AgentState.waiting
-        pending = self._turn(self._turn_start(), len(self.log.actions))
-        waiting = sum(action.ends_turn for action in self.log.actions[self._agent_read :])
+        pending = self._turn(self._turn_start(), len(self.actions))
+        waiting = sum(action.ends_turn for action in self.actions[self._agent_read :])
         return Snapshot(
             kind=EventKind.snapshot,
             board=self.board,
@@ -151,15 +143,17 @@ class Hud:
         position = [self._agent_read]
         self._positions.append(position)
         try:
-            async for _ in self.log.follow(position[0]):
+            while True:
+                changed = self._changed
                 while (end := self._turn_end(position[0])) is not None:
-                    turn = Turn.of(self.log.actions[end - 1].id, self._turn(position[0], end))
+                    turn = Turn.of(self.actions[end - 1].id, self._turn(position[0], end))
                     position[0] = end
                     if not self.working:
                         self.working = True
                         self._notify()
                     yield turn
                     self._mark_read(end)
+                await changed.wait()
         finally:
             self._positions.remove(position)
 
@@ -169,10 +163,10 @@ class Hud:
         moved or resized, or with a comment or an arrow on it, or every card when a clear came after it;
         and the ids of those actions. None when the log no longer has the id.
         """
-        found = [n for n, action in enumerate(self.log.actions) if action.id == action_id]
+        found = [n for n, action in enumerate(self.actions) if action.id == action_id]
         if not found:
             return None
-        after = self.log.actions[found[-1] + 1 :]
+        after = self.actions[found[-1] + 1 :]
         changed: set[TCardId] | None = set()
         for action in after:
             match action.body, changed:
@@ -204,7 +198,7 @@ class Hud:
         """
         The user's actions from the turn start to the end, as the agent hears them.
         """
-        actions = [action for action in self.log.actions[start:end] if action.author is Author.user]
+        actions = [action for action in self.actions[start:end] if action.author is Author.user]
         return tuple(self._heard[action.id] for action in without_layout_actions(actions))
 
     def _mark_read(self, end: int) -> None:
@@ -212,7 +206,7 @@ class Hud:
             return
         self._agent_read = end
         self._forget_boards()
-        self._keep_read()
+        self._store.keep_read(self._base + self._agent_read)
         self._notify()
 
     def _forget_boards(self) -> None:
@@ -220,10 +214,6 @@ class Hud:
         floor = min([self._agent_read, self._turn_start(), *(position[0] for position in self._positions)])
         for start in [start for start in self._turn_boards if start < floor]:
             del self._turn_boards[start]
-
-    def _keep_read(self) -> None:
-        if self._store is not None:
-            self._store.keep_read(self._base + self._agent_read)
 
     def _take(self, actions: list[Action]) -> None:
         boards = [self.board]
@@ -238,23 +228,23 @@ class Hud:
             if action.author is Author.user
         }
         self.board = boards[-1]
-        offset = len(self.log.actions)
+        offset = len(self.actions)
         for n, action in enumerate(actions, start=1):
             if action.ends_turn:
                 self._turn_boards[offset + n] = boards[n]
-        self.log.extend(actions)
+        self.actions.extend(actions)
         if any(action.author is Author.agent for action in actions):
             self.working = False
         self._notify()
 
     def _turn_start(self) -> int:
         """The index in the log after the user's last send, or 0."""
-        actions = self.log.actions
+        actions = self.actions
         return next((n + 1 for n in range(len(actions) - 1, -1, -1) if actions[n].ends_turn), 0)
 
     def _turn_end(self, start: int) -> int | None:
         """The index in the log after the first send from start on, if there is one."""
-        return next((n + 1 for n, action in enumerate(self.log.actions[start:], start) if action.ends_turn), None)
+        return next((n + 1 for n, action in enumerate(self.actions[start:], start) if action.ends_turn), None)
 
     def _notify(self) -> None:
         self._changed.set()

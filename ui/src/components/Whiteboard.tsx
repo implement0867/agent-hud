@@ -31,6 +31,7 @@ import { ThreadPopover } from "~/components/ThreadPopover";
 import { Toolbar } from "~/components/Toolbar";
 import type { TCardView } from "~/data/boardModel";
 import { useBoard, useStore } from "~/data/context";
+import { boardInUrl } from "~/data/boards";
 import { ActionKind } from "~/domain/actions";
 import { anchorsOn, newId, versionsOf } from "~/domain/board";
 import type { TAnchor, TArrow, TPoint } from "~/domain/board";
@@ -98,8 +99,7 @@ const titleOf = (cards: Record<string, { md: string }>, id: string) => {
 };
 
 /** The key that keeps, in the browser, how many comments of each thread the user has read on this board. */
-const seenKey = () =>
-  `agent-hud:seen:${new URLSearchParams(window.location.search).get("board") ?? "shared"}`;
+const seenKey = () => `agent-hud:seen:${boardInUrl() ?? ""}`;
 
 const readSeen = (): Record<string, number> => {
   try {

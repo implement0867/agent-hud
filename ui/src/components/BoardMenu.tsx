@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind } from "~/domain/actions";
-import { boardListSchema } from "~/domain/events";
+import { boardInUrl, fetchBoards, linkTo } from "~/data/boards";
 import type { TBoardList } from "~/domain/events";
 import { agentDots } from "~/theme";
 
@@ -74,35 +74,19 @@ const ClearDialog = ({ board, close }: TClearDialogProps) => {
   );
 };
 
-/** The id of the board that the page shows, from its URL; the shared board without one. */
-const currentBoard = () =>
-  new URLSearchParams(window.location.search).get("board") ?? "shared";
-
-/** The page's URL for another board, with the token kept. */
-const linkTo = (id: string) => {
-  const url = new URL(window.location.href);
-  url.searchParams.set("board", id);
-  return url.toString();
-};
-
 /**
- * The board that the page shows, and a menu of every board on the server, one for each project that an agent works
- * in and the shared one, each with its cards and whether an agent follows it; a click opens that board's page. The
+ * The board that the page shows, and a menu of every board on the server, each with its cards and whether an agent
+ * follows it; a click opens that board's page. The
  * menu ends with Clear this board, which asks first, in the page, and names what goes.
  */
 export const BoardMenu = () => {
   const { model } = useBoard();
   const [boards, setBoards] = useState<TBoardList | "failed" | null>(null);
   const [clearing, setClearing] = useState(false);
-  const current = currentBoard();
+  const current = boardInUrl() ?? "";
   const open = async () => {
     try {
-      const url = new URL(
-        `/boards${window.location.search}`,
-        window.location.href,
-      );
-      const response = await fetch(url);
-      setBoards(boardListSchema.parse(await response.json()));
+      setBoards(await fetchBoards());
     } catch {
       setBoards("failed");
     }
@@ -135,19 +119,20 @@ export const BoardMenu = () => {
             </li>
           ) : (
             boards.map((board) => (
-              <li key={board.id} role="none">
+              <li key={board.name} role="none">
                 <a
                   role="menuitem"
-                  href={linkTo(board.id)}
-                  aria-current={board.id === current ? "page" : undefined}
-                  className={`flex items-center gap-2 rounded-lg px-2 py-1 text-xs hover:bg-surface-sunken ${board.id === current ? "bg-accent-faint text-accent-strong" : "text-ink-soft"}`}
+                  href={linkTo(board.name)}
+                  aria-current={board.name === current ? "page" : undefined}
+                  className={`flex items-center gap-2 rounded-lg px-2 py-1 text-xs hover:bg-surface-sunken ${board.name === current ? "bg-accent-faint text-accent-strong" : "text-ink-soft"}`}
                 >
                   <span
                     className={`size-2 rounded-full ${agentDots[board.agent]}`}
                   />
-                  <span className="truncate font-mono">{board.id}</span>
+                  <span className="truncate font-mono">{board.name}</span>
                   <span className="ml-auto text-ink-faint">
-                    {board.cards} {board.cards === 1 ? "card" : "cards"}
+                    {board.card_count}{" "}
+                    {board.card_count === 1 ? "card" : "cards"}
                   </span>
                 </a>
               </li>

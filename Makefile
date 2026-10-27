@@ -12,4 +12,4 @@ check-live:
 	cd server && AGENT_HUD_LIVE=1 uv run pytest tests/test_live.py -s
 
 serve:
-	cd server && uv run uvicorn agent_hud.web:create_app --factory --port $${AGENT_HUD_PORT:-7676}
+	cd server && uv run uvicorn agent_hud.web:app_factory --factory --port $${AGENT_HUD_PORT:-7676}

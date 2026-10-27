@@ -6,26 +6,25 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
-from secrets import token_urlsafe
 from time import monotonic
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketException, status
-from fastapi import Request as HttpRequest
+from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketException, status
 from fastapi.staticfiles import StaticFiles
+from mcp.server.subscriptions import InMemorySubscriptionBus, ResourceUpdated
 from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardRegistry, BoardSummary
+from agent_hud.boards import BoardSummary, TBoardName, board_names, open_hud, summarize
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
 from agent_hud.frames import split_into_frames
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.base import Model
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
-from agent_hud.server import build_mcp_server
+from agent_hud.server import board_uri, build_mcp_server
 from agent_hud.settings import get_settings
 
 
@@ -128,21 +127,19 @@ def keep_token(token: str, state_dir: Path) -> None:
     path.write_text(token)
 
 
-def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) -> FastAPI:
+def create_app(huds: dict[TBoardName, Hud], stop: Callable[[], None]) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
-    the boards in the settings' directory, with the hud as the shared board when one is given. The agent's requests
-    name their board in the X-Agent-Hud-Board header, and the sockets in the board query parameter.
-    The sockets and /boards need the token as a query parameter; /mcp/ needs it as a bearer token when the settings give one.
-    After the settings' idle seconds with no page or monitor connected and no request, the app calls stop, which stops
-    the process unless the caller gives another. RuntimeError when another process holds a board's file, as a second
-    uvicorn worker would.
+    the boards in the settings' boards dir; huds holds each board that is open.
+    The agent's tools name their board in an argument, and the sockets in the board query parameter.
+    The sockets and /boards need the socket token as a query parameter; /mcp/ needs the token as a bearer token when
+    the settings give one. After the settings' idle seconds with no page or monitor connected and no request, the app
+    calls stop. RuntimeError when another process holds a board's file, as a second uvicorn worker would.
     """
     settings = get_settings()
-    boards = BoardRegistry(settings.board_files, default_hud=hud)
-    token = settings.token or token_urlsafe(32)
-    keep_token(token, settings.state_dir)
-    mcp_app = build_mcp_server(boards, token).http_app(path="/")
+    keep_token(settings.socket_token, settings.state_dir)
+    bus = InMemorySubscriptionBus()
+    mcp_app = build_mcp_server(settings, huds, bus).http_app(path="/")
     activity = Activity()
 
     @asynccontextmanager
@@ -159,38 +156,40 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
         finally:
             if watch is not None:
                 watch.cancel()
-            boards.compact()
-            boards.close()
+            for hud in huds.values():
+                hud.compact()
+                hud.close()
 
-    def require_board(websocket: WebSocket) -> Hud:
-        """The hud of the board that the socket's board query parameter names; the shared board without one."""
-        board_id = websocket.query_params.get("board", BoardRegistry.default_board_id)
-        hud = boards.find(board_id)
-        if hud is None:
-            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board_id}'")
-        return hud
+    async def require_board(board: Annotated[TBoardName, Query()]) -> tuple[TBoardName, Hud]:
+        """
+        The board that the socket's board query parameter names, and its hud. A policy violation when there is none.
+        Async, so that the hud's SQLite file opens on the event loop's thread, which uses it.
+        """
+        try:
+            return board, open_hud(huds, settings.boards_dir, board)
+        except ValueError as error:
+            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, str(error)) from error
 
     app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     app.add_middleware(Watched, activity=activity)
-    with_token = token_dep(token)
+    with_token = token_dep(settings.socket_token)
 
     @app.get("/health")
     def health() -> dict[str, str]:
         """The app, its version and the build fingerprint it was started with, for the hook that starts it: any other answer on the port is another program."""
         return {"app": "agent-hud", "version": version("agent-hud"), "build": settings.build}
 
-    @app.get("/boards")
-    def board_summaries(request: HttpRequest) -> list[BoardSummary]:
+    @app.get("/boards", dependencies=[with_token])
+    async def board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
-        if request.query_params.get("token") != token:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "the token is missing or wrong")
-        return boards.summaries()
+        return [summarize(name, open_hud(huds, settings.boards_dir, name)) for name in board_names(settings.boards_dir)]
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
-    async def page(websocket: WebSocket, hud: Annotated[Hud, Depends(require_board)]) -> None:
+    async def page(websocket: WebSocket, board: Annotated[tuple[TBoardName, Hud], Depends(require_board)]) -> None:
         """Send the board's snapshot on connect and after each change, and act for the user, until the page disconnects."""
+        name, hud = board
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
             sender = tg.create_task(send_each(websocket, hud.snapshots()))
@@ -202,12 +201,14 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
                     reply = Rejected(kind=EventKind.rejected, id=request.id, reason=str(error)).model_dump_json()
                 else:
                     reply = Accepted(kind=EventKind.accepted, id=request.id).model_dump_json()
+                    await bus.publish(ResourceUpdated(uri=board_uri(name)))
                 await websocket.send_text(reply)
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[AgentOriginDep, with_token])
-    async def agent(websocket: WebSocket, hud: Annotated[Hud, Depends(require_board)]) -> None:
+    async def agent(websocket: WebSocket, board: Annotated[tuple[TBoardName, Hud], Depends(require_board)]) -> None:
         """Send each of the user's turns on the board to this agent's monitor, as frames of lines, until it disconnects."""
+        _, hud = board
         await websocket.accept()
         with hud.monitor():
             async with asyncio.TaskGroup() as tg:
@@ -221,3 +222,8 @@ def create_app(hud: Hud | None = None, stop: Callable[[], None] = stop_process) 
     app.mount("/mcp", mcp_app if settings.token is None else Bearer(mcp_app, settings.token))
     app.mount("/", StaticFiles(directory=settings.static_dir, html=True))
     return app
+
+
+def app_factory() -> FastAPI:
+    """The app as uvicorn serves it: no board open yet, and the process stops when idle."""
+    return create_app({}, stop_process)

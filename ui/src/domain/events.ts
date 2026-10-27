@@ -70,8 +70,8 @@ export const serverEventSchema = z.discriminatedUnion("kind", [
 export const boardListSchema = z
   .array(
     z.strictObject({
-      id: z.string().describe("Board id: a project's, or shared"),
-      cards: z
+      name: z.string().describe("The board's name"),
+      card_count: z
         .number()
         .int()
         .nonnegative()

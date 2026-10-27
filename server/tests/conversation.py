@@ -12,22 +12,23 @@ import uvicorn
 from fastmcp import Client
 from websockets.asyncio.client import ClientConnection, connect
 
-from agent_hud.frames import join_frames, parse_frame_head
+from agent_hud.boards import TBoardName
+from agent_hud.frames import FrameHead, join_frames
 from agent_hud.hud import Hud
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, THeardBody, Turn
 from agent_hud.settings import get_settings
 from agent_hud.web import create_app
-from tests.factories import as_json, send
+from tests.factories import BOARD, as_json, send
 
 # The app's token in the tests: /mcp/ needs it as a bearer token, and the sockets as a query parameter.
 TOKEN = "test-token"
 
 
-async def listen_url(tools: Client[Any]) -> str:
-    """The websocket URL of the user's turns that listen returns."""
-    listening = (await tools.call_tool("listen", {})).structured_content
+async def listen_url(tools: Client[Any], board: TBoardName = BOARD) -> str:
+    """The websocket URL of the user's turns on the board that listen returns."""
+    listening = (await tools.call_tool("listen", {"name": board})).structured_content
     assert listening is not None
     return str(listening["url"])
 
@@ -36,7 +37,9 @@ async def receive_turn(monitor: ClientConnection) -> Turn:
     """The next turn that the monitor gets, from all its frames. TimeoutError if it is not whole in five seconds."""
     async with asyncio.timeout(5):
         frames = [str(await monitor.recv())]
-        while (head := parse_frame_head(frames[-1])).of is not None and head.frame != head.of:
+        while (
+            head := FrameHead.model_validate_json(frames[-1].partition("\n")[0])
+        ).of is not None and head.frame != head.of:
             frames.append(str(await monitor.recv()))
     return join_frames(frames)
 
@@ -49,7 +52,7 @@ class Agent:
     monitor: ClientConnection
 
     async def write(self, *bodies: TBody) -> None:
-        await self.tools.call_tool("write", {"actions": as_json(*bodies)})
+        await self.tools.call_tool("write", {"name": BOARD, "actions": as_json(*bodies)})
 
     async def turn(self) -> Turn:
         """The next turn of the user that the monitor gets. TimeoutError if none comes in five seconds."""
@@ -112,7 +115,9 @@ class User:
 async def open_page(address: tuple[str, int]) -> AsyncGenerator[User]:
     """A user on a new page from the app's origin, until the context ends."""
     host, port = address
-    async with connect(f"ws://{host}:{port}/ws?token={TOKEN}", origin=f"http://{host}:{port}", proxy=None) as page:
+    async with connect(
+        f"ws://{host}:{port}/ws?board={BOARD}&token={TOKEN}", origin=f"http://{host}:{port}", proxy=None
+    ) as page:
         yield User(page, Snapshot.model_validate_json(await page.recv()))
 
 
@@ -127,7 +132,7 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
 
 @asynccontextmanager
 async def serve(
-    hud: Hud,
+    huds: dict[TBoardName, Hud],
     static_dir: Path,
     state_dir: Path,
     build: str = "",
@@ -138,7 +143,7 @@ async def serve(
     monitor_gap: float = 0,
 ) -> AsyncGenerator[tuple[str, int]]:
     """
-    Host and port of the app on the hud, with the UI in static_dir, its token in state_dir and the build fingerprint,
+    Host and port of the app on the boards dir of the state dir, with huds as its open boards, with the UI in static_dir, its token in state_dir and the build fingerprint,
     on the port or a free one, until the context ends; after the idle seconds without a socket or a request, when
     they are above 0, the app calls on_idle instead of stopping its process. The monitor's frames are at most
     monitor_chars when given, with no gap between the frames of a turn unless one is given.
@@ -153,7 +158,7 @@ async def serve(
         if monitor_chars is not None:
             env.setenv("AGENT_HUD_MONITOR_CHARS", str(monitor_chars))
         get_settings.cache_clear()
-        app = create_app(hud, stop=on_idle)
+        app = create_app(huds, on_idle)
     get_settings.cache_clear()
     # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
