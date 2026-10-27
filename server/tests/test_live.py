@@ -23,7 +23,7 @@ from time import monotonic
 import pytest
 from websockets.asyncio.client import connect
 
-from agent_hud.boards import board_id
+from agent_hud.boards import board_id_for_project
 from agent_hud.models.actions import Author
 from agent_hud.models.events import AgentState, Snapshot
 from tests.conversation import User
@@ -158,7 +158,7 @@ async def test_the_agent_answers_a_turn_sent_after_the_monitors_cap(tmp_path: Pa
         await session.until("cap", 180)
         assert session.cap is not None and session.opened is not None
         await session.until("writes", 180)
-        board = board_id(str(tmp_path / "project"))
+        board = board_id_for_project(str(tmp_path / "project"))
         async with open_page(port, token, board) as user:
             deadline = monotonic() + 120
             while "plan" not in user.board.cards or user.snapshot.agent is AgentState.away:

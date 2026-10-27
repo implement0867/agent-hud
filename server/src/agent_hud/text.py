@@ -10,7 +10,7 @@ def fence_options(info: str) -> dict[str, str]:
     return {key: value for word in info.split()[1:] for key, sep, value in [word.partition("=")] if sep}
 
 
-def squeeze(text: str) -> str:
+def strip_whitespace(text: str) -> str:
     """
     The text without its white space. Quotes match the card's text in this form, so that the page's text and the
     server's agree where they join blocks, lines and cells in other ways.
@@ -24,7 +24,7 @@ def inline_text(token: Token) -> str:
 
 
 @lru_cache(maxsize=256)
-def text_of(md: str) -> str:
+def visible_text(md: str) -> str:
     """
     The text of the markdown as the page shows it: the text of each block, and each line of code, one per line.
     A task item's box and a table cell of a box alone, [ ] or [x], show as a checkbox, which has no text.
@@ -55,9 +55,9 @@ def text_of(md: str) -> str:
     return "\n".join(lines)
 
 
-def places(md: str, quote: str) -> list[int]:
+def quote_offsets(md: str, quote: str) -> list[int]:
     """Where the quote starts in the card's text, squeezed, at each place it occurs; every place for an empty quote."""
-    text, wanted = squeeze(text_of(md)), squeeze(quote)
+    text, wanted = strip_whitespace(visible_text(md)), strip_whitespace(quote)
     if not wanted:
         return [0]
     found: list[int] = []

@@ -9,10 +9,10 @@ from fastmcp.exceptions import ToolError
 from hypothesis import given
 from mcp.types import Tool
 
-from agent_hud.boards import Huds
+from agent_hud.boards import BoardRegistry
 from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, TAgentBody
-from agent_hud.server import build
+from agent_hud.server import build_mcp_server
 from tests.factories import as_json, comment, link, put, read_board, remove, resize, say, send, unlink
 from tests.strategies import agent_bodies, card_ids
 
@@ -24,7 +24,7 @@ async def listed_write(client: Client[Any]) -> Tool:
 @pytest.fixture
 async def client(hud: Hud) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the test's hud as the shared board."""
-    async with Client(build(Huds(None, shared=hud))) as client:
+    async with Client(build_mcp_server(BoardRegistry(None, default_hud=hud))) as client:
         yield client
 
 
@@ -169,7 +169,7 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TAge
     """Assemble: a client connected to a new server.
     Act: check an action of each kind against the listed schema of write.
     Assert: the schema takes it, so that a client that checks the schema sends each action that the server takes."""
-    async with Client(build(Hud())) as client:
+    async with Client(build_mcp_server(BoardRegistry(None, default_hud=Hud()))) as client:
         jsonschema.validate({"actions": as_json(body)}, (await listed_write(client)).input_schema)
 
 

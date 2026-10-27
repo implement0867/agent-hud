@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from agent_hud.hud import Hud, Since, hear
+from agent_hud.hud import ChangesSince, Hud, to_agent_message
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, THeardBody, Turn
@@ -106,7 +106,7 @@ async def test_a_hud_on_the_state_file_takes_up_where_the_last_left_off(batch: l
         # The user's actions of each turn as the agent hears them, without the sends; the last turn once it is sent.
         expected: list[list[THeardBody]] = [[]]
         for action in batch:
-            heard = hear(hud.board, action).body
+            heard = to_agent_message(hud.board, action).body
             with suppress(ValueError):
                 hud.act([action])
                 if action.author is Author.user and action.body.kind is not ActionKind.send:
@@ -313,13 +313,13 @@ def test_changed_since_names_the_cards_the_later_actions_touched_and_their_ids()
             Action(id="m", author=Author.user, body=move("d", 1, 1)),
         ]
     )
-    assert hud.changed_since("turn") == Since({"a", "b", "c", "d"}, {"p", "f", "l", "m"})
-    assert hud.changed_since("f") == Since({"c", "b", "d"}, {"l", "m"})
+    assert hud.changed_since("turn") == ChangesSince({"a", "b", "c", "d"}, {"p", "f", "l", "m"})
+    assert hud.changed_since("f") == ChangesSince({"c", "b", "d"}, {"l", "m"})
     assert hud.changed_since("nope") is None
     hud.act(
         [Action(id="clear", author=Author.agent, body=clear()), Action(id="s", author=Author.agent, body=say("hi"))]
     )
-    assert hud.changed_since("turn") == Since(None, {"p", "f", "l", "m", "clear", "s"})
+    assert hud.changed_since("turn") == ChangesSince(None, {"p", "f", "l", "m", "clear", "s"})
 
 
 def test_a_hud_on_a_state_file_of_an_earlier_version_starts_empty() -> None:

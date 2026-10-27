@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from agent_hud.models.actions import Action, Author, TBody
 from agent_hud.models.base import Model
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Size, Thread, Version
-from agent_hud.text import places, squeeze, text_of
+from agent_hud.text import quote_offsets, strip_whitespace, visible_text
 from tests.factories import clear, comment, link, move, place, put, remove, resize, restore, say, unlink
 from tests.strategies import (
     action_ids,
@@ -77,7 +77,7 @@ def test_put_sets_the_card_and_keeps_the_threads_whose_words_it_keeps(
     assert on_card == {*kept, *version.threads}
     assert not set(kept) & set(version.threads)
     for thread in kept.values():
-        assert thread.occurrence < len(places(md, thread.quote))
+        assert thread.occurrence < len(quote_offsets(md, thread.quote))
 
 
 @given(boards(), card_ids(), mds(), st.integers(min_value=0, max_value=3))
@@ -258,7 +258,7 @@ def test_a_comment_fits_the_words_the_card_shows_and_the_card(
     board = act(Board(), put(card_id, list_md("1. ", texts)))
     quote = data.draw(st.sampled_from(["", *texts]))
     other = data.draw(card_ids().filter(lambda other: other != card_id))
-    if len(places(board.cards[card_id].md, quote)) == 1:
+    if len(quote_offsets(board.cards[card_id].md, quote)) == 1:
         act(board, comment(card_id, text, quote))
     with pytest.raises(ValueError):
         act(board, comment(card_id, text, "zz not on the card zz"))
@@ -336,7 +336,7 @@ def test_text_of_has_the_words_the_page_shows() -> None:
         "| | Step |\n|---|---|\n| [x] | parse |\n| [ ] | render |\n\n"
         "```py file=src/app.py start=40\nx = 1\n\ny = 2\n```"
     )
-    assert text_of(md).split("\n") == [
+    assert visible_text(md).split("\n") == [
         "Plan",
         "Ship the board soon & more  x",
         "task one",
@@ -371,7 +371,7 @@ def test_places_finds_each_place_of_the_quote_without_white_space(md: str, quote
     """Assemble: markdown and a quote of its words.
     Act: find the places of the quote.
     Assert: each start in the text without white space, across blocks and markdown, overlapping too; one place for an empty quote."""
-    assert places(md, quote) == found
+    assert quote_offsets(md, quote) == found
 
 
 @given(st.lists(item_texts(), min_size=1))
@@ -380,8 +380,8 @@ def test_each_list_item_is_a_place_in_the_text(texts: list[str]) -> None:
     Act: find each item's words.
     Assert: the card shows each item's words."""
     md = list_md("- ", texts)
-    assert all(places(md, text) for text in texts)
-    assert squeeze(text_of(md)) == squeeze("".join(texts))
+    assert all(quote_offsets(md, text) for text in texts)
+    assert strip_whitespace(visible_text(md)) == strip_whitespace("".join(texts))
 
 
 def test_a_thread_follows_its_words_to_the_nearest_place_and_goes_to_the_history_when_they_go() -> None:
@@ -432,7 +432,9 @@ def test_link_draws_an_arrow_from_words_to_a_card_and_unlink_removes_it(
     Act: link from its words or the card to itself, then unlink the arrow.
     Assert: the board has the arrow, then none."""
     board = act(Board(), put(card_id, list_md("1. ", texts)))
-    quote = data.draw(st.sampled_from(["", *texts]).filter(lambda q: len(places(board.cards[card_id].md, q)) == 1))
+    quote = data.draw(
+        st.sampled_from(["", *texts]).filter(lambda q: len(quote_offsets(board.cards[card_id].md, q)) == 1)
+    )
     linked = act(board, link(arrow_id, card_id, card_id, quote=quote), author)
     assert linked.arrows == {arrow_id: Arrow(card=card_id, quote=quote, dst=card_id, text="", author=author)}
     assert act(linked, unlink(arrow_id)).arrows == {}

@@ -12,8 +12,8 @@ from mcp.types import ToolAnnotations
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
-from agent_hud.boards import Huds
-from agent_hud.hud import Hud, Since
+from agent_hud.boards import BoardRegistry
+from agent_hud.hud import ChangesSince, Hud
 from agent_hud.models.actions import (
     Action,
     ActionKind,
@@ -28,14 +28,14 @@ from agent_hud.models.actions import (
 )
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board, Said
-from agent_hud.schema import compact
+from agent_hud.schema import compact_actions_schema
 
 type TActions = Annotated[list[TAgentBody], Field(min_length=1)]
 
 BodyAdapter = TypeAdapter[TAgentBody](TAgentBody)
 
 
-def agent_kinds() -> list[ActionKind]:
+def agent_action_kinds() -> list[ActionKind]:
     """The kinds of action the agent writes: each kind but send, which is the page's."""
     return [kind for kind in ActionKind if kind is not ActionKind.send]
 
@@ -53,7 +53,7 @@ class Listening(Model):
     )
 
 
-def board_key() -> str | None:
+def project_from_request() -> str | None:
     """The board that the agent's request names in its X-Agent-Hud-Board header; none in memory or without the header."""
     try:
         return get_http_request().headers.get("x-agent-hud-board") or None
@@ -70,19 +70,19 @@ def turns_command(url: str) -> str:
     return f"{runner}agent-hud-turns {quote(url)}"
 
 
-class Retired(Model):
+class RetiredThread(Model):
     """A thread that went to its card's history, since the words it was on are gone."""
 
     card: TCardId
     quote: TQuote
 
 
-class Written(Model):
+class WriteResult(Model):
     """What a write made and what it moved aside."""
 
     added: list[TCardId] = Field(description="The cards the write put that were not on the board")
     replaced: list[TCardId] = Field(description="The cards the write put in place of the card with that id")
-    retired: list[Retired] = Field(
+    retired: list[RetiredThread] = Field(
         description="The threads that moved to the history, since the write changed their words or removed their card"
     )
     dropped: list[TCardId] = Field(description="The arrows the write dropped, since their words or a card went")
@@ -94,7 +94,7 @@ def messages_after(chat: Sequence[Said], since: TActionId) -> tuple[Said, ...]:
     return tuple(chat[found[-1] + 1 :] if found else chat)
 
 
-def selected(board: Board, cards: list[TCardId] | None, chat: Sequence[Said]) -> Board:
+def select_cards(board: Board, cards: list[TCardId] | None, chat: Sequence[Said]) -> Board:
     """
     The board with the given cards only, if given, with everything keyed by card or by a ref on it kept for those cards;
     and with the chat in place of its messages.
@@ -115,15 +115,15 @@ def selected(board: Board, cards: list[TCardId] | None, chat: Sequence[Said]) ->
     )
 
 
-def written(before: Board, after: Board, bodies: list[TAgentBody]) -> Written:
+def summarize_write(before: Board, after: Board, bodies: list[TAgentBody]) -> WriteResult:
     """What the actions made of the board and moved aside, from the board before them and after."""
     put = [body.id for body in bodies if isinstance(body, Put)]
     unlinked = {body.id for body in bodies if isinstance(body, Unlink)}
-    return Written(
+    return WriteResult(
         added=[card_id for card_id in put if card_id not in before.cards],
         replaced=[card_id for card_id in put if card_id in before.cards],
         retired=[
-            Retired(card=thread.card, quote=thread.quote)
+            RetiredThread(card=thread.card, quote=thread.quote)
             for card_id, versions in after.history.items()
             for version in versions[len(before.history.get(card_id, ())) :]
             for thread in version.threads.values()
@@ -132,9 +132,9 @@ def written(before: Board, after: Board, bodies: list[TAgentBody]) -> Written:
     )
 
 
-def detail(error: ErrorDetails) -> str:
+def describe_validation_error(error: ErrorDetails) -> str:
     """One validation error on an action, in a line: the field and what is wrong with it, or the kind that is not one."""
-    kinds = ", ".join(agent_kinds())
+    kinds = ", ".join(agent_action_kinds())
     match error["type"], [str(part) for part in error["loc"]]:
         case "union_tag_invalid", _:
             return f"kind '{error.get('ctx', {}).get('tag')}' is not one of {kinds}"
@@ -148,7 +148,7 @@ def detail(error: ErrorDetails) -> str:
             return error["msg"].removeprefix("Value error, ")
 
 
-def parse(actions: list[dict[str, Any]]) -> list[TAgentBody]:
+def parse_agent_actions(actions: list[dict[str, Any]]) -> list[TAgentBody]:
     """
     The actions as the model of their kind takes them.
     Misfit, with the index of the action, if one does not fit its kind, or puts a card that an earlier one puts.
@@ -160,8 +160,8 @@ def parse(actions: list[dict[str, Any]]) -> list[TAgentBody]:
             bodies.append(BodyAdapter.validate_python(action))
         except ValidationError as error:
             kind = action.get("kind")
-            reasons = ", ".join(detail(found) for found in error.errors())
-            raise Misfit(n, ActionKind(kind) if kind in agent_kinds() else None, reasons) from error
+            reasons = ", ".join(describe_validation_error(found) for found in error.errors())
+            raise Misfit(n, ActionKind(kind) if kind in agent_action_kinds() else None, reasons) from error
         match bodies[-1]:
             case Put(id=card_id) if card_id in puts:
                 raise Misfit(n, ActionKind.put, f"card '{card_id}' is already put by action {puts[card_id]}")
@@ -172,34 +172,34 @@ def parse(actions: list[dict[str, Any]]) -> list[TAgentBody]:
     return bodies
 
 
-def build(huds: Huds, token: str | None = None) -> FastMCP:
+def build_mcp_server(boards: BoardRegistry, token: str | None = None) -> FastMCP:
     """
     The MCP server whose tools act on the board that each request names, or on the shared board.
     With a token, the URL that listen returns carries it.
     """
     mcp = FastMCP("agent-hud")
 
-    def hud_now() -> Hud:
-        return huds.of(board_key())
+    def current_hud() -> Hud:
+        return boards.hud_for(project_from_request())
 
-    async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> Written:
+    async def write(actions: Annotated[list[dict[str, Any]], Field(min_length=1)]) -> WriteResult:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
         A card is markdown; put adds it or replaces it. A comment or an arrow names a card and a quote of its words, as the card shows them.
         A thread on words that a put keeps stays with them; the rest goes to the card's history.
         Returns the cards added and replaced, the threads that went to the history, and the arrows dropped.
         """
-        hud = hud_now()
+        hud = current_hud()
         before = hud.board
         try:
-            bodies = parse(actions)
+            bodies = parse_agent_actions(actions)
             now = datetime.now(UTC)
             hud.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in bodies])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
-        return written(before, hud.board, bodies)
+        return summarize_write(before, hud.board, bodies)
 
-    def listed(actions: TActions) -> None:
+    def write_schema_stub(actions: TActions) -> None:
         """The signature of write with the model of each kind of action, for the listed schema."""
 
     async def read(
@@ -220,11 +220,11 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
         The board: the cards, the threads of comments on their words, the arrows and the chat.
         Read it once, then follow the turns; read it again when unsure, with cards or since to read less.
         """
-        hud = hud_now()
+        hud = current_hud()
         board = hud.board if history else hud.board.model_copy(update={"history": {}})
         chat: Sequence[Said] = board.messages
         match None if since is None else hud.changed_since(since):
-            case Since(cards=changed, actions=ids):
+            case ChangesSince(cards=changed, actions=ids):
                 chat = [said for said in chat if said.id in ids]
                 if changed is not None:
                     cards = [card_id for card_id in (board.cards if cards is None else cards) if card_id in changed]
@@ -232,7 +232,7 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
                 chat = messages_after(chat, since)
             case _:
                 pass
-        return selected(board, cards, chat)
+        return select_cards(board, cards, chat)
 
     async def listen() -> Listening:
         """
@@ -243,14 +243,14 @@ def build(huds: Huds, token: str | None = None) -> FastMCP:
         An edit of a card on the board is a diff of its markdown.
         Also the board's id and the monitors already open on it: above 0, another session follows this board, so tell the user before you open one too.
         """
-        key = board_key()
-        board = huds.id_of(key)
-        url = get_http_request().url.replace(scheme="ws", path="/agent").include_query_params(board=board)
+        project = project_from_request()
+        board_id = boards.board_id_for(project)
+        url = get_http_request().url.replace(scheme="ws", path="/agent").include_query_params(board=board_id)
         url = str(url if token is None else url.include_query_params(token=token))
-        return Listening(url=url, command=turns_command(url), board=board, monitors=huds.of(key).monitors)
+        return Listening(url=url, command=turns_command(url), board=board_id, monitors=boards.hud_for(project).monitors)
 
     tool = FunctionTool.from_function(write)
-    parameters, kinds = compact(FunctionTool.from_function(listed).parameters)
+    parameters, kinds = compact_actions_schema(FunctionTool.from_function(write_schema_stub).parameters)
     mcp.add_tool(
         tool.model_copy(update={"parameters": parameters, "description": f"{tool.description}\nActions: {kinds}."})
     )

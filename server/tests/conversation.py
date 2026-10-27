@@ -12,7 +12,7 @@ import uvicorn
 from fastmcp import Client
 from websockets.asyncio.client import ClientConnection, connect
 
-from agent_hud.frames import head_of, turn_of
+from agent_hud.frames import join_frames, parse_frame_head
 from agent_hud.hud import Hud
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
@@ -36,9 +36,9 @@ async def receive_turn(monitor: ClientConnection) -> Turn:
     """The next turn that the monitor gets, from all its frames. TimeoutError if it is not whole in five seconds."""
     async with asyncio.timeout(5):
         frames = [str(await monitor.recv())]
-        while (head := head_of(frames[-1])).of is not None and head.frame != head.of:
+        while (head := parse_frame_head(frames[-1])).of is not None and head.frame != head.of:
             frames.append(str(await monitor.recv()))
-    return turn_of(frames)
+    return join_frames(frames)
 
 
 @dataclass
