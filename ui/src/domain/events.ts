@@ -71,7 +71,7 @@ export const boardListSchema = z
   .array(
     z.strictObject({
       name: z.string().describe("The board's name"),
-      cards: z
+      card_count: z
         .number()
         .int()
         .nonnegative()

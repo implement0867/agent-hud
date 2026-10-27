@@ -16,7 +16,7 @@ from tests.factories import put
 def test_a_slug_is_a_board_name(name: str) -> None:
     """Act: a board summary with a name of 1 to 64 letters, digits, _ or -.
     Assert: the summary keeps the name."""
-    assert BoardSummary(name=name, cards=0, agent=AgentState.away).name == name
+    assert BoardSummary(name=name, card_count=0, agent=AgentState.away).name == name
 
 
 @pytest.mark.parametrize("text", ["", "a/b", "has space", "x" * 65, "../shared"])
@@ -24,7 +24,7 @@ def test_a_board_name_rejects_other_text(text: str) -> None:
     """Act: a board summary with a name that is not 1 to 64 letters, digits, _ or -.
     Assert: ValidationError."""
     with pytest.raises(ValidationError, match="String should match pattern"):
-        BoardSummary.model_validate({"name": text, "cards": 0, "agent": AgentState.away})
+        BoardSummary.model_validate({"name": text, "card_count": 0, "agent": AgentState.away})
 
 
 def test_open_boards_opens_each_state_file_of_the_directory_by_its_name(tmp_path: Path) -> None:

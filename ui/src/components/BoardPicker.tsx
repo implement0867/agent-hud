@@ -42,7 +42,7 @@ export const BoardPicker = () => {
                 />
                 <span className="truncate font-mono">{board.name}</span>
                 <span className="ml-auto text-ink-faint">
-                  {board.cards} {board.cards === 1 ? "card" : "cards"}
+                  {board.card_count} {board.card_count === 1 ? "card" : "cards"}
                 </span>
               </a>
             </li>

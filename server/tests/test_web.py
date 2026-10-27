@@ -191,7 +191,7 @@ async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
         created = (await remote.call_tool("create_board", {"name": "alpha"})).structured_content
-        assert created == {"name": "alpha", "cards": 0, "agent": "away"}
+        assert created == {"name": "alpha", "card_count": 0, "agent": "away"}
         with pytest.raises(ToolError, match="a board 'alpha' exists"):
             await remote.call_tool("create_board", {"name": "alpha"})
         await remote.call_tool("write", {"name": "alpha", "actions": as_json(put("plan", "1. a"))})
@@ -202,9 +202,9 @@ async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
         origin = f"http://{host}:{port}"
         async with connect(f"ws://{host}:{port}/ws?token={TOKEN}&board=alpha", origin=origin, proxy=None) as page:
             assert list(Snapshot.model_validate_json(await page.recv()).board.cards) == ["plan"]
-        assert (await asyncio.to_thread(list_boards, address))["alpha"]["cards"] == 1
+        assert (await asyncio.to_thread(list_boards, address))["alpha"]["card_count"] == 1
         listed = (await remote.call_tool("list_boards", {})).structured_content
-        assert listed is not None and {"name": "alpha", "cards": 1, "agent": "away"} in listed["result"]
+        assert listed is not None and {"name": "alpha", "card_count": 1, "agent": "away"} in listed["result"]
         await remote.call_tool("delete_board", {"name": "alpha"})
         assert "alpha" not in await asyncio.to_thread(list_boards, address)
         assert (state_dir / "boards").is_dir() and not (state_dir / "boards" / "alpha.db").exists()

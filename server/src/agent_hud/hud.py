@@ -54,12 +54,8 @@ class ChangesSince(NamedTuple):
 
 class Hud:
     """
-    The board, and the log of the actions that made it; and the agents' monitors.
-    The log is kept in the state file after the board at a checkpoint, with the agents' read position, and compacted
-    on a clear and on shutdown: the checkpoint takes the board at the start of the oldest turn that an agent has not
-    had, and the file keeps the turns from there. The state file ":memory:" keeps nothing after the process.
-    One process holds the state file: RuntimeError when another does. ValidationError when the state file holds a
-    board or an action that this version does not take, such as one of an earlier version.
+    The board, the actions that made it, and the agents' monitors, kept in the state file.
+    RuntimeError when another process holds the file. ValidationError when the file does not fit this version.
     """
 
     def __init__(self, state_file: Path) -> None:
@@ -70,7 +66,6 @@ class Hud:
         self._positions: list[list[int]] = []
         self._store = Store(state_file)
         try:
-            # The sequence number in the store of the first action of the log.
             self._base, self.board, actions, read = self._store.load()
         except ValidationError:
             self._store.close()
