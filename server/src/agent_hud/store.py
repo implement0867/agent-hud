@@ -1,11 +1,40 @@
 import sqlite3
 from pathlib import Path
+from typing import Protocol
 
 from agent_hud.models.actions import Action
 from agent_hud.models.board import Board
 
 
-class Store:
+class Store(Protocol):
+    """
+    The state of one board: the board at a checkpoint, the actions from there on, each at its sequence number, and
+    the sequence number up to which an agent has had the actions.
+    """
+
+    def load(self) -> tuple[int, Board, list[Action], int]:
+        """
+        The checkpoint's sequence number and board, the actions from there on, and the agent's sequence number.
+        ValidationError when the store holds a board or an action that this version does not take.
+        """
+        ...
+
+    def append(self, seq: int, actions: list[Action]) -> None:
+        """Keep the actions, the first at the sequence number."""
+        ...
+
+    def compact(self, seq: int, board: Board, read: int) -> None:
+        """Make the board, which the actions before the sequence number made, the checkpoint; drop those actions; keep the agent's sequence number."""
+        ...
+
+    def keep_read(self, read: int) -> None:
+        """Keep the sequence number up to which an agent has had the actions."""
+        ...
+
+    def close(self) -> None: ...
+
+
+class SqliteStore:
     """
     The state in one SQLite file: the board at a checkpoint, the actions from there on, each at its sequence number,
     and the sequence number up to which an agent has had the actions. One process holds the file: RuntimeError when

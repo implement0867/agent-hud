@@ -27,14 +27,14 @@ from pydantic import ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
-from agent_hud.boards import open_hud
+from agent_hud.boards import exchange_on_file, open_exchange
+from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
-from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, ActionKind, Author, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings, get_settings
-from agent_hud.store import Store
+from agent_hud.store import SqliteStore
 from agent_hud.web import create_app, send_turns
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
 from tests.factories import BOARD, as_json, comment, put, say, send
@@ -57,28 +57,28 @@ def host_names() -> st.SearchStrategy[str]:
 
 
 @pytest.fixture(scope="module")
-def hud(state_dir: Path) -> Iterator[Hud]:
+def exchange(state_dir: Path) -> Iterator[Exchange]:
     """A new board for the module, for the app and the agent."""
-    with closing(Hud(state_dir / "boards" / f"{BOARD}.db")) as hud:
-        yield hud
+    with closing(exchange_on_file(state_dir / "boards" / f"{BOARD}.db")) as exchange:
+        yield exchange
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def address(static_dir: Path, state_dir: Path, hud: Hud) -> AsyncIterator[tuple[str, int]]:
-    """Host and port of the app on the module's hud."""
-    async with serve({BOARD: hud}, static_dir, state_dir) as address:
+async def address(static_dir: Path, state_dir: Path, exchange: Exchange) -> AsyncIterator[tuple[str, int]]:
+    """Host and port of the app on the module's exchange."""
+    async with serve({BOARD: exchange}, static_dir, state_dir) as address:
         yield address
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def user(address: tuple[str, int], hud: Hud) -> AsyncIterator[User]:
+async def user(address: tuple[str, int], exchange: Exchange) -> AsyncIterator[User]:
     """A page from the app's origin."""
     async with open_page(address) as user:
         yield user
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def listeners(address: tuple[str, int], hud: Hud) -> AsyncIterator[list[ClientConnection]]:
+async def listeners(address: tuple[str, int], exchange: Exchange) -> AsyncIterator[list[ClientConnection]]:
     """Two agents' sockets for the user's actions, at the URL that the listen tool returns."""
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
@@ -88,10 +88,10 @@ async def listeners(address: tuple[str, int], hud: Hud) -> AsyncIterator[list[Cl
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def agent(hud: Hud, state_dir: Path) -> AsyncIterator[Client[Any]]:
-    """The MCP tools in memory, on the same hud as the app. MCP over HTTP is slower per call."""
+async def agent(exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
+    """The MCP tools in memory, on the same exchange as the app. MCP over HTTP is slower per call."""
     settings = Settings(state_dir=state_dir, static_dir=state_dir)
-    async with Client(build_mcp_server(settings, {BOARD: hud}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -133,24 +133,24 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
 
 
 async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
-    """Assemble: a hud on a state file, with a card, a send that an agent took, and a comment the user has not sent.
+    """Assemble: an exchange on a state file, with a card, a send that an agent took, and a comment the user has not sent.
     Act: serve the app on it, and stop it.
-    Assert: the checkpoint holds the board at the start of the user's turn, the state file only the turn, and a new hud starts on it."""
+    Assert: the checkpoint holds the board at the start of the user's turn, the state file only the turn, and a new exchange starts on it."""
     state_file = tmp_path / "board.db"
-    hud = Hud(state_file)
-    hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
-    hud.act([Action(id="u", author=Author.user, body=send())])
-    hud.act([Action(id="r", author=Author.user, body=comment("plan", "yes", "a"))])
-    async with serve({BOARD: hud}, static_dir, tmp_path) as address, open_agent(address):
+    exchange = exchange_on_file(state_file)
+    exchange.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
+    exchange.act([Action(id="u", author=Author.user, body=send())])
+    exchange.act([Action(id="r", author=Author.user, body=comment("plan", "yes", "a"))])
+    async with serve({BOARD: exchange}, static_dir, tmp_path) as address, open_agent(address):
         pass
-    store = Store(state_file)
+    store = SqliteStore(state_file)
     _, checkpoint, kept, _ = store.load()
     store.close()
-    assert checkpoint.cards == hud.board.cards
+    assert checkpoint.cards == exchange.board.cards
     assert checkpoint.threads == {}
     assert [action.id for action in kept] == ["r"]
-    again = Hud(state_file)
-    assert again.board == hud.board
+    again = exchange_on_file(state_file)
+    assert again.board == exchange.board
     again.close()
 
 
@@ -161,10 +161,10 @@ async def test_a_second_app_on_the_state_dir_does_not_open_a_board_the_first_hol
     Act: open the board's file for another app on the same state dir, as a second uvicorn worker would.
     Assert: RuntimeError that names the board's file; and once the first app has stopped, the board opens."""
     state_file = tmp_path / "boards" / "plan.db"
-    async with serve({"plan": Hud(state_file)}, static_dir, tmp_path):
+    async with serve({"plan": exchange_on_file(state_file)}, static_dir, tmp_path):
         with pytest.raises(RuntimeError, match=re.escape(str(state_file))):
-            open_hud({}, tmp_path / "boards", "plan")
-    open_hud({}, tmp_path / "boards", "plan").close()
+            open_exchange({}, tmp_path / "boards", "plan")
+    open_exchange({}, tmp_path / "boards", "plan").close()
 
 
 def list_boards(address: tuple[str, int]) -> dict[str, dict[str, Any]]:
@@ -175,9 +175,9 @@ def list_boards(address: tuple[str, int]) -> dict[str, dict[str, Any]]:
 
 
 async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
-    address: tuple[str, int], hud: Hud, state_dir: Path
+    address: tuple[str, int], exchange: Exchange, state_dir: Path
 ) -> None:
-    """Assemble: the app, whose one board is the module's hud.
+    """Assemble: the app, whose one board is the module's exchange.
     Act: an agent creates the board alpha, puts a card on it, and listens; a page opens alpha; the agent deletes alpha.
     Assert: the card is on alpha alone, listen names alpha in its URL, the page sees the card, /boards and list_boards
     list alpha with its card; a second create of alpha fails; after the delete, alpha and its file are gone, and a
@@ -192,7 +192,7 @@ async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
         listening = (await remote.call_tool("listen", {"name": "alpha"})).structured_content
         assert listening is not None
         assert "board=alpha" in str(listening["url"]) and listening["board"] == "alpha"
-        assert "plan" not in hud.board.cards
+        assert "plan" not in exchange.board.cards
         origin = f"http://{host}:{port}"
         async with connect(f"ws://{host}:{port}/ws?token={TOKEN}&board=alpha", origin=origin, proxy=None) as page:
             assert list(Snapshot.model_validate_json(await page.recv()).board.cards) == ["plan"]
@@ -231,10 +231,10 @@ async def test_a_tool_refuses_a_name_that_is_not_a_board_name(agent: Client[Any]
             await agent.call_tool(tool, {"name": name})
 
 
-async def test_a_monitor_on_one_board_counts_for_that_board_alone(address: tuple[str, int], hud: Hud) -> None:
+async def test_a_monitor_on_one_board_counts_for_that_board_alone(address: tuple[str, int], exchange: Exchange) -> None:
     """Assemble: the app, and the board gamma.
     Act: open a monitor on gamma.
-    Assert: gamma says an agent waits and the module's board says what its hud says; and a socket on a board that
+    Assert: gamma says an agent waits and the module's board says what its exchange says; and a socket on a board that
     there is not, or without a board, fails, and /boards without the token fails."""
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
@@ -243,7 +243,7 @@ async def test_a_monitor_on_one_board_counts_for_that_board_alone(address: tuple
     async with connect(url, proxy=None):
         await asyncio.sleep(0.1)
         boards = await asyncio.to_thread(list_boards, address)
-        assert boards["gamma"]["agent"] == AgentState.waiting and boards[BOARD]["agent"] == hud.snapshot().agent
+        assert boards["gamma"]["agent"] == AgentState.waiting and boards[BOARD]["agent"] == exchange.snapshot().agent
     with pytest.raises(InvalidStatus):
         await connect(f"ws://{host}:{port}/agent?token={TOKEN}&board=nowhere", proxy=None)
     with pytest.raises(InvalidStatus):
@@ -295,7 +295,7 @@ async def test_health_names_the_app_and_its_version(address: tuple[str, int]) ->
         )
 
 
-async def test_page_gets_the_board_on_connect(address: tuple[str, int], hud: Hud) -> None:
+async def test_page_gets_the_board_on_connect(address: tuple[str, int], exchange: Exchange) -> None:
     """Assemble: the app.
     Act: open a page from the app's origin.
     Assert: the first event carries the board."""
@@ -303,7 +303,7 @@ async def test_page_gets_the_board_on_connect(address: tuple[str, int], hud: Hud
     async with connect(
         f"ws://{host}:{port}/ws?board={BOARD}&token={TOKEN}", origin=f"http://{host}:{port}", proxy=None
     ) as page:
-        assert Snapshot.model_validate_json(await page.recv()).board == hud.board
+        assert Snapshot.model_validate_json(await page.recv()).board == exchange.board
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
@@ -339,14 +339,14 @@ async def test_the_agent_socket_takes_the_token_without_origin(address: tuple[st
 @given(writes())
 @settings(deadline=None)
 async def test_page_gets_the_board_after_each_write(
-    user: User, agent: Client[Any], hud: Hud, writes: list[list[TBody]]
+    user: User, agent: Client[Any], exchange: Exchange, writes: list[list[TBody]]
 ) -> None:
     """Assemble: a page on the app.
     Act: the agent writes each batch of actions.
     Assert: after each write, the page shows the board."""
     for batch in writes:
         await agent.call_tool("write", {"name": BOARD, "actions": as_json(*batch)}, raise_on_error=False)
-        assert await user.sees(hud.board) == hud.board
+        assert await user.sees(exchange.board) == exchange.board
 
 
 @given(card_ids(), mds(), st.data())
@@ -355,7 +355,7 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     user: User,
     listeners: list[ClientConnection],
     agent: Client[Any],
-    hud: Hud,
+    exchange: Exchange,
     card_id: str,
     md: str,
     data: st.DataObject,
@@ -365,20 +365,20 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     Assert: accepted, the page shows the board and each listener gets a turn of what the page listed as pending; or rejected, and the board is as it was."""
     body = data.draw(bodies(st.just(card_id)))
     await agent.call_tool("write", {"name": BOARD, "actions": as_json(put(card_id, md))})
-    before = hud.board
-    pending = [heard.body for heard in hud.snapshot().pending]
+    before = exchange.board
+    pending = [heard.body for heard in exchange.snapshot().pending]
     match await user.act(body):
         case Accepted():
-            assert await user.sees(hud.board) == hud.board
-            if not hud.actions[-1].ends_turn:
-                heard = [heard.body for heard in hud.snapshot().pending]
+            assert await user.sees(exchange.board) == exchange.board
+            if not exchange.actions[-1].ends_turn:
+                heard = [heard.body for heard in exchange.snapshot().pending]
                 await user.send()
             else:
                 heard = [*pending, body] if body.kind is ActionKind.say else pending
             for listener in listeners:
                 assert list((await receive_turn(listener)).actions) == heard
         case Rejected():
-            assert hud.board == before
+            assert exchange.board == before
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
@@ -442,10 +442,10 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
     """Assemble: an app whose monitor frames hold 300 characters, with a list of eight items on its board.
     Act: the user comments on each item and sends.
     Assert: the monitor gets several frames, each within the size, whose turn is the comments."""
-    hud = Hud(tmp_path / "boards" / f"{BOARD}.db")
+    exchange = exchange_on_file(tmp_path / "boards" / f"{BOARD}.db")
     texts = [f"step {n} of the plan, with words that fill the line" for n in range(1, 9)]
     async with (
-        serve({BOARD: hud}, static_dir, tmp_path, monitor_chars=300) as address,
+        serve({BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
         open_agent(address) as agent,
         open_page(address) as user,
     ):

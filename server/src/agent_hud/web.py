@@ -17,10 +17,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardSummary, TBoardName, board_names, open_hud, summarize
+from agent_hud.boards import BoardSummary, TBoardName, board_names, open_exchange, summarize
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
+from agent_hud.exchange import Exchange
 from agent_hud.frames import split_into_frames
-from agent_hud.hud import Hud
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.base import Model
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
@@ -127,10 +127,10 @@ def keep_token(token: str, state_dir: Path) -> None:
     path.write_text(token)
 
 
-def create_app(huds: dict[TBoardName, Hud], stop: Callable[[], None]) -> FastAPI:
+def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
-    the boards in the settings' boards dir; huds holds each board that is open.
+    the boards in the settings' boards dir; exchanges holds each board that is open.
     The agent's tools name their board in an argument, and the sockets in the board query parameter.
     The sockets and /boards need the socket token as a query parameter; /mcp/ needs the token as a bearer token when
     the settings give one. After the settings' idle seconds with no page or monitor connected and no request, the app
@@ -139,7 +139,7 @@ def create_app(huds: dict[TBoardName, Hud], stop: Callable[[], None]) -> FastAPI
     settings = get_settings()
     keep_token(settings.socket_token, settings.state_dir)
     bus = InMemorySubscriptionBus()
-    mcp_app = build_mcp_server(settings, huds, bus).http_app(path="/")
+    mcp_app = build_mcp_server(settings, exchanges, bus).http_app(path="/")
     activity = Activity()
 
     @asynccontextmanager
@@ -156,17 +156,17 @@ def create_app(huds: dict[TBoardName, Hud], stop: Callable[[], None]) -> FastAPI
         finally:
             if watch is not None:
                 watch.cancel()
-            for hud in huds.values():
-                hud.compact()
-                hud.close()
+            for exchange in exchanges.values():
+                exchange.compact()
+                exchange.close()
 
-    async def require_board(board: Annotated[TBoardName, Query()]) -> tuple[TBoardName, Hud]:
+    async def require_board(board: Annotated[TBoardName, Query()]) -> tuple[TBoardName, Exchange]:
         """
-        The board that the socket's board query parameter names, and its hud. A policy violation when there is none.
-        Async, so that the hud's SQLite file opens on the event loop's thread, which uses it.
+        The board that the socket's board query parameter names, and its exchange. A policy violation when there is none.
+        Async, so that the exchange's SQLite file opens on the event loop's thread, which uses it.
         """
         try:
-            return board, open_hud(huds, settings.boards_dir, board)
+            return board, open_exchange(exchanges, settings.boards_dir, board)
         except ValueError as error:
             raise WebSocketException(status.WS_1008_POLICY_VIOLATION, str(error)) from error
 
@@ -184,19 +184,22 @@ def create_app(huds: dict[TBoardName, Hud], stop: Callable[[], None]) -> FastAPI
     @app.get("/boards", dependencies=[with_token])
     async def board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
-        return [summarize(name, open_hud(huds, settings.boards_dir, name)) for name in board_names(settings.boards_dir)]
+        return [
+            summarize(name, open_exchange(exchanges, settings.boards_dir, name))
+            for name in board_names(settings.boards_dir)
+        ]
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
-    async def page(websocket: WebSocket, board: Annotated[tuple[TBoardName, Hud], Depends(require_board)]) -> None:
+    async def page(websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]) -> None:
         """Send the board's snapshot on connect and after each change, and act for the user, until the page disconnects."""
-        name, hud = board
+        name, exchange = board
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
-            sender = tg.create_task(send_each(websocket, hud.snapshots()))
+            sender = tg.create_task(send_each(websocket, exchange.snapshots()))
             async for text in websocket.iter_text():
                 request = Request.model_validate_json(text)
                 try:
-                    hud.act([Action(id=request.id, author=Author.user, body=request.body, at=datetime.now(UTC))])
+                    exchange.act([Action(id=request.id, author=Author.user, body=request.body, at=datetime.now(UTC))])
                 except ValueError as error:
                     reply = Rejected(kind=EventKind.rejected, id=request.id, reason=str(error)).model_dump_json()
                 else:
@@ -206,14 +209,16 @@ def create_app(huds: dict[TBoardName, Hud], stop: Callable[[], None]) -> FastAPI
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[AgentOriginDep, with_token])
-    async def agent(websocket: WebSocket, board: Annotated[tuple[TBoardName, Hud], Depends(require_board)]) -> None:
+    async def agent(
+        websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]
+    ) -> None:
         """Send each of the user's turns on the board to this agent's monitor, as frames of lines, until it disconnects."""
-        _, hud = board
+        _, exchange = board
         await websocket.accept()
-        with hud.monitor():
+        with exchange.monitor():
             async with asyncio.TaskGroup() as tg:
                 sender = tg.create_task(
-                    send_turns(websocket, hud.user_turns(), settings.monitor_chars, settings.monitor_gap)
+                    send_turns(websocket, exchange.user_turns(), settings.monitor_chars, settings.monitor_gap)
                 )
                 # The monitor sends nothing, so this returns when it disconnects.
                 await websocket.receive()

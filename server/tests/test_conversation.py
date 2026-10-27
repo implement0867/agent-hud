@@ -7,7 +7,7 @@ import pytest_asyncio
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from agent_hud.hud import Hud
+from agent_hud.boards import exchange_on_file
 from agent_hud.models.actions import ActionKind, Author, TBody
 from agent_hud.models.board import Arrow, Board, Point, Version
 from agent_hud.models.events import Accepted, AgentState, Edit, EventKind, Rejected
@@ -250,9 +250,9 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
     Assert: after each turn the page shows the board that the agent reads, and after the user's last send the agent has heard each turn as the page listed it as pending, with the message that ended it, in order."""
     taken: list[TBody] = []
     with TemporaryDirectory() as directory:
-        hud = Hud(Path(directory) / "boards" / f"{BOARD}.db")
+        exchange = exchange_on_file(Path(directory) / "boards" / f"{BOARD}.db")
         async with (
-            serve({BOARD: hud}, static_dir, Path(directory)) as address,
+            serve({BOARD: exchange}, static_dir, Path(directory)) as address,
             open_agent(address) as agent,
             open_page(address) as user,
         ):
@@ -260,7 +260,7 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
                 match author:
                     case Author.user:
                         for body in batch:
-                            pending = [heard.body for heard in hud.snapshot().pending]
+                            pending = [heard.body for heard in exchange.snapshot().pending]
                             answer = await user.act(body)
                             match answer, body.kind:
                                 case Accepted(), ActionKind.say:
@@ -275,7 +275,7 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
                         )
                 board = await read_board(agent.tools, history=True)
                 assert await user.sees(board) == board
-            taken += [heard.body for heard in hud.snapshot().pending]
+            taken += [heard.body for heard in exchange.snapshot().pending]
             await user.send()
             heard: list[TBody] = []
             while len(heard) < len(taken):

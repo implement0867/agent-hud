@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from playwright.async_api import Browser, Locator, Page, async_playwright, expect
 
-from agent_hud.hud import Hud
+from agent_hud.boards import exchange_on_file
 from agent_hud.models.actions import Action, ActionKind, Author, Link
 from agent_hud.models.board import Card, Point
 from agent_hud.models.events import Edit
@@ -636,9 +636,9 @@ async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
     Assert: while the server is away the page shows a banner and still the card; once it is back the banner goes,
     the draft is still in the box, and a message reaches the board."""
     state_file = tmp_path / "boards" / f"{BOARD}.db"
-    hud = Hud(state_file)
-    hud.act([Action(id="a", author=Author.agent, body=put("plan", "1. parse"))])
-    hud.close()
+    exchange = exchange_on_file(state_file)
+    exchange.act([Action(id="a", author=Author.agent, body=put("plan", "1. parse"))])
+    exchange.close()
     async with serve({}, static_dir, tmp_path) as (host, port):
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
         await page.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
@@ -652,7 +652,7 @@ async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
         await page.get_by_label("Message the agent").press("Enter")
         await expect(page.get_by_label("Chat with the agent")).to_contain_text("half a thought")
     await page.close()
-    again = Hud(state_file)
+    again = exchange_on_file(state_file)
     assert [said.text for said in again.board.messages] == ["half a thought"]
     again.close()
 

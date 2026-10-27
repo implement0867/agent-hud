@@ -3,7 +3,8 @@ from typing import Any
 
 from fastmcp import Client
 
-from agent_hud.hud import Hud
+from agent_hud.boards import exchange_on_file
+from agent_hud.exchange import Exchange
 from agent_hud.models.actions import (
     ActionKind,
     Clear,
@@ -26,9 +27,9 @@ from agent_hud.models.board import Board
 BOARD = "test"
 
 
-def memory_hud() -> Hud:
-    """A hud whose state file is in memory, so that it keeps nothing after the test."""
-    return Hud(Path(":memory:"))
+def memory_exchange() -> Exchange:
+    """An exchange whose state file is in memory, so that it keeps nothing after the test."""
+    return exchange_on_file(Path(":memory:"))
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:

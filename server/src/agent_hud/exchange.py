@@ -1,11 +1,8 @@
 import asyncio
-from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncIterator, Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from difflib import unified_diff
-from pathlib import Path
-from typing import NamedTuple
-
-from pydantic import ValidationError
 
 from agent_hud.models.actions import (
     Action,
@@ -45,35 +42,80 @@ def without_layout_actions(actions: list[Action]) -> list[Action]:
     return [action for action in actions if not isinstance(action.body, Move | Resize | Place | Send)]
 
 
-class ChangesSince(NamedTuple):
+@dataclass(frozen=True)
+class ChangesSince:
     """What came after an action: the cards that changed, or None when every card counts, and the ids of the actions."""
 
     cards: set[TCardId] | None
     actions: set[TActionId]
 
 
-class Hud:
+def turn_start(actions: Sequence[Action]) -> int:
+    """The index in the actions after the user's last send, or 0."""
+    return next((n + 1 for n in range(len(actions) - 1, -1, -1) if actions[n].ends_turn), 0)
+
+
+def turn_end(actions: Sequence[Action], start: int) -> int | None:
+    """The index in the actions after the first send from start on, if there is one."""
+    return next((n + 1 for n, action in enumerate(actions[start:], start) if action.ends_turn), None)
+
+
+def changes_since(actions: Sequence[Action], action_id: TActionId) -> ChangesSince | None:
     """
-    The board, the actions that made it, and the agents' monitors, kept in the state file.
-    RuntimeError when another process holds the file. ValidationError when the file does not fit this version.
+    What came in the actions after the one with the id: the cards that the actions after it touched, put, removed, restored,
+    moved or resized, or with a comment or an arrow on it, or every card when a clear came after it;
+    and the ids of those actions. None when the actions do not have the id.
+    """
+    found = [n for n, action in enumerate(actions) if action.id == action_id]
+    if not found:
+        return None
+    after = actions[found[-1] + 1 :]
+    changed: set[TCardId] | None = set()
+    for action in after:
+        match action.body, changed:
+            case Clear(), _:
+                changed = None
+            case _, None:
+                pass
+            case (
+                (
+                    Put(id=card_id)
+                    | Remove(id=card_id)
+                    | Restore(id=card_id)
+                    | Move(id=card_id)
+                    | Resize(id=card_id)
+                    | Place(id=card_id)
+                ),
+                _,
+            ):
+                changed.add(card_id)
+            case Comment(card=card_id), _:
+                changed.add(card_id)
+            case Link(card=card_id, dst=dst), _:
+                changed.update((card_id, dst))
+            case _:
+                pass
+    return ChangesSince(changed, {action.id for action in after})
+
+
+class Exchange:
+    """
+    The board, the actions that made it, and the agents' monitors, kept in the store.
+    ValidationError when the store does not fit this version.
     """
 
-    def __init__(self, state_file: Path) -> None:
+    def __init__(self, store: Store) -> None:
         self.monitors = 0
         self.working = False
         self._heard: dict[TActionId, Heard] = {}
         self._changed = asyncio.Event()
         self._positions: list[list[int]] = []
-        self._store = Store(state_file)
-        try:
-            self._base, self.board, actions, read = self._store.load()
-        except ValidationError:
-            self._store.close()
-            raise
+        self._store = store
+        self._base, self.board, actions, read = store.load()
         self.actions: list[Action] = []
         self._turn_boards: dict[int, Board] = {0: self.board}
         self._take(actions)
-        self._agent_read = min(read - self._base, self._turn_start())
+        self._agent_read = min(read - self._base, turn_start(self.actions))
 
     def act(self, actions: list[Action]) -> None:
         """Apply the actions in order, all or nothing. Misfit, with the index of the action, if one does not fit the board."""
@@ -86,13 +128,13 @@ class Hud:
     def compact(self) -> None:
         """
         Make the board at the start of the oldest turn that an agent has not had, or of the user's turn, the checkpoint
-        of the state file, so that it keeps the turns from there alone.
+        of the store, so that it keeps the turns from there alone.
         """
-        keep = min(self._agent_read, self._turn_start())
+        keep = min(self._agent_read, turn_start(self.actions))
         self._store.compact(self._base + keep, self._turn_boards[keep], self._base + self._agent_read)
 
     def close(self) -> None:
-        """Let the state file go, for another process to hold."""
+        """Let the store go, for another process to hold."""
         self._store.close()
 
     def snapshot(self) -> Snapshot:
@@ -103,7 +145,7 @@ class Hud:
                 agent = AgentState.working
             case _:
                 agent = AgentState.waiting
-        pending = self._turn(self._turn_start(), len(self.actions))
+        pending = self._turn(turn_start(self.actions), len(self.actions))
         waiting = sum(action.ends_turn for action in self.actions[self._agent_read :])
         return Snapshot(
             kind=EventKind.snapshot,
@@ -145,7 +187,7 @@ class Hud:
         try:
             while True:
                 changed = self._changed
-                while (end := self._turn_end(position[0])) is not None:
+                while (end := turn_end(self.actions, position[0])) is not None:
                     turn = Turn.of(self.actions[end - 1].id, self._turn(position[0], end))
                     position[0] = end
                     if not self.working:
@@ -156,43 +198,6 @@ class Hud:
                 await changed.wait()
         finally:
             self._positions.remove(position)
-
-    def changed_since(self, action_id: TActionId) -> ChangesSince | None:
-        """
-        What came after the action with the id: the cards that the actions after it touched, put, removed, restored,
-        moved or resized, or with a comment or an arrow on it, or every card when a clear came after it;
-        and the ids of those actions. None when the log no longer has the id.
-        """
-        found = [n for n, action in enumerate(self.actions) if action.id == action_id]
-        if not found:
-            return None
-        after = self.actions[found[-1] + 1 :]
-        changed: set[TCardId] | None = set()
-        for action in after:
-            match action.body, changed:
-                case Clear(), _:
-                    changed = None
-                case _, None:
-                    pass
-                case (
-                    (
-                        Put(id=card_id)
-                        | Remove(id=card_id)
-                        | Restore(id=card_id)
-                        | Move(id=card_id)
-                        | Resize(id=card_id)
-                        | Place(id=card_id)
-                    ),
-                    _,
-                ):
-                    changed.add(card_id)
-                case Comment(card=card_id), _:
-                    changed.add(card_id)
-                case Link(card=card_id, dst=dst), _:
-                    changed.update((card_id, dst))
-                case _:
-                    pass
-        return ChangesSince(changed, {action.id for action in after})
 
     def _turn(self, start: int, end: int) -> tuple[Heard, ...]:
         """
@@ -211,7 +216,7 @@ class Hud:
 
     def _forget_boards(self) -> None:
         """Drop the boards at the starts of the turns that every monitor has had and that the user's turn is past."""
-        floor = min([self._agent_read, self._turn_start(), *(position[0] for position in self._positions)])
+        floor = min([self._agent_read, turn_start(self.actions), *(position[0] for position in self._positions)])
         for start in [start for start in self._turn_boards if start < floor]:
             del self._turn_boards[start]
 
@@ -236,15 +241,6 @@ class Hud:
         if any(action.author is Author.agent for action in actions):
             self.working = False
         self._notify()
-
-    def _turn_start(self) -> int:
-        """The index in the log after the user's last send, or 0."""
-        actions = self.actions
-        return next((n + 1 for n in range(len(actions) - 1, -1, -1) if actions[n].ends_turn), 0)
-
-    def _turn_end(self, start: int) -> int | None:
-        """The index in the log after the first send from start on, if there is one."""
-        return next((n + 1 for n, action in enumerate(self.actions[start:], start) if action.ends_turn), None)
 
     def _notify(self) -> None:
         self._changed.set()
