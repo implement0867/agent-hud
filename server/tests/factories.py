@@ -1,9 +1,13 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
+from sqlalchemy import Engine
 
-from agent_hud.boards import exchange_on_file
+from agent_hud.boards import add_board
+from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import (
     ActionKind,
@@ -22,14 +26,28 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.board import Board
+from agent_hud.store import SqlStore
 
 # The board that the tests' tools and sockets name.
 BOARD = "test"
 
 
-def memory_exchange() -> Exchange:
-    """An exchange whose state file is in memory, so that it keeps nothing after the test."""
-    return exchange_on_file(Path(":memory:"))
+@contextmanager
+def memory_board() -> Iterator[Engine]:
+    """A database in memory with the board BOARD, so that it keeps nothing after the test."""
+    engine = open_database(Path(":memory:"))
+    try:
+        add_board(engine, BOARD)
+        yield engine
+    finally:
+        engine.dispose()
+
+
+@contextmanager
+def memory_exchange() -> Iterator[Exchange]:
+    """The exchange of the board BOARD in a database in memory."""
+    with memory_board() as engine:
+        yield Exchange(SqlStore(engine, BOARD))
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:

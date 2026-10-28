@@ -1,22 +1,30 @@
 import asyncio
 import re
-import sqlite3
-from contextlib import aclosing, closing, suppress
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from contextlib import aclosing, suppress
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from pydantic import ValidationError
 
-from agent_hud.boards import exchange_on_file
 from agent_hud.exchange import ChangesSince, Exchange, changes_since, to_agent_message
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState, Edit, THeardBody, Turn
-from agent_hud.store import SqliteStore
-from tests.factories import clear, comment, link, memory_exchange, move, place, put, resize, say, send
+from agent_hud.store import SqlStore
+from tests.factories import (
+    BOARD,
+    clear,
+    comment,
+    link,
+    memory_board,
+    memory_exchange,
+    move,
+    place,
+    put,
+    resize,
+    say,
+    send,
+)
 from tests.strategies import actions, item_texts, list_md, messages
 
 
@@ -25,7 +33,7 @@ async def test_act_takes_all_the_actions_or_none(batch: list[Action]) -> None:
     """Assemble: a new exchange.
     Act: act with any batch of actions.
     Assert: the board and log have every action, or, on ValueError, are as they were."""
-    with closing(memory_exchange()) as exchange:
+    with memory_exchange() as exchange:
         expected = exchange.board
         try:
             for action in batch:
@@ -45,7 +53,7 @@ def test_act_names_the_action_that_does_not_fit() -> None:
     Assert: Misfit with the index and kind of the second action and the board's reason, which in a batch says that no action was applied."""
     batch = [put("plan", "1. a"), comment("plan", "why?", "b"), say("hi")]
     reason = "card 'plan' does not show the words 'b': quote its text without markdown"
-    with pytest.raises(Misfit, match=f"^{re.escape(reason)}$") as info, closing(memory_exchange()) as exchange:
+    with pytest.raises(Misfit, match=f"^{re.escape(reason)}$") as info, memory_exchange() as exchange:
         exchange.act([Action(id=str(n), author=Author.agent, body=body) for n, body in enumerate(batch)])
     assert (info.value.index, info.value.kind) == (2, ActionKind.comment)
     assert info.value.in_batch() == f"action 2 (comment): {reason}; no actions were applied"
@@ -82,7 +90,7 @@ async def test_an_agent_gets_the_user_actions_that_no_agent_had(
     """Assemble: an exchange whose first agent got the user's first messages and stopped, then more messages by both authors.
     Act: a second agent follows the exchange.
     Assert: it gets a turn of each of the user's messages after the first, in order."""
-    with closing(memory_exchange()) as exchange:
+    with memory_exchange() as exchange:
         exchange.act(said(first, Author.user))
         assert await take(exchange, len(first)) == turns(said(first, Author.user))
         exchange.act([*said(agent_texts, Author.agent), *said(rest, Author.user)])
@@ -90,21 +98,20 @@ async def test_an_agent_gets_the_user_actions_that_no_agent_had(
 
 
 def plain(action: Action) -> bool:
-    """Whether a turn carries the action as it is: not a clear, which compacts the state file, nor a kind a turn leaves out."""
+    """Whether a turn carries the action as it is: not a clear, which compacts the database, nor a kind a turn leaves out."""
     nets = (ActionKind.clear, ActionKind.move, ActionKind.resize, ActionKind.place)
     return action.body.kind not in nets
 
 
-# Each example writes and reads a state file, so its time varies more than the default deadline allows.
+# Each example writes and reads the database, so its time varies more than the default deadline allows.
 @given(st.lists(actions(st.sampled_from(["a", "b"])).filter(plain)), messages())
 @settings(deadline=None)
 async def test_an_exchange_on_the_state_file_takes_up_where_the_last_left_off(batch: list[Action], text: str) -> None:
-    """Assemble: an exchange on a state file that took each action that fits, with no agent to take the turns.
+    """Assemble: an exchange on the database that took each action that fits, with no agent to take the turns.
     Act: start a new exchange on the same file, and the user says a message.
     Assert: the new exchange has the same board and log, and an agent gets each turn that no agent had, then the message's."""
-    with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "board.db"
-        exchange = exchange_on_file(state_file)
+    with memory_board() as engine:
+        exchange = Exchange(SqlStore(engine, BOARD))
         # The user's actions of each turn as the agent hears them, without the sends; the last turn once it is sent.
         expected: list[list[THeardBody]] = [[]]
         for action in batch:
@@ -115,23 +122,20 @@ async def test_an_exchange_on_the_state_file_takes_up_where_the_last_left_off(ba
                     expected[-1].append(heard)
                 if action.ends_turn:
                     expected.append([])
-        exchange.close()
-        again = exchange_on_file(state_file)
+        again = Exchange(SqlStore(engine, BOARD))
         assert (again.board, again.actions) == (exchange.board, exchange.actions)
         again.act(said([text], Author.user))
         expected[-1].append(say(text))
         taken = await take(again, len(expected))
         assert [list(turn.actions) for turn in taken] == expected
-        again.close()
 
 
 async def test_the_read_position_survives_a_restart() -> None:
-    """Assemble: an exchange on a state file where the user sent two turns with no agent, then acted on.
-    Act: start a new exchange on the file, and an agent takes the turns; then start another, and compact.
-    Assert: the first new exchange's agent gets both turns, the second's gets none, and the compacted file holds the user's turn alone."""
-    with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "board.db"
-        exchange = exchange_on_file(state_file)
+    """Assemble: an exchange on the database where the user sent two turns with no agent, then acted on.
+    Act: start a new exchange on the database, and an agent takes the turns; then start another, and compact.
+    Assert: the first new exchange's agent gets both turns, the second's gets none, and the compacted database holds the user's turn alone."""
+    with memory_board() as engine:
+        exchange = Exchange(SqlStore(engine, BOARD))
         exchange.act(by(Author.agent, put("plan", "1. a")))
         exchange.act([Action(id="one", author=Author.user, body=say("one"))])
         exchange.act(
@@ -141,38 +145,21 @@ async def test_the_read_position_survives_a_restart() -> None:
             ]
         )
         exchange.act([Action(id="late", author=Author.user, body=comment("plan", "and", "a"))])
-        exchange.close()
-        again = exchange_on_file(state_file)
+        again = Exchange(SqlStore(engine, BOARD))
         assert again.snapshot().waiting == 2
         assert [list(turn.actions) for turn in await take(again, 2)] == [
             [say("one")],
             [comment("plan", "yes", "a"), say("two")],
         ]
         assert again.snapshot().waiting == 0
-        again.close()
-        third = exchange_on_file(state_file)
+        third = Exchange(SqlStore(engine, BOARD))
         assert third.snapshot().waiting == 0
         with pytest.raises(TimeoutError):
             await take(third, 1, seconds=0.01)
         third.compact()
-        third.close()
-        fourth = exchange_on_file(state_file)
+        fourth = Exchange(SqlStore(engine, BOARD))
         assert [action.id for action in fourth.actions] == ["late"]
         assert fourth.board == exchange.board
-        fourth.close()
-
-
-def test_one_process_holds_the_state_file() -> None:
-    """Assemble: an exchange on a state file.
-    Act: start another exchange on the same file, as a second uvicorn worker would; then close the first and start another.
-    Assert: the second raises RuntimeError that names the file and says one process, and the third starts."""
-    with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "board.db"
-        exchange = exchange_on_file(state_file)
-        with pytest.raises(RuntimeError, match=f"{re.escape(str(state_file))}.*one process"):
-            exchange_on_file(state_file)
-        exchange.close()
-        exchange_on_file(state_file).close()
 
 
 async def test_a_turn_counts_as_had_once_the_agent_asks_for_the_next(exchange: Exchange) -> None:
@@ -211,13 +198,12 @@ async def test_a_turn_leaves_out_the_moves_resizes_and_places(exchange: Exchange
 async def test_an_exchange_on_a_compacted_state_file_takes_up_where_the_last_left_off(
     *, batch: list[Action], on_clear: bool
 ) -> None:
-    """Assemble: an exchange on a state file that took each action that fits, whose turns an agent took, compacted by the user's clear or by compact.
+    """Assemble: an exchange on the database that took each action that fits, whose turns an agent took, compacted by the user's clear or by compact.
     Act: start a new exchange on the same file.
-    Assert: the checkpoint holds the board at the start of the user's turn, the file holds the turn alone, and the
+    Assert: the checkpoint holds the board at the start of the user's turn, the database holds the turn alone, and the
     new exchange has the same board and the same unsent actions."""
-    with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "board.db"
-        exchange = exchange_on_file(state_file)
+    with memory_board() as engine:
+        exchange = Exchange(SqlStore(engine, BOARD))
         for action in batch:
             with suppress(ValueError):
                 exchange.act([action])
@@ -231,16 +217,12 @@ async def test_an_exchange_on_a_compacted_state_file_takes_up_where_the_last_lef
         at_start = Board()
         for action in exchange.actions[:start]:
             at_start = at_start.apply(action)
-        exchange.close()
-        store = SqliteStore(state_file)
-        _, checkpoint, kept, _ = store.load()
-        store.close()
+        _, checkpoint, kept, _ = SqlStore(engine, BOARD).load()
         assert (checkpoint, kept) == (at_start, exchange.actions[start:])
-        turn = exchange_on_file(state_file)
+        turn = Exchange(SqlStore(engine, BOARD))
         assert turn.actions == exchange.actions[start:]
         assert turn.board == exchange.board
         assert turn.snapshot().unsent == exchange.snapshot().unsent
-        turn.close()
 
 
 def by(author: Author, *bodies: TBody) -> list[Action]:
@@ -252,7 +234,7 @@ async def test_the_agent_gets_the_users_actions_when_the_user_sends(texts: list[
     """Assemble: an exchange with the agent's list.
     Act: the user comments on the card and on an item, and moves the card, the agent puts a new list, then the user sends.
     Assert: the agent gets nothing before the send, then one turn of the user's actions but the move."""
-    with closing(memory_exchange()) as exchange:
+    with memory_exchange() as exchange:
         exchange.act(by(Author.agent, put("plan", list_md("1. ", ["first-item", *texts]))))
         feedback = by(Author.user, comment("plan", text), comment("plan", text, "first-item"), move("plan", 0, 0))
         exchange.act(feedback)
@@ -289,7 +271,7 @@ async def test_the_agent_hears_an_edit_of_a_card_as_a_diff(texts: list[str]) -> 
     Act: the user puts the list with a new second item, puts a new note, and sends.
     Assert: the agent hears the edit as a diff of the changed line with one line around it, and the new note in full."""
     first, second, third, new = texts
-    with closing(memory_exchange()) as exchange:
+    with memory_exchange() as exchange:
         exchange.act(by(Author.agent, put("plan", list_md("1. ", [first, second, third]))))
         exchange.act(by(Author.user, put("plan", list_md("1. ", [first, new, third])), put("note", new), send()))
         [turn] = await take(exchange, 1)
@@ -318,22 +300,3 @@ def test_changes_since_names_the_cards_the_later_actions_touched_and_their_ids(e
         [Action(id="clear", author=Author.agent, body=clear()), Action(id="s", author=Author.agent, body=say("hi"))]
     )
     assert changes_since(exchange.actions, "turn") == ChangesSince(None, {"p", "f", "l", "m", "clear", "s"})
-
-
-def test_an_exchange_on_a_state_file_of_an_earlier_version_does_not_start() -> None:
-    """Assemble: a state file whose checkpoint and actions are of an earlier agent-hud, with values, widths and reactions.
-    Act: start an exchange on it.
-    Assert: ValidationError, and the file is as it was and free for another process."""
-    with TemporaryDirectory() as directory:
-        state_file = Path(directory) / "board.db"
-        SqliteStore(state_file).close()
-        old_board = '{"cards": {"plan": {"md": "1. a", "author": "agent"}}, "values": {"plan/1/2": 3}, "widths": {}}'
-        old_action = '{"id": "r", "author": "user", "body": {"kind": "react", "ref": "plan/1", "reaction": "approve"}}'
-        with sqlite3.connect(state_file) as db:
-            db.execute("UPDATE checkpoint SET board = ?", (old_board,))
-            db.execute("INSERT INTO actions (seq, action) VALUES (0, ?)", (old_action,))
-        db.close()
-        with pytest.raises(ValidationError):
-            exchange_on_file(state_file)
-        with closing(sqlite3.connect(state_file)) as db:
-            assert db.execute("SELECT board FROM checkpoint").fetchone() == (old_board,)

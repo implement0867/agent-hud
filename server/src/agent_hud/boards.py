@@ -1,20 +1,21 @@
-from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, StringConstraints, TypeAdapter, ValidationError
+from pydantic import Field, StringConstraints
+from sqlalchemy import Engine, delete, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from agent_hud.exchange import Exchange
 from agent_hud.models.base import Model
+from agent_hud.models.board import Board
 from agent_hud.models.events import AgentState
-from agent_hud.store import SqliteStore
+from agent_hud.tables import BoardRow
 
 type TBoardName = Annotated[
     str,
     StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$"),
     Field(description="The name of a board: 1 to 64 letters, digits, _ or -"),
 ]
-
-BoardNameAdapter = TypeAdapter[TBoardName](TBoardName)
 
 
 class BoardSummary(Model):
@@ -25,34 +26,25 @@ class BoardSummary(Model):
     agent: AgentState
 
 
-def board_names(directory: Path) -> list[TBoardName]:
-    """The name of each board: the stem of each state file in the directory. ValidationError when one is not a name."""
-    return sorted(BoardNameAdapter.validate_python(path.stem) for path in directory.glob("*.db"))
+def board_names(engine: Engine) -> list[TBoardName]:
+    """The name of each board, in order."""
+    with Session(engine) as session:
+        return list(session.scalars(select(BoardRow.name).order_by(BoardRow.name)))
 
 
-def exchange_on_file(path: Path) -> Exchange:
-    """
-    The exchange on the SQLite state file at the path. RuntimeError when another process holds the file.
-    ValidationError when the file does not fit this version.
-    """
-    store = SqliteStore(path)
+def add_board(engine: Engine, name: TBoardName) -> None:
+    """Add an empty board with the name. ValueError when a board has the name."""
     try:
-        return Exchange(store)
-    except ValidationError:
-        store.close()
-        raise
+        with Session(engine) as session, session.begin():
+            session.add(BoardRow(name=name, checkpoint_seq=0, checkpoint=Board(), agent_seq=0))
+    except IntegrityError as error:
+        raise ValueError(f"a board '{name}' exists") from error
 
 
-def open_exchange(exchanges: dict[TBoardName, Exchange], directory: Path, name: TBoardName) -> Exchange:
-    """The exchange of the board, opened into exchanges on first use. ValueError when the directory has no state file for it."""
-    if name not in exchanges:
-        path = directory / f"{name}.db"
-        if not path.exists():
-            raise ValueError(
-                f"no board '{name}': the boards are {', '.join(board_names(directory)) or 'none'}; create_board makes one"
-            )
-        exchanges[name] = exchange_on_file(path)
-    return exchanges[name]
+def remove_board(engine: Engine, name: TBoardName) -> None:
+    """Delete the board and its actions, for good."""
+    with Session(engine) as session, session.begin():
+        session.execute(delete(BoardRow).where(BoardRow.name == name))
 
 
 def summarize(name: TBoardName, exchange: Exchange) -> BoardSummary:

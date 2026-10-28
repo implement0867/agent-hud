@@ -1,10 +1,9 @@
 import asyncio
 import itertools
-import re
 import shlex
 import sys
 from collections.abc import AsyncIterator, Iterator
-from contextlib import AsyncExitStack, closing
+from contextlib import AsyncExitStack
 from importlib.metadata import version
 from json import load
 from pathlib import Path
@@ -24,17 +23,19 @@ from hypothesis.provisional import domains
 from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
+from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
-from agent_hud.boards import exchange_on_file, open_exchange
+from agent_hud.boards import add_board
+from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import Action, ActionKind, Author, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings, get_settings
-from agent_hud.store import SqliteStore
+from agent_hud.store import SqlStore
 from agent_hud.web import create_app, send_turns
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
 from tests.factories import BOARD, as_json, comment, put, say, send
@@ -57,16 +58,26 @@ def host_names() -> st.SearchStrategy[str]:
 
 
 @pytest.fixture(scope="module")
-def exchange(state_dir: Path) -> Iterator[Exchange]:
+def engine(state_dir: Path) -> Iterator[Engine]:
+    """A new database for the module, for the app and the agent."""
+    engine = open_database(state_dir / "agent-hud.db")
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def exchange(engine: Engine) -> Exchange:
     """A new board for the module, for the app and the agent."""
-    with closing(exchange_on_file(state_dir / "boards" / f"{BOARD}.db")) as exchange:
-        yield exchange
+    add_board(engine, BOARD)
+    return Exchange(SqlStore(engine, BOARD))
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def address(static_dir: Path, state_dir: Path, exchange: Exchange) -> AsyncIterator[tuple[str, int]]:
+async def address(
+    static_dir: Path, state_dir: Path, engine: Engine, exchange: Exchange
+) -> AsyncIterator[tuple[str, int]]:
     """Host and port of the app on the module's exchange."""
-    async with serve({BOARD: exchange}, static_dir, state_dir) as address:
+    async with serve(engine, {BOARD: exchange}, static_dir, state_dir) as address:
         yield address
 
 
@@ -88,10 +99,10 @@ async def listeners(address: tuple[str, int], exchange: Exchange) -> AsyncIterat
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def agent(exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
+async def agent(engine: Engine, exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same exchange as the app. MCP over HTTP is slower per call."""
     settings = Settings(state_dir=state_dir, static_dir=state_dir)
-    async with Client(build_mcp_server(settings, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -115,7 +126,7 @@ async def test_tools_need_the_token_when_the_settings_give_one(address: tuple[st
 
 
 async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, engine: Engine
 ) -> None:
     """Assemble: settings with a state dir and no token.
     Act: create the app.
@@ -124,7 +135,7 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
     monkeypatch.delenv("AGENT_HUD_TOKEN", raising=False)
     get_settings.cache_clear()
     try:
-        create_app({}, lambda: None)
+        create_app(engine, {}, lambda: None)
     finally:
         get_settings.cache_clear()
     path = tmp_path / "state" / "token"
@@ -132,39 +143,24 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
     assert len(path.read_text()) >= 32
 
 
-async def test_the_app_compacts_the_state_file_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
-    """Assemble: an exchange on a state file, with a card, a send that an agent took, and a comment the user has not sent.
+async def test_the_app_compacts_each_board_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
+    """Assemble: an exchange with a card, a send that an agent took, and a comment the user has not sent.
     Act: serve the app on it, and stop it.
-    Assert: the checkpoint holds the board at the start of the user's turn, the state file only the turn, and a new exchange starts on it."""
-    state_file = tmp_path / "board.db"
-    exchange = exchange_on_file(state_file)
+    Assert: the checkpoint holds the board at the start of the user's turn, the database only the turn, and a new exchange starts on it."""
+    engine = open_database(tmp_path / "agent-hud.db")
+    add_board(engine, BOARD)
+    exchange = Exchange(SqlStore(engine, BOARD))
     exchange.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
     exchange.act([Action(id="u", author=Author.user, body=send())])
     exchange.act([Action(id="r", author=Author.user, body=comment("plan", "yes", "a"))])
-    async with serve({BOARD: exchange}, static_dir, tmp_path) as address, open_agent(address):
+    async with serve(engine, {BOARD: exchange}, static_dir, tmp_path) as address, open_agent(address):
         pass
-    store = SqliteStore(state_file)
-    _, checkpoint, kept, _ = store.load()
-    store.close()
+    _, checkpoint, kept, _ = SqlStore(engine, BOARD).load()
     assert checkpoint.cards == exchange.board.cards
     assert checkpoint.threads == {}
     assert [action.id for action in kept] == ["r"]
-    again = exchange_on_file(state_file)
-    assert again.board == exchange.board
-    again.close()
-
-
-async def test_a_second_app_on_the_state_dir_does_not_open_a_board_the_first_holds(
-    static_dir: Path, tmp_path: Path
-) -> None:
-    """Assemble: an app served on a state dir, with a board open.
-    Act: open the board's file for another app on the same state dir, as a second uvicorn worker would.
-    Assert: RuntimeError that names the board's file; and once the first app has stopped, the board opens."""
-    state_file = tmp_path / "boards" / "plan.db"
-    async with serve({"plan": exchange_on_file(state_file)}, static_dir, tmp_path):
-        with pytest.raises(RuntimeError, match=re.escape(str(state_file))):
-            open_exchange({}, tmp_path / "boards", "plan")
-    open_exchange({}, tmp_path / "boards", "plan").close()
+    assert Exchange(SqlStore(engine, BOARD)).board == exchange.board
+    engine.dispose()
 
 
 def list_boards(address: tuple[str, int]) -> dict[str, dict[str, Any]]:
@@ -175,12 +171,12 @@ def list_boards(address: tuple[str, int]) -> dict[str, dict[str, Any]]:
 
 
 async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
-    address: tuple[str, int], exchange: Exchange, state_dir: Path
+    address: tuple[str, int], exchange: Exchange
 ) -> None:
     """Assemble: the app, whose one board is the module's exchange.
     Act: an agent creates the board alpha, puts a card on it, and listens; a page opens alpha; the agent deletes alpha.
     Assert: the card is on alpha alone, listen names alpha in its URL, the page sees the card, /boards and list_boards
-    list alpha with its card; a second create of alpha fails; after the delete, alpha and its file are gone, and a
+    list alpha with its card; a second create of alpha fails; after the delete, alpha is gone, and a
     tool on alpha fails."""
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
@@ -201,7 +197,6 @@ async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
         assert listed is not None and {"name": "alpha", "card_count": 1, "agent": "away"} in listed["result"]
         await remote.call_tool("delete_board", {"name": "alpha"})
         assert "alpha" not in await asyncio.to_thread(list_boards, address)
-        assert (state_dir / "boards").is_dir() and not (state_dir / "boards" / "alpha.db").exists()
         with pytest.raises(ToolError, match="no board 'alpha'"):
             await remote.call_tool("read", {"name": "alpha"})
 
@@ -442,10 +437,12 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
     """Assemble: an app whose monitor frames hold 300 characters, with a list of eight items on its board.
     Act: the user comments on each item and sends.
     Assert: the monitor gets several frames, each within the size, whose turn is the comments."""
-    exchange = exchange_on_file(tmp_path / "boards" / f"{BOARD}.db")
+    engine = open_database(tmp_path / "agent-hud.db")
+    add_board(engine, BOARD)
+    exchange = Exchange(SqlStore(engine, BOARD))
     texts = [f"step {n} of the plan, with words that fill the line" for n in range(1, 9)]
     async with (
-        serve({BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
+        serve(engine, {BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
         open_agent(address) as agent,
         open_page(address) as user,
     ):

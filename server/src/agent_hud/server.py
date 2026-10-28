@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from shlex import quote
-from typing import Annotated
+from typing import Annotated, assert_never
 from uuid import uuid4
 
 from fastmcp import FastMCP
@@ -14,8 +14,9 @@ from fastmcp.tools import FunctionTool
 from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, ResourcesListChanged, ResourceUpdated
 from mcp.types import SubscriptionsListenRequestParams, ToolAnnotations
 from pydantic import AfterValidator, Field
+from sqlalchemy import Engine
 
-from agent_hud.boards import BoardSummary, TBoardName, board_names, exchange_on_file, open_exchange, summarize
+from agent_hud.boards import BoardSummary, TBoardName, add_board, board_names, remove_board, summarize
 from agent_hud.exchange import ChangesSince, Exchange, changes_since
 from agent_hud.models.actions import (
     Action,
@@ -32,6 +33,7 @@ from agent_hud.models.base import Model
 from agent_hud.models.board import Board, Said
 from agent_hud.schema import compact_actions_schema
 from agent_hud.settings import Settings
+from agent_hud.store import SqlStore
 
 
 def check_each_card_put_once(bodies: list[TAgentBody]) -> list[TAgentBody]:
@@ -140,11 +142,11 @@ def board_uri(name: TBoardName) -> str:
 
 
 def build_mcp_server(
-    settings: Settings, exchanges: dict[TBoardName, Exchange], bus: InMemorySubscriptionBus
+    settings: Settings, engine: Engine, exchanges: dict[TBoardName, Exchange], bus: InMemorySubscriptionBus
 ) -> FastMCP:
     """
-    The MCP server whose tools create, list and delete the boards in the settings' boards dir, and act on the board
-    that each call names; exchanges holds each board that is open. Each board is the resource board://<name>, and bus
+    The MCP server whose tools create, list and delete the boards in the database, and act on the board that each
+    call names; exchanges holds the exchange of each board. Each board is the resource board://<name>, and bus
     carries an update of it at each write, and a change of the list at each create and delete.
     """
     mcp = FastMCP("agent-hud")
@@ -155,7 +157,7 @@ def build_mcp_server(
 
     def add_resource(name: TBoardName) -> None:
         def board_json() -> str:
-            return open_exchange(exchanges, settings.boards_dir, name).board.model_dump_json()
+            return exchanges[name].board.model_dump_json()
 
         mcp.add_resource(
             Resource.from_function(
@@ -172,40 +174,38 @@ def build_mcp_server(
         The exchange of the board with the name, for a tool's exchange argument. ToolError when there is none, since
         FastMCP hides any other error from a dependency.
         """
-        try:
-            return open_exchange(exchanges, settings.boards_dir, name)
-        except ValueError as error:
-            raise ToolError(str(error)) from error
+        match exchanges.get(name):
+            case Exchange() as exchange:
+                return exchange
+            case None:
+                boards = ", ".join(board_names(engine)) or "none"
+                raise ToolError(f"no board '{name}': the boards are {boards}; create_board makes one")
+            case other:
+                assert_never(other)
 
     board_exchange = Depends(exchange_of, name=CallArgument())
 
     async def create_board(name: TBoardName) -> BoardSummary:
         """Create an empty board with the name. ValueError when a board has the name."""
-        path = settings.boards_dir / f"{name}.db"
-        if path.exists():
-            raise ValueError(f"a board '{name}' exists")
-        exchanges[name] = exchange_on_file(path)
+        add_board(engine, name)
+        exchanges[name] = Exchange(SqlStore(engine, name))
         add_resource(name)
         await bus.publish(ResourcesListChanged())
         return summarize(name, exchanges[name])
 
     async def list_boards() -> list[BoardSummary]:
         """Each board with its number of cards and whether an agent follows it."""
-        return [
-            summarize(name, open_exchange(exchanges, settings.boards_dir, name))
-            for name in board_names(settings.boards_dir)
-        ]
+        return [summarize(name, exchanges[name]) for name in board_names(engine)]
 
     async def delete_board(name: TBoardName, exchange: Exchange = board_exchange) -> None:
         """
-        Delete the board and its state file, for good.
+        Delete the board and its actions, for good.
         ValueError when no board has the name, or when a monitor is open on it.
         """
         if exchange.monitors:
             raise ValueError(f"the board '{name}' has {exchange.monitors} open monitors: stop them first")
-        exchange.close()
+        remove_board(engine, name)
         del exchanges[name]
-        (settings.boards_dir / f"{name}.db").unlink()
         mcp.local_provider.remove_resource(board_uri(name))
         await bus.publish(ResourcesListChanged())
 
@@ -281,6 +281,6 @@ def build_mcp_server(
     mcp.tool(delete_board, annotations=ToolAnnotations(destructive_hint=True))
     mcp.tool(read, annotations=ToolAnnotations(read_only_hint=True))
     mcp.tool(listen, annotations=ToolAnnotations(read_only_hint=True))
-    for name in board_names(settings.boards_dir):
+    for name in board_names(engine):
         add_resource(name)
     return mcp

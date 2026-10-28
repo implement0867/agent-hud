@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     state_dir: Path = Field(
         default_factory=find_state_dir, description="Directory of the token file and of the boards by default"
     )
-    boards_dir: Path = Field(
-        default_factory=lambda data: data["state_dir"] / "boards",
-        description="Directory of the SQLite file of each board's state, replayed on start; boards in the state dir by default",
+    database: Path = Field(
+        default_factory=lambda data: data["state_dir"] / "agent-hud.db",
+        description="The SQLite file of the boards, which the plugin keeps in its data dir; agent-hud.db in the state dir by default",
     )
     build: str = Field(
         default="",

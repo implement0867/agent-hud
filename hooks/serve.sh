@@ -62,6 +62,7 @@ start() {
   cd "$server_dir" || fail "no server directory at $server_dir"
   [ -d .venv ] || echo "agent-hud: starting, the first run installs its dependencies" >&2
   export AGENT_HUD_STATE_DIR="$state_dir"
+  export AGENT_HUD_DATABASE="$CLAUDE_PLUGIN_DATA/agent-hud.db"
   export AGENT_HUD_BUILD="$build"
   nohup uv run --no-dev --frozen --quiet uvicorn agent_hud.web:app_factory --factory --port "$port" >>"$log" 2>&1 &
   pid=$!
@@ -79,6 +80,7 @@ start() {
 }
 
 command -v uv >/dev/null || fail "uv is not installed, see https://docs.astral.sh/uv/"
+[ -n "$CLAUDE_PLUGIN_DATA" ] || fail "CLAUDE_PLUGIN_DATA is not set: run this hook from the agent-hud plugin"
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$server_dir/pyproject.toml")
 [ -n "$version" ] || fail "no version in $server_dir/pyproject.toml"
 build=$(fingerprint)

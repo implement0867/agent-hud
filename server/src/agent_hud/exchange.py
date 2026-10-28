@@ -133,10 +133,6 @@ class Exchange:
         keep = min(self._agent_read, turn_start(self.actions))
         self._store.compact(self._base + keep, self._turn_boards[keep], self._base + self._agent_read)
 
-    def close(self) -> None:
-        """Let the store go, for another process to hold."""
-        self._store.close()
-
     def snapshot(self) -> Snapshot:
         match self.monitors, self.working:
             case 0, _:

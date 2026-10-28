@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 import uvicorn
 from fastmcp import Client
+from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 
 from agent_hud.boards import TBoardName
@@ -132,6 +133,7 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
 
 @asynccontextmanager
 async def serve(
+    engine: Engine,
     exchanges: dict[TBoardName, Exchange],
     static_dir: Path,
     state_dir: Path,
@@ -143,7 +145,7 @@ async def serve(
     monitor_gap: float = 0,
 ) -> AsyncGenerator[tuple[str, int]]:
     """
-    Host and port of the app on the boards dir of the state dir, with exchanges as its open boards, with the UI in static_dir, its token in state_dir and the build fingerprint,
+    Host and port of the app on the database, with the exchange of each board, with the UI in static_dir, its token in state_dir and the build fingerprint,
     on the port or a free one, until the context ends; after the idle seconds without a socket or a request, when
     they are above 0, the app calls on_idle instead of stopping its process. The monitor's frames are at most
     monitor_chars when given, with no gap between the frames of a turn unless one is given.
@@ -158,7 +160,7 @@ async def serve(
         if monitor_chars is not None:
             env.setenv("AGENT_HUD_MONITOR_CHARS", str(monitor_chars))
         get_settings.cache_clear()
-        app = create_app(exchanges, on_idle)
+        app = create_app(engine, exchanges, on_idle)
     get_settings.cache_clear()
     # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)

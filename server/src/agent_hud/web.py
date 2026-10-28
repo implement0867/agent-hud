@@ -7,17 +7,19 @@ from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketException, status
 from fastapi.staticfiles import StaticFiles
 from mcp.server.subscriptions import InMemorySubscriptionBus, ResourceUpdated
+from sqlalchemy import Engine
 from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardSummary, TBoardName, board_names, open_exchange, summarize
+from agent_hud.boards import BoardSummary, TBoardName, board_names, summarize
+from agent_hud.database import open_database
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
 from agent_hud.exchange import Exchange
 from agent_hud.frames import split_into_frames
@@ -26,6 +28,7 @@ from agent_hud.models.base import Model
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
 from agent_hud.server import board_uri, build_mcp_server
 from agent_hud.settings import get_settings
+from agent_hud.store import SqlStore
 
 
 async def send_each(websocket: WebSocket, events: AsyncIterator[Model]) -> None:
@@ -127,24 +130,24 @@ def keep_token(token: str, state_dir: Path) -> None:
     path.write_text(token)
 
 
-def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) -> FastAPI:
+def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
-    the boards in the settings' boards dir; exchanges holds each board that is open.
+    the boards in the database; exchanges holds the exchange of each board.
     The agent's tools name their board in an argument, and the sockets in the board query parameter.
     The sockets and /boards need the socket token as a query parameter; /mcp/ needs the token as a bearer token when
     the settings give one. After the settings' idle seconds with no page or monitor connected and no request, the app
-    calls stop. RuntimeError when another process holds a board's file, as a second uvicorn worker would.
+    calls stop.
     """
     settings = get_settings()
     keep_token(settings.socket_token, settings.state_dir)
     bus = InMemorySubscriptionBus()
-    mcp_app = build_mcp_server(settings, exchanges, bus).http_app(path="/")
+    mcp_app = build_mcp_server(settings, engine, exchanges, bus).http_app(path="/")
     activity = Activity()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """The MCP session manager and the idle watch while the app runs, and each board's file compacted and let go on shutdown."""
+        """The MCP session manager and the idle watch while the app runs, and each board compacted on shutdown."""
         watch = (
             asyncio.create_task(stop_when_idle(activity, settings.idle_seconds, stop))
             if settings.idle_seconds > 0
@@ -158,17 +161,17 @@ def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) 
                 watch.cancel()
             for exchange in exchanges.values():
                 exchange.compact()
-                exchange.close()
+            engine.dispose()
 
-    async def require_board(board: Annotated[TBoardName, Query()]) -> tuple[TBoardName, Exchange]:
-        """
-        The board that the socket's board query parameter names, and its exchange. A policy violation when there is none.
-        Async, so that the exchange's SQLite file opens on the event loop's thread, which uses it.
-        """
-        try:
-            return board, open_exchange(exchanges, settings.boards_dir, board)
-        except ValueError as error:
-            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, str(error)) from error
+    def require_board(board: Annotated[TBoardName, Query()]) -> tuple[TBoardName, Exchange]:
+        """The board that the socket's board query parameter names, and its exchange. A policy violation when there is none."""
+        match exchanges.get(board):
+            case Exchange() as exchange:
+                return board, exchange
+            case None:
+                raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
+            case other:
+                assert_never(other)
 
     app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
@@ -184,10 +187,7 @@ def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) 
     @app.get("/boards", dependencies=[with_token])
     async def board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
-        return [
-            summarize(name, open_exchange(exchanges, settings.boards_dir, name))
-            for name in board_names(settings.boards_dir)
-        ]
+        return [summarize(name, exchanges[name]) for name in board_names(engine)]
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
     async def page(websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]) -> None:
@@ -230,5 +230,7 @@ def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) 
 
 
 def app_factory() -> FastAPI:
-    """The app as uvicorn serves it: no board open yet, and the process stops when idle."""
-    return create_app({}, stop_process)
+    """The app as uvicorn serves it: on the settings' database, with each board's exchange, and the process stops when idle."""
+    engine = open_database(get_settings().database)
+    exchanges = {name: Exchange(SqlStore(engine, name)) for name in board_names(engine)}
+    return create_app(engine, exchanges, stop_process)
