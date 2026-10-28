@@ -6,7 +6,6 @@ from typing import Any
 from fastmcp import Client
 from sqlalchemy import Engine
 
-from agent_hud.boards import add_board
 from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import (
@@ -26,6 +25,7 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.board import Board
+from agent_hud.queries.boards import add_board
 from agent_hud.store import SqlStore
 
 # The board that the tests' tools and sockets name.

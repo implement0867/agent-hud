@@ -5,9 +5,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import Engine
 
-from agent_hud.boards import add_board
 from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
+from agent_hud.queries.boards import add_board
 from agent_hud.store import SqlStore
 from tests.conversation import serve
 from tests.factories import BOARD

@@ -27,12 +27,12 @@ from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
-from agent_hud.boards import add_board
 from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import Action, ActionKind, Author, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
+from agent_hud.queries.boards import add_board
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings, get_settings
 from agent_hud.store import SqlStore
@@ -101,7 +101,7 @@ async def listeners(address: tuple[str, int], exchange: Exchange) -> AsyncIterat
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def agent(engine: Engine, exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same exchange as the app. MCP over HTTP is slower per call."""
-    settings = Settings(state_dir=state_dir, static_dir=state_dir)
+    settings = Settings(state_dir=state_dir, static_dir=state_dir, data_dir=state_dir)
     async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
@@ -132,6 +132,7 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
     Act: create the app.
     Assert: the token file in the state dir has the token of the URL that listen returns, readable by the user only."""
     monkeypatch.setenv("AGENT_HUD_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(tmp_path))
     monkeypatch.delenv("AGENT_HUD_TOKEN", raising=False)
     get_settings.cache_clear()
     try:

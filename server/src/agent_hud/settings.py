@@ -19,15 +19,15 @@ def find_state_dir() -> Path:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="AGENT_HUD_", extra="ignore", frozen=True)
+    model_config = SettingsConfigDict(env_prefix="AGENT_HUD_", extra="ignore", frozen=True, validate_by_name=True)
 
     static_dir: Path = Field(default_factory=find_static_dir, description="Directory of the built UI")
     state_dir: Path = Field(
         default_factory=find_state_dir, description="Directory of the token file and of the boards by default"
     )
-    database: Path = Field(
-        default_factory=lambda data: data["state_dir"] / "agent-hud.db",
-        description="The SQLite file of the boards, which the plugin keeps in its data dir; agent-hud.db in the state dir by default",
+    data_dir: Path = Field(
+        validation_alias="CLAUDE_PLUGIN_DATA",
+        description="The plugin's data folder, which holds the SQLite file of the boards; Claude Code sets CLAUDE_PLUGIN_DATA",
     )
     build: str = Field(
         default="",
@@ -61,4 +61,4 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # pyright: ignore[reportCallIssue]

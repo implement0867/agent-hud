@@ -7,12 +7,12 @@ import pytest_asyncio
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from agent_hud.boards import add_board
 from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import ActionKind, Author, TBody
 from agent_hud.models.board import Arrow, Board, Point, Version
 from agent_hud.models.events import Accepted, AgentState, Edit, EventKind, Rejected
+from agent_hud.queries.boards import add_board
 from agent_hud.store import SqlStore
 from tests.conversation import Agent, User, open_agent, open_page, serve
 from tests.factories import BOARD, as_json, comment, link, move, put, read_board, remove, say

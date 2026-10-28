@@ -1,21 +1,25 @@
-"""The boards, each with its checkpoint and the agent's position, and the actions on each board.
+"""create boards and actions
 
-Revision ID: boards_and_actions
+Revision ID: 48c7179dfaa6
 Revises:
-Create Date: 2026-10-28
+Create Date: 2026-10-28 02:46:48.072575
 
 """
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "boards_and_actions"
-down_revision = None
-branch_labels = None
-depends_on = None
+# revision identifiers, used by Alembic.
+revision: str = "48c7179dfaa6"
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the boards, each with its checkpoint and the agent's position, and the actions on each board."""
     op.create_table(
         "boards",
         sa.Column("name", sa.Text(), primary_key=True),
@@ -34,5 +38,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Drop the actions and the boards."""
     op.drop_table("actions")
     op.drop_table("boards")

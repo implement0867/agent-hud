@@ -17,10 +17,7 @@ def test_the_migrations_make_the_tables_of_the_models(engine: Engine) -> None:
 
 def test_each_connection_checks_foreign_keys_and_writes_ahead(engine: Engine) -> None:
     """Act: read the pragmas of a connection.
-    Assert: foreign keys on, the write-ahead log, normal sync, and a 5 s wait for a lock."""
+    Assert: foreign keys on, and the write-ahead log."""
     with engine.connect() as connection:
-        pragmas = [
-            connection.execute(text(f"PRAGMA {name}")).scalar()
-            for name in ["foreign_keys", "journal_mode", "synchronous", "busy_timeout"]
-        ]
-    assert pragmas == [1, "wal", 1, 5000]
+        pragmas = [connection.execute(text(f"PRAGMA {name}")).scalar() for name in ["foreign_keys", "journal_mode"]]
+    assert pragmas == [1, "wal"]

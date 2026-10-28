@@ -9,11 +9,11 @@ import pytest_asyncio
 from playwright.async_api import Browser, Locator, Page, async_playwright, expect
 from sqlalchemy import Engine
 
-from agent_hud.boards import add_board
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import Action, ActionKind, Author, Link
 from agent_hud.models.board import Card, Point
 from agent_hud.models.events import Edit
+from agent_hud.queries.boards import add_board
 from agent_hud.settings import find_static_dir
 from agent_hud.store import SqlStore
 from tests.conversation import TOKEN, Agent, open_agent, open_page, serve

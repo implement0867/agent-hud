@@ -18,7 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardSummary, TBoardName, board_names, summarize
+from agent_hud.boards import BoardSummary, TBoardName, summarize
 from agent_hud.database import open_database
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
 from agent_hud.exchange import Exchange
@@ -26,6 +26,7 @@ from agent_hud.frames import split_into_frames
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.base import Model
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
+from agent_hud.queries.boards import select_board_names
 from agent_hud.server import board_uri, build_mcp_server
 from agent_hud.settings import get_settings
 from agent_hud.store import SqlStore
@@ -187,7 +188,7 @@ def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Call
     @app.get("/boards", dependencies=[with_token])
     async def board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
-        return [summarize(name, exchanges[name]) for name in board_names(engine)]
+        return [summarize(name, exchanges[name]) for name in select_board_names(engine)]
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
     async def page(websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]) -> None:
@@ -230,7 +231,7 @@ def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Call
 
 
 def app_factory() -> FastAPI:
-    """The app as uvicorn serves it: on the settings' database, with each board's exchange, and the process stops when idle."""
-    engine = open_database(get_settings().database)
-    exchanges = {name: Exchange(SqlStore(engine, name)) for name in board_names(engine)}
+    """The app as uvicorn serves it: on the database in the plugin's data folder, with each board's exchange, and the process stops when idle."""
+    engine = open_database(get_settings().data_dir / "agent-hud.db")
+    exchanges = {name: Exchange(SqlStore(engine, name)) for name in select_board_names(engine)}
     return create_app(engine, exchanges, stop_process)

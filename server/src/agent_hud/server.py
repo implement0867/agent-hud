@@ -16,7 +16,7 @@ from mcp.types import SubscriptionsListenRequestParams, ToolAnnotations
 from pydantic import AfterValidator, Field
 from sqlalchemy import Engine
 
-from agent_hud.boards import BoardSummary, TBoardName, add_board, board_names, remove_board, summarize
+from agent_hud.boards import BoardSummary, TBoardName, summarize
 from agent_hud.exchange import ChangesSince, Exchange, changes_since
 from agent_hud.models.actions import (
     Action,
@@ -31,6 +31,7 @@ from agent_hud.models.actions import (
 )
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board, Said
+from agent_hud.queries.boards import add_board, remove_board, select_board_names
 from agent_hud.schema import compact_actions_schema
 from agent_hud.settings import Settings
 from agent_hud.store import SqlStore
@@ -178,7 +179,7 @@ def build_mcp_server(
             case Exchange() as exchange:
                 return exchange
             case None:
-                boards = ", ".join(board_names(engine)) or "none"
+                boards = ", ".join(select_board_names(engine)) or "none"
                 raise ToolError(f"no board '{name}': the boards are {boards}; create_board makes one")
             case other:
                 assert_never(other)
@@ -195,11 +196,11 @@ def build_mcp_server(
 
     async def list_boards() -> list[BoardSummary]:
         """Each board with its number of cards and whether an agent follows it."""
-        return [summarize(name, exchanges[name]) for name in board_names(engine)]
+        return [summarize(name, exchanges[name]) for name in select_board_names(engine)]
 
     async def delete_board(name: TBoardName, exchange: Exchange = board_exchange) -> None:
         """
-        Delete the board and its actions, for good.
+        Delete the board and its actions.
         ValueError when no board has the name, or when a monitor is open on it.
         """
         if exchange.monitors:
@@ -281,6 +282,6 @@ def build_mcp_server(
     mcp.tool(delete_board, annotations=ToolAnnotations(destructive_hint=True))
     mcp.tool(read, annotations=ToolAnnotations(read_only_hint=True))
     mcp.tool(listen, annotations=ToolAnnotations(read_only_hint=True))
-    for name in board_names(engine):
+    for name in select_board_names(engine):
         add_resource(name)
     return mcp

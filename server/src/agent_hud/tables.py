@@ -35,9 +35,9 @@ class BoardRow(Base):
     __table_args__ = ({"sqlite_strict": True},)
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
-    checkpoint_seq: Mapped[int] = mapped_column(Integer)
-    checkpoint: Mapped[Board] = mapped_column(PydanticJson(Board))
-    agent_seq: Mapped[int] = mapped_column(Integer)
+    checkpoint_seq: Mapped[int] = mapped_column(Integer, default=0)
+    checkpoint: Mapped[Board] = mapped_column(PydanticJson(Board), default=Board)
+    agent_seq: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ActionRow(Base):

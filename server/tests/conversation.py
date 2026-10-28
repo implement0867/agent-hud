@@ -153,6 +153,7 @@ async def serve(
     with pytest.MonkeyPatch.context() as env:
         env.setenv("AGENT_HUD_STATIC_DIR", str(static_dir))
         env.setenv("AGENT_HUD_STATE_DIR", str(state_dir))
+        env.setenv("CLAUDE_PLUGIN_DATA", str(state_dir))
         env.setenv("AGENT_HUD_TOKEN", TOKEN)
         env.setenv("AGENT_HUD_BUILD", build)
         env.setenv("AGENT_HUD_IDLE_SECONDS", str(idle_seconds))

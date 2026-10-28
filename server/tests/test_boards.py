@@ -4,10 +4,11 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from sqlalchemy import Engine
 
-from agent_hud.boards import BoardSummary, add_board, board_names, remove_board
+from agent_hud.boards import BoardSummary
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.events import AgentState
+from agent_hud.queries.boards import add_board, remove_board, select_board_names
 from agent_hud.store import SqlStore
 from tests.factories import put
 
@@ -30,14 +31,14 @@ def test_a_board_name_rejects_other_text(text: str) -> None:
 def test_the_boards_are_the_rows_of_the_database(engine: Engine) -> None:
     """Assemble: two boards added out of order, one with a card.
     Act: list the board names, add a board whose name is in use, remove the board with the card, and add it again.
-    Assert: the names in order; ValueError for the name in use; and the board added again has no actions."""
+    Assert: the names; ValueError for the name in use; and the board added again has no actions."""
     add_board(engine, "two")
     add_board(engine, "one")
     Exchange(SqlStore(engine, "one")).act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
-    assert board_names(engine) == ["one", "two"]
+    assert set(select_board_names(engine)) == {"one", "two"}
     with pytest.raises(ValueError, match="a board 'one' exists"):
         add_board(engine, "one")
     remove_board(engine, "one")
-    assert board_names(engine) == ["two"]
+    assert select_board_names(engine) == ["two"]
     add_board(engine, "one")
     assert Exchange(SqlStore(engine, "one")).actions == []

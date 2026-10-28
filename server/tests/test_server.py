@@ -44,7 +44,7 @@ async def listed_write(client: Client[Any]) -> Tool:
 @pytest.fixture
 async def client(engine: Engine, exchange: Exchange, tmp_path: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the test's database, with the test's exchange as their one board."""
-    settings = Settings(state_dir=tmp_path, static_dir=tmp_path)
+    settings = Settings(state_dir=tmp_path, static_dir=tmp_path, data_dir=tmp_path)
     async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
@@ -206,7 +206,9 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TAge
     Act: check an action of each kind against the listed schema of write.
     Assert: the schema takes it, so that a client that checks the schema sends each action that the server takes."""
     with memory_board() as engine:
-        server = build_mcp_server(Settings(state_dir=Path("unused")), engine, {}, InMemorySubscriptionBus())
+        server = build_mcp_server(
+            Settings(state_dir=Path("unused"), data_dir=Path("unused")), engine, {}, InMemorySubscriptionBus()
+        )
         async with Client(server) as client:
             jsonschema.validate({"name": BOARD, "actions": as_json(body)}, (await listed_write(client)).input_schema)
 
