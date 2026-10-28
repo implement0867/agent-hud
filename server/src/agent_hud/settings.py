@@ -26,8 +26,9 @@ class Settings(BaseSettings):
         default_factory=find_state_dir, description="Directory of the token file and of the boards by default"
     )
     data_dir: Path = Field(
+        default_factory=lambda data: data["state_dir"],
         validation_alias="CLAUDE_PLUGIN_DATA",
-        description="The plugin's data folder, which holds the SQLite file of the boards; Claude Code sets CLAUDE_PLUGIN_DATA",
+        description="The folder of the SQLite file of the boards: the plugin's data folder, which Claude Code sets as CLAUDE_PLUGIN_DATA, or the state dir",
     )
     build: str = Field(
         default="",
@@ -61,4 +62,4 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()  # pyright: ignore[reportCallIssue]
+    return Settings()

@@ -46,8 +46,8 @@ the next session's hook starts it again.
 |---|---|
 | `AGENT_HUD_PORT` | the port, 7676 by default; the hook, the MCP server URL and `make serve` read it |
 | `AGENT_HUD_TOKEN` | the token that `/mcp/` needs as a bearer token, which the plugin sends from this variable, and the sockets and `/boards` as a query parameter; unset, `/mcp/` is open to local processes and the app makes a token for the sockets and `/boards` alone |
-| `AGENT_HUD_STATE_DIR` | the directory of the token file; `$XDG_STATE_HOME/agent-hud` by default, with `~/.local/state` for the XDG state home |
-| `CLAUDE_PLUGIN_DATA` | the plugin's data folder, which Claude Code sets; the app keeps the boards in `agent-hud.db` there and migrates it to the latest schema on start. On a clear and on shutdown the app compacts each board: its checkpoint takes the board at the start of the user's turn, and only the actions from there stay |
+| `AGENT_HUD_STATE_DIR` | the directory of the token file, and of the database when `CLAUDE_PLUGIN_DATA` is not set; `$XDG_STATE_HOME/agent-hud` by default, with `~/.local/state` for the XDG state home |
+| `CLAUDE_PLUGIN_DATA` | the plugin's data folder, which Claude Code sets, and the state dir when it is not set; the app keeps the boards in `agent-hud.db` there and migrates it to the latest schema on start. On a clear and on shutdown the app compacts each board: its checkpoint takes the board at the start of the user's turn, and only the actions from there stay |
 | `AGENT_HUD_STATIC_DIR` | the directory of the built UI; the one in the package by default |
 | `AGENT_HUD_IDLE_SECONDS` | how long the app runs with no page or monitor connected and no request before it stops, 3600 by default; 0 keeps it running |
 | `AGENT_HUD_MONITOR_CHARS` | how many characters of one event Claude Code's Monitor shows, 3000 by default; a turn with more goes to the monitor in as many events as it needs |
