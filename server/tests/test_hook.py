@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import Engine
 
+from agent_hud.store import StoreFactory
 from tests.conversation import serve
 
 # The app fixture serves in the module's loop, so the tests run there too.
@@ -93,11 +93,13 @@ async def fingerprint() -> str:
     return result.stdout.strip()
 
 
-async def test_hook_exits_at_once_when_this_build_answers(static_dir: Path, tmp_path: Path, engine: Engine) -> None:
+async def test_hook_exits_at_once_when_this_build_answers(
+    static_dir: Path, tmp_path: Path, stores: StoreFactory
+) -> None:
     """Assemble: the app on a port, started with the fingerprint of these sources.
     Act: run the hook for that port.
     Assert: exit 0, no message, and no server of its own started."""
-    async with serve(engine, {}, static_dir, tmp_path, build=await fingerprint()) as (_, port):
+    async with serve(stores, {}, static_dir, tmp_path, build=await fingerprint()) as (_, port):
         result = await run_hook(port, tmp_path)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert not (tmp_path / "agent-hud" / "server.pid").exists()

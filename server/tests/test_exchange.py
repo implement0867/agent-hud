@@ -1,30 +1,16 @@
 import asyncio
 import re
-from contextlib import aclosing, suppress
+from contextlib import aclosing
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
-from agent_hud.exchange import ChangesSince, Exchange, changes_since, to_agent_message
+from agent_hud.exchange import Exchange, Monitor
 from agent_hud.models.actions import Action, ActionKind, Author, Misfit, TBody
-from agent_hud.models.board import Board
-from agent_hud.models.events import AgentState, Edit, THeardBody, Turn
-from agent_hud.store import SqlStore
-from tests.factories import (
-    BOARD,
-    clear,
-    comment,
-    link,
-    memory_board,
-    memory_exchange,
-    move,
-    place,
-    put,
-    resize,
-    say,
-    send,
-)
+from agent_hud.models.events import AgentState, Edit, Turn
+from agent_hud.models.state import BoardState
+from tests.factories import clear, comment, link, move, place, put, resize, say, send
 from tests.strategies import actions, item_texts, list_md, messages
 
 
@@ -32,19 +18,19 @@ from tests.strategies import actions, item_texts, list_md, messages
 async def test_act_takes_all_the_actions_or_none(batch: list[Action]) -> None:
     """Assemble: a new exchange.
     Act: act with any batch of actions.
-    Assert: the board and log have every action, or, on ValueError, are as they were."""
-    with memory_exchange() as exchange:
-        expected = exchange.board
-        try:
-            for action in batch:
-                expected = expected.apply(action)
-        except ValueError:
-            with pytest.raises(ValueError):
-                exchange.act(batch)
-            assert (exchange.board, exchange.actions) == (Board(), [])
-        else:
+    Assert: the board has every action, or, on ValueError, the state is as it was."""
+    exchange = Exchange(BoardState())
+    expected = exchange.board
+    try:
+        for action in batch:
+            expected = expected.apply(action)
+    except ValueError:
+        with pytest.raises(ValueError):
             exchange.act(batch)
-            assert (exchange.board, exchange.actions) == (expected, batch)
+        assert exchange.state == BoardState()
+    else:
+        exchange.act(batch)
+        assert exchange.board == expected
 
 
 def test_act_names_the_action_that_does_not_fit() -> None:
@@ -53,7 +39,8 @@ def test_act_names_the_action_that_does_not_fit() -> None:
     Assert: Misfit with the index and kind of the second action and the board's reason, which in a batch says that no action was applied."""
     batch = [put("plan", "1. a"), comment("plan", "why?", "b"), say("hi")]
     reason = "card 'plan' does not show the words 'b': quote its text without markdown"
-    with pytest.raises(Misfit, match=f"^{re.escape(reason)}$") as info, memory_exchange() as exchange:
+    exchange = Exchange(BoardState())
+    with pytest.raises(Misfit, match=f"^{re.escape(reason)}$") as info:
         exchange.act([Action(id=str(n), author=Author.agent, body=body) for n, body in enumerate(batch)])
     assert (info.value.index, info.value.kind) == (2, ActionKind.comment)
     assert info.value.in_batch() == f"action 2 (comment): {reason}; no actions were applied"
@@ -69,17 +56,21 @@ def turns(actions: list[Action]) -> list[Turn]:
 
 
 async def take(exchange: Exchange, count: int, seconds: float = 1) -> list[Turn]:
-    """The first turns an agent gets from the exchange. TimeoutError if fewer come in the seconds."""
+    """Take the first turns through a new monitor on the exchange. TimeoutError if fewer come in the seconds."""
+    with exchange.monitor() as monitor:
+        return await take_through(exchange, monitor, count, seconds)
+
+
+async def take_through(exchange: Exchange, monitor: Monitor, count: int, seconds: float = 1) -> list[Turn]:
+    """
+    Take the first turns as the monitor does: wait for each, then mark it had.
+    TimeoutError if fewer come in the seconds.
+    """
     taken: list[Turn] = []
-    async with aclosing(exchange.user_turns()) as user_turns:
-        async with asyncio.timeout(seconds):
-            while len(taken) < count:
-                taken.append(await anext(user_turns))
-        # A turn counts as had once the agent asks for the next, so ask for the turns that are there now.
-        with suppress(TimeoutError):
-            async with asyncio.timeout(0):
-                while True:
-                    taken.append(await anext(user_turns))
+    async with aclosing(exchange.wait_for_turns(monitor)) as turns, asyncio.timeout(seconds):
+        while len(taken) < count:
+            taken.append(await anext(turns))
+            exchange.mark_had(monitor, taken[-1])
     return taken
 
 
@@ -87,93 +78,42 @@ async def take(exchange: Exchange, count: int, seconds: float = 1) -> list[Turn]
 async def test_an_agent_gets_the_user_actions_that_no_agent_had(
     first: list[str], agent_texts: list[str], rest: list[str]
 ) -> None:
-    """Assemble: an exchange whose first agent got the user's first messages and stopped, then more messages by both authors.
-    Act: a second agent follows the exchange.
+    """Assemble: an exchange whose first agent got the user's first messages, then more messages by both authors.
+    Act: an agent takes the turns again.
     Assert: it gets a turn of each of the user's messages after the first, in order."""
-    with memory_exchange() as exchange:
-        exchange.act(said(first, Author.user))
-        assert await take(exchange, len(first)) == turns(said(first, Author.user))
-        exchange.act([*said(agent_texts, Author.agent), *said(rest, Author.user)])
-        assert await take(exchange, len(rest)) == turns(said(rest, Author.user))
+    exchange = Exchange(BoardState())
+    exchange.act(said(first, Author.user))
+    assert await take(exchange, len(first)) == turns(said(first, Author.user))
+    exchange.act([*said(agent_texts, Author.agent), *said(rest, Author.user)])
+    assert await take(exchange, len(rest)) == turns(said(rest, Author.user))
 
 
-def plain(action: Action) -> bool:
-    """Whether a turn carries the action as it is: not a clear, which compacts the database, nor a kind a turn leaves out."""
-    nets = (ActionKind.clear, ActionKind.move, ActionKind.resize, ActionKind.place)
-    return action.body.kind not in nets
-
-
-# Each example writes and reads the database, so its time varies more than the default deadline allows.
-@given(st.lists(actions(st.sampled_from(["a", "b"])).filter(plain)), messages())
-@settings(deadline=None)
-async def test_an_exchange_on_the_state_file_takes_up_where_the_last_left_off(batch: list[Action], text: str) -> None:
-    """Assemble: an exchange on the database that took each action that fits, with no agent to take the turns.
-    Act: start a new exchange on the same file, and the user says a message.
-    Assert: the new exchange has the same board and log, and an agent gets each turn that no agent had, then the message's."""
-    with memory_board() as engine:
-        exchange = Exchange(SqlStore(engine, BOARD))
-        # The user's actions of each turn as the agent hears them, without the sends; the last turn once it is sent.
-        expected: list[list[THeardBody]] = [[]]
-        for action in batch:
-            heard = to_agent_message(exchange.board, action).body
-            with suppress(ValueError):
-                exchange.act([action])
-                if action.author is Author.user and action.body.kind is not ActionKind.send:
-                    expected[-1].append(heard)
-                if action.ends_turn:
-                    expected.append([])
-        again = Exchange(SqlStore(engine, BOARD))
-        assert (again.board, again.actions) == (exchange.board, exchange.actions)
-        again.act(said([text], Author.user))
-        expected[-1].append(say(text))
-        taken = await take(again, len(expected))
-        assert [list(turn.actions) for turn in taken] == expected
-
-
-async def test_the_read_position_survives_a_restart() -> None:
-    """Assemble: an exchange on the database where the user sent two turns with no agent, then acted on.
-    Act: start a new exchange on the database, and an agent takes the turns; then start another, and compact.
-    Assert: the first new exchange's agent gets both turns, the second's gets none, and the compacted database holds the user's turn alone."""
-    with memory_board() as engine:
-        exchange = Exchange(SqlStore(engine, BOARD))
-        exchange.act(by(Author.agent, put("plan", "1. a")))
-        exchange.act([Action(id="one", author=Author.user, body=say("one"))])
-        exchange.act(
-            [
-                Action(id="r", author=Author.user, body=comment("plan", "yes", "a")),
-                Action(id="two", author=Author.user, body=say("two")),
-            ]
-        )
-        exchange.act([Action(id="late", author=Author.user, body=comment("plan", "and", "a"))])
-        again = Exchange(SqlStore(engine, BOARD))
-        assert again.snapshot().waiting == 2
-        assert [list(turn.actions) for turn in await take(again, 2)] == [
-            [say("one")],
-            [comment("plan", "yes", "a"), say("two")],
-        ]
-        assert again.snapshot().waiting == 0
-        third = Exchange(SqlStore(engine, BOARD))
-        assert third.snapshot().waiting == 0
-        with pytest.raises(TimeoutError):
-            await take(third, 1, seconds=0.01)
-        third.compact()
-        fourth = Exchange(SqlStore(engine, BOARD))
-        assert [action.id for action in fourth.actions] == ["late"]
-        assert fourth.board == exchange.board
-
-
-async def test_a_turn_counts_as_had_once_the_agent_asks_for_the_next(exchange: Exchange) -> None:
+async def test_a_turn_comes_again_until_a_monitor_has_had_it(exchange: Exchange) -> None:
     """Assemble: an exchange where the user sent a turn.
-    Act: an agent gets the turn and its monitor ends before it asks for the next; then another agent follows.
-    Assert: the second agent gets the same turn."""
+    Act: a monitor gets the turn and ends before it marks it had; then another monitor takes the turns.
+    Assert: the second monitor gets the same turn, and the turn is then gone from the sent turns."""
     exchange.act(said(["one"], Author.user))
-    async with aclosing(exchange.user_turns()) as user_turns:
-        first = await anext(user_turns)
+    with exchange.monitor() as monitor:
+        async with aclosing(exchange.wait_for_turns(monitor)) as waiting:
+            first = await anext(waiting)
     assert await take(exchange, 1) == [first]
+    assert exchange.state.sent_turns == ()
+
+
+async def test_each_open_monitor_gets_each_turn(exchange: Exchange) -> None:
+    """Assemble: an exchange with two open monitors.
+    Act: the user says a message; the first monitor takes the turn, then the second.
+    Assert: both get the turn, and it stays in the sent turns until the second has had it."""
+    with exchange.monitor() as first, exchange.monitor() as second:
+        exchange.act(said(["one"], Author.user))
+        [turn] = await take_through(exchange, first, 1)
+        assert exchange.state.sent_turns == (turn,)
+        assert await take_through(exchange, second, 1) == [turn]
+        assert exchange.state.sent_turns == ()
 
 
 async def test_a_turn_leaves_out_the_moves_resizes_and_places(exchange: Exchange) -> None:
-    """Assemble: an exchange with the agent's card, whose last turn an agent took.
+    """Assemble: an exchange with the agent's card,
     Act: in the turn, the user comments, moves, places and resizes the card, comments again, and sends.
     Assert: the pending list and the turn carry the comments alone, which read has the places and sizes for."""
     exchange.act(by(Author.agent, put("plan", "1. a\n2. b")))
@@ -193,38 +133,6 @@ async def test_a_turn_leaves_out_the_moves_resizes_and_places(exchange: Exchange
     assert heard.actions == tuple(action.body for action in turn if action.id in expected)
 
 
-@given(batch=st.lists(actions(st.sampled_from(["a", "b"]))), on_clear=st.booleans())
-@settings(deadline=None)
-async def test_an_exchange_on_a_compacted_state_file_takes_up_where_the_last_left_off(
-    *, batch: list[Action], on_clear: bool
-) -> None:
-    """Assemble: an exchange on the database that took each action that fits, whose turns an agent took, compacted by the user's clear or by compact.
-    Act: start a new exchange on the same file.
-    Assert: the checkpoint holds the board at the start of the user's turn, the database holds the turn alone, and the
-    new exchange has the same board and the same unsent actions."""
-    with memory_board() as engine:
-        exchange = Exchange(SqlStore(engine, BOARD))
-        for action in batch:
-            with suppress(ValueError):
-                exchange.act([action])
-        if sent := sum(action.ends_turn for action in exchange.actions):
-            await take(exchange, sent)
-        if on_clear:
-            exchange.act([Action(id="c", author=Author.user, body=clear())])
-        else:
-            exchange.compact()
-        start = max((n + 1 for n, action in enumerate(exchange.actions) if action.ends_turn), default=0)
-        at_start = Board()
-        for action in exchange.actions[:start]:
-            at_start = at_start.apply(action)
-        _, checkpoint, kept, _ = SqlStore(engine, BOARD).load()
-        assert (checkpoint, kept) == (at_start, exchange.actions[start:])
-        turn = Exchange(SqlStore(engine, BOARD))
-        assert turn.actions == exchange.actions[start:]
-        assert turn.board == exchange.board
-        assert turn.snapshot().unsent == exchange.snapshot().unsent
-
-
 def by(author: Author, *bodies: TBody) -> list[Action]:
     return [Action(id=f"{author}{n}", author=author, body=body) for n, body in enumerate(bodies)]
 
@@ -234,15 +142,15 @@ async def test_the_agent_gets_the_users_actions_when_the_user_sends(texts: list[
     """Assemble: an exchange with the agent's list.
     Act: the user comments on the card and on an item, and moves the card, the agent puts a new list, then the user sends.
     Assert: the agent gets nothing before the send, then one turn of the user's actions but the move."""
-    with memory_exchange() as exchange:
-        exchange.act(by(Author.agent, put("plan", list_md("1. ", ["first-item", *texts]))))
-        feedback = by(Author.user, comment("plan", text), comment("plan", text, "first-item"), move("plan", 0, 0))
-        exchange.act(feedback)
-        exchange.act(by(Author.agent, put("plan", "1. new")))
-        with pytest.raises(TimeoutError):
-            await take(exchange, 1, seconds=0.01)
-        exchange.act([Action(id="end", author=Author.user, body=send())])
-        assert await take(exchange, 1) == [Turn(id="end", actions=tuple(action.body for action in feedback[:2]))]
+    exchange = Exchange(BoardState())
+    exchange.act(by(Author.agent, put("plan", list_md("1. ", ["first-item", *texts]))))
+    feedback = by(Author.user, comment("plan", text), comment("plan", text, "first-item"), move("plan", 0, 0))
+    exchange.act(feedback)
+    exchange.act(by(Author.agent, put("plan", "1. new")))
+    with pytest.raises(TimeoutError):
+        await take(exchange, 1, seconds=0.01)
+    exchange.act([Action(id="end", author=Author.user, body=send())])
+    assert await take(exchange, 1) == [Turn(id="end", actions=tuple(action.body for action in feedback[:2]))]
 
 
 async def test_the_snapshot_tells_the_page_the_agents_state_and_the_unsent_actions(exchange: Exchange) -> None:
@@ -251,14 +159,14 @@ async def test_the_snapshot_tells_the_page_the_agents_state_and_the_unsent_actio
     Assert: the state goes away, waiting, working until the agent writes, waiting, away; the unsent count leaves out moves and goes to 0 on the send."""
     exchange.act(by(Author.agent, put("plan", "1. a")))
     assert (exchange.snapshot().agent, exchange.snapshot().unsent) == (AgentState.away, 0)
-    with exchange.monitor():
+    with exchange.monitor() as monitor:
         assert exchange.snapshot().agent is AgentState.waiting
         exchange.act(by(Author.user, comment("plan", "ok", "a"), move("plan", 1, 1)))
         assert exchange.snapshot().unsent == 1
         exchange.act([Action(id="end", author=Author.user, body=send())])
         assert (exchange.snapshot().agent, exchange.snapshot().unsent) == (AgentState.waiting, 0)
         assert exchange.snapshot().waiting == 1
-        await take(exchange, 1)
+        await take_through(exchange, monitor, 1)
         assert (exchange.snapshot().agent, exchange.snapshot().waiting) == (AgentState.working, 0)
         exchange.act(by(Author.agent, say("done")))
         assert exchange.snapshot().agent is AgentState.waiting
@@ -271,32 +179,31 @@ async def test_the_agent_hears_an_edit_of_a_card_as_a_diff(texts: list[str]) -> 
     Act: the user puts the list with a new second item, puts a new note, and sends.
     Assert: the agent hears the edit as a diff of the changed line with one line around it, and the new note in full."""
     first, second, third, new = texts
-    with memory_exchange() as exchange:
-        exchange.act(by(Author.agent, put("plan", list_md("1. ", [first, second, third]))))
-        exchange.act(by(Author.user, put("plan", list_md("1. ", [first, new, third])), put("note", new), send()))
-        [turn] = await take(exchange, 1)
-        diff = "\n".join(["@@ -1,3 +1,3 @@", f" 1. {first}", f"-1. {second}", f"+1. {new}", f" 1. {third}"])
-        assert list(turn.actions) == [Edit(kind="edit", id="plan", diff=diff), put("note", new)]
+    exchange = Exchange(BoardState())
+    exchange.act(by(Author.agent, put("plan", list_md("1. ", [first, second, third]))))
+    exchange.act(by(Author.user, put("plan", list_md("1. ", [first, new, third])), put("note", new), send()))
+    [turn] = await take(exchange, 1)
+    diff = "\n".join(["@@ -1,3 +1,3 @@", f" 1. {first}", f"-1. {second}", f"+1. {new}", f" 1. {third}"])
+    assert list(turn.actions) == [Edit(kind="edit", id="plan", diff=diff), put("note", new)]
 
 
-def test_changes_since_names_the_cards_the_later_actions_touched_and_their_ids(exchange: Exchange) -> None:
-    """Assemble: an exchange with four cards, where after the user's send the agent puts one, the user comments on another and links the third to it, and the user moves a card.
-    Act: ask what changed since the send, since an id the log does not have, and since the send after a clear.
-    Assert: the cards put, commented on, linked and moved with the ids of those actions; None for the unknown id; and no cards, which means all, after the clear."""
+def test_the_unread_cards_are_the_cards_changed_since_the_last_read(exchange: Exchange) -> None:
+    """Assemble: an exchange with four cards that the agent read, where the agent then puts one, the user comments on another, links the third to it and moves the fourth, and says a message.
+    Act: mark the first two cards read; then clear the board.
+    Assert: all four cards are unread before the mark, the last two after it, and none after the clear; each mark reads every message, and the clear starts the messages again."""
     exchange.act(by(Author.agent, put("a", "1. a"), put("b", "1. b"), put("c", "1. c"), put("d", "1. d")))
-    exchange.act([Action(id="turn", author=Author.user, body=send())])
+    exchange.mark_read(frozenset(exchange.board.cards))
     exchange.act([Action(id="p", author=Author.agent, body=put("a", "1. a2"))])
     exchange.act(
         [
             Action(id="f", author=Author.user, body=comment("b", "why?", "b")),
             Action(id="l", author=Author.user, body=link("arrow", "c", "b", quote="c")),
             Action(id="m", author=Author.user, body=move("d", 1, 1)),
+            Action(id="s", author=Author.user, body=say("look")),
         ]
     )
-    assert changes_since(exchange.actions, "turn") == ChangesSince({"a", "b", "c", "d"}, {"p", "f", "l", "m"})
-    assert changes_since(exchange.actions, "f") == ChangesSince({"c", "b", "d"}, {"l", "m"})
-    assert changes_since(exchange.actions, "nope") is None
-    exchange.act(
-        [Action(id="clear", author=Author.agent, body=clear()), Action(id="s", author=Author.agent, body=say("hi"))]
-    )
-    assert changes_since(exchange.actions, "turn") == ChangesSince(None, {"p", "f", "l", "m", "clear", "s"})
+    assert exchange.state.unread_cards == {"a", "b", "c", "d"}
+    exchange.mark_read(frozenset({"a", "b"}))
+    assert (exchange.state.unread_cards, exchange.state.read_messages) == ({"c", "d"}, len(exchange.board.messages))
+    exchange.act([Action(id="clear", author=Author.agent, body=clear())])
+    assert (exchange.state.unread_cards, exchange.state.read_messages) == (frozenset(), 0)

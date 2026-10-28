@@ -2,8 +2,9 @@ import asyncio
 import itertools
 import shlex
 import sys
-from collections.abc import AsyncIterator, Iterator
-from contextlib import AsyncExitStack
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, nullcontext
+from functools import partial
 from importlib.metadata import version
 from json import load
 from pathlib import Path
@@ -23,22 +24,20 @@ from hypothesis.provisional import domains
 from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
-from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
-from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
-from agent_hud.models.actions import Action, ActionKind, Author, TBody
+from agent_hud.models.actions import ActionKind, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
-from agent_hud.queries.boards import add_board
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings, get_settings
-from agent_hud.store import SqlStore
-from agent_hud.web import create_app, send_turns
+from agent_hud.store import StoreFactory
+from agent_hud.stores.memory import MemoryStore
+from agent_hud.web import create_app, send_turn
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
-from tests.factories import BOARD, as_json, comment, put, say, send
+from tests.factories import BOARD, as_json, comment, put, say
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
@@ -58,26 +57,31 @@ def host_names() -> st.SearchStrategy[str]:
 
 
 @pytest.fixture(scope="module")
-def engine(state_dir: Path) -> Iterator[Engine]:
-    """A new database for the module, for the app and the agent."""
-    engine = open_database(state_dir / "agent-hud.db")
-    yield engine
-    engine.dispose()
+def store() -> MemoryStore:
+    """A new store in memory for the module, with the board BOARD, for the app and the agent."""
+    store = MemoryStore()
+    store.add_board(BOARD)
+    return store
 
 
 @pytest.fixture(scope="module")
-def exchange(engine: Engine) -> Exchange:
-    """A new board for the module, for the app and the agent."""
-    add_board(engine, BOARD)
-    return Exchange(SqlStore(engine, BOARD))
+def stores(store: MemoryStore) -> StoreFactory:
+    """Open the module's store."""
+    return partial(nullcontext, store)
+
+
+@pytest.fixture(scope="module")
+def exchange(store: MemoryStore) -> Exchange:
+    """The exchange of the board BOARD, for the app and the agent."""
+    return Exchange(store.load_board_state(BOARD))
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def address(
-    static_dir: Path, state_dir: Path, engine: Engine, exchange: Exchange
+    static_dir: Path, state_dir: Path, stores: StoreFactory, exchange: Exchange
 ) -> AsyncIterator[tuple[str, int]]:
     """Host and port of the app on the module's exchange."""
-    async with serve(engine, {BOARD: exchange}, static_dir, state_dir) as address:
+    async with serve(stores, {BOARD: exchange}, static_dir, state_dir) as address:
         yield address
 
 
@@ -99,10 +103,10 @@ async def listeners(address: tuple[str, int], exchange: Exchange) -> AsyncIterat
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def agent(engine: Engine, exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
+async def agent(stores: StoreFactory, exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same exchange as the app. MCP over HTTP is slower per call."""
     settings = Settings(state_dir=state_dir, static_dir=state_dir, data_dir=state_dir)
-    async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, stores, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -126,7 +130,7 @@ async def test_tools_need_the_token_when_the_settings_give_one(address: tuple[st
 
 
 async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, engine: Engine
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Assemble: settings with a state dir and no token.
     Act: create the app.
@@ -136,32 +140,12 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
     monkeypatch.delenv("AGENT_HUD_TOKEN", raising=False)
     get_settings.cache_clear()
     try:
-        create_app(engine, {}, lambda: None)
+        create_app(partial(nullcontext, MemoryStore()), {}, lambda: None)
     finally:
         get_settings.cache_clear()
     path = tmp_path / "state" / "token"
     assert path.stat().st_mode & 0o777 == 0o600
     assert len(path.read_text()) >= 32
-
-
-async def test_the_app_compacts_each_board_on_shutdown(static_dir: Path, tmp_path: Path) -> None:
-    """Assemble: an exchange with a card, a send that an agent took, and a comment the user has not sent.
-    Act: serve the app on it, and stop it.
-    Assert: the checkpoint holds the board at the start of the user's turn, the database only the turn, and a new exchange starts on it."""
-    engine = open_database(tmp_path / "agent-hud.db")
-    add_board(engine, BOARD)
-    exchange = Exchange(SqlStore(engine, BOARD))
-    exchange.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
-    exchange.act([Action(id="u", author=Author.user, body=send())])
-    exchange.act([Action(id="r", author=Author.user, body=comment("plan", "yes", "a"))])
-    async with serve(engine, {BOARD: exchange}, static_dir, tmp_path) as address, open_agent(address):
-        pass
-    _, checkpoint, kept, _ = SqlStore(engine, BOARD).load()
-    assert checkpoint.cards == exchange.board.cards
-    assert checkpoint.threads == {}
-    assert [action.id for action in kept] == ["r"]
-    assert Exchange(SqlStore(engine, BOARD)).board == exchange.board
-    engine.dispose()
 
 
 def list_boards(address: tuple[str, int]) -> dict[str, dict[str, Any]]:
@@ -366,7 +350,7 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     match await user.act(body):
         case Accepted():
             assert await user.sees(exchange.board) == exchange.board
-            if not exchange.actions[-1].ends_turn:
+            if body.kind not in {ActionKind.send, ActionKind.say}:
                 heard = [heard.body for heard in exchange.snapshot().pending]
                 await user.send()
             else:
@@ -438,12 +422,12 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
     """Assemble: an app whose monitor frames hold 300 characters, with a list of eight items on its board.
     Act: the user comments on each item and sends.
     Assert: the monitor gets several frames, each within the size, whose turn is the comments."""
-    engine = open_database(tmp_path / "agent-hud.db")
-    add_board(engine, BOARD)
-    exchange = Exchange(SqlStore(engine, BOARD))
+    store = MemoryStore()
+    store.add_board(BOARD)
+    exchange = Exchange(store.load_board_state(BOARD))
     texts = [f"step {n} of the plan, with words that fill the line" for n in range(1, 9)]
     async with (
-        serve(engine, {BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
+        serve(partial(nullcontext, store), {BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
         open_agent(address) as agent,
         open_page(address) as user,
     ):
@@ -483,12 +467,9 @@ async def test_the_sender_leaves_the_gap_between_the_frames_of_a_turn_and_none_b
     first = Turn(id="one", actions=tuple(say(f"message {n} of the first turn, long enough") for n in range(6)))
     second = Turn(id="two", actions=(say("hi"),))
 
-    async def turns() -> AsyncIterator[Turn]:
-        yield first
-        yield second
-
     recorder = Recorder()
-    await send_turns(cast(WebSocket, recorder), turns(), 200, 0.2)
+    for turn in [first, second]:
+        await send_turn(cast(WebSocket, recorder), turn, 200, 0.2)
     assert [FrameHead.model_validate_json(text.partition("\n")[0]).of for _, text in recorder.sent] == [3, 3, 3, None]
     gaps = [later - earlier for (earlier, _), (later, _) in itertools.pairwise(recorder.sent)]
     assert all(gap >= 0.19 for gap in gaps[:2]) and gaps[2] < 0.1, gaps

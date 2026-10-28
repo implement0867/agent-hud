@@ -1,6 +1,8 @@
 import asyncio
 import re
 from collections.abc import AsyncIterator
+from contextlib import nullcontext
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -13,25 +15,26 @@ from mcp.client.subscriptions import ServerEvent, Subscription, listen
 from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.subscriptions import ResourcesListChanged, ResourceUpdated
 from mcp.types import TextResourceContents, Tool
-from sqlalchemy import Engine
 
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import Action, ActionKind, Author, TAgentBody
 from agent_hud.models.board import Board
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings
+from agent_hud.store import StoreFactory
+from agent_hud.stores.memory import MemoryStore
 from tests.factories import (
     BOARD,
     as_json,
     comment,
     link,
-    memory_board,
+    move,
     put,
     read_board,
+    read_changes,
     remove,
     resize,
     say,
-    send,
     unlink,
 )
 from tests.strategies import agent_bodies, card_ids
@@ -42,10 +45,10 @@ async def listed_write(client: Client[Any]) -> Tool:
 
 
 @pytest.fixture
-async def client(engine: Engine, exchange: Exchange, tmp_path: Path) -> AsyncIterator[Client[Any]]:
-    """The MCP tools in memory, on the test's database, with the test's exchange as their one board."""
+async def client(stores: StoreFactory, exchange: Exchange, tmp_path: Path) -> AsyncIterator[Client[Any]]:
+    """The MCP tools in memory, on the test's store, with the test's exchange as their one board."""
     settings = Settings(state_dir=tmp_path, static_dir=tmp_path, data_dir=tmp_path)
-    async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, stores, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -81,35 +84,20 @@ async def test_read_of_cards_returns_what_is_on_them(client: Client[Any], exchan
     assert set((await read_board(client, cards=["risk"])).arrows) == {"why"}
 
 
-async def test_read_since_returns_the_messages_after_the_one_named(client: Client[Any]) -> None:
-    """Assemble: three messages.
-    Act: read since the second, and since an id that no message has.
-    Assert: the third alone, then all three."""
-    await client.call_tool("write", {"name": BOARD, "actions": as_json(say("one"), say("two"), say("three"))})
-    [_, second, _] = (await read_board(client)).messages
-    assert [said.text for said in (await read_board(client, since=second.id)).messages] == ["three"]
-    assert [said.text for said in (await read_board(client, since="none")).messages] == ["one", "two", "three"]
-
-
-async def test_read_since_a_turn_returns_the_cards_that_changed_after_it_and_the_messages(
-    client: Client[Any], exchange: Exchange
-) -> None:
-    """Assemble: two cards and a message from the agent; the user comments on the first and sends; the agent puts a third card, comments on the second and says.
-    Act: read since the send, with and without cards named; then since an id the log does not have.
-    Assert: the cards the agent touched after the send, with the comment and the message after it; the first card alone when named with the third; and the whole board for the id the log does not have."""
-    await client.call_tool(
-        "write", {"name": BOARD, "actions": as_json(put("a", "1. a"), put("b", "1. b"), say("review"))}
-    )
+async def test_read_changes_returns_what_changed_since_the_last_read(client: Client[Any], exchange: Exchange) -> None:
+    """Assemble: two cards from the agent, which then reads the board; the user comments on the first; the agent puts a third card and says.
+    Act: read the changes twice; then the user moves the second card, and read the changes again.
+    Assert: the first read has the first and third cards, the comment and the message; the second read has nothing; the last has the second card alone."""
+    await client.call_tool("write", {"name": BOARD, "actions": as_json(put("a", "1. a"), put("b", "1. b"))})
+    await read_board(client)
     exchange.act([Action(id="r", author=Author.user, body=comment("a", "yes", "a"))])
-    exchange.act([Action(id="turn", author=Author.user, body=send())])
-    await client.call_tool(
-        "write", {"name": BOARD, "actions": as_json(put("c", "1. c"), comment("b", "fine", "b"), say("done"))}
-    )
-    board = await read_board(client, since="turn")
-    assert (set(board.cards), [said.text for said in board.messages]) == ({"b", "c"}, ["fine", "done"])
-    assert set((await read_board(client, since="turn", cards=["a", "c"])).cards) == {"c"}
-    whole = await read_board(client, since="gone")
-    assert (set(whole.cards), len(whole.messages)) == ({"a", "b", "c"}, 4)
+    await client.call_tool("write", {"name": BOARD, "actions": as_json(put("c", "1. c"), say("done"))})
+    first = await read_changes(client)
+    assert (set(first.cards), [said.text for said in first.messages]) == ({"a", "c"}, ["yes", "done"])
+    second = await read_changes(client)
+    assert (set(second.cards), second.messages) == (set(), ())
+    exchange.act([Action(id="m", author=Author.user, body=move("b", 1, 1))])
+    assert set((await read_changes(client)).cards) == {"b"}
 
 
 async def test_read_leaves_out_the_history_unless_asked(client: Client[Any], exchange: Exchange) -> None:
@@ -170,15 +158,16 @@ async def test_write_reports_the_threads_and_arrows_a_put_moves_aside(client: Cl
     }
 
 
-async def test_read_listen_and_list_boards_are_read_only(client: Client[Any]) -> None:
+async def test_the_reads_listen_and_list_boards_are_read_only(client: Client[Any]) -> None:
     """Assemble: a client connected to a new server.
     Act: list the tools.
-    Assert: read, listen and list_boards have the read-only hint, and the tools that change a board do not."""
+    Assert: read, read_changes, listen and list_boards have the read-only hint, and the tools that change a board do not."""
     tools = await client.list_tools()
     hints = {tool.name: tool.annotations is not None and tool.annotations.read_only_hint is True for tool in tools}
     assert hints == {
         "write": False,
         "read": True,
+        "read_changes": True,
         "listen": True,
         "create_board": False,
         "list_boards": True,
@@ -205,12 +194,10 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TAge
     """Assemble: a client connected to a new server.
     Act: check an action of each kind against the listed schema of write.
     Assert: the schema takes it, so that a client that checks the schema sends each action that the server takes."""
-    with memory_board() as engine:
-        server = build_mcp_server(
-            Settings(state_dir=Path("unused"), data_dir=Path("unused")), engine, {}, InMemorySubscriptionBus()
-        )
-        async with Client(server) as client:
-            jsonschema.validate({"name": BOARD, "actions": as_json(body)}, (await listed_write(client)).input_schema)
+    unused = Settings(state_dir=Path("unused"), data_dir=Path("unused"))
+    server = build_mcp_server(unused, partial(nullcontext, MemoryStore()), {}, InMemorySubscriptionBus())
+    async with Client(server) as client:
+        jsonschema.validate({"name": BOARD, "actions": as_json(body)}, (await listed_write(client)).input_schema)
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,7 @@
-from collections.abc import Iterator
-from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
-from sqlalchemy import Engine
 
-from agent_hud.database import open_database
-from agent_hud.exchange import Exchange
 from agent_hud.models.actions import (
     ActionKind,
     Clear,
@@ -25,29 +19,9 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.board import Board
-from agent_hud.queries.boards import add_board
-from agent_hud.store import SqlStore
 
 # The board that the tests' tools and sockets name.
 BOARD = "test"
-
-
-@contextmanager
-def memory_board() -> Iterator[Engine]:
-    """A database in memory with the board BOARD, so that it keeps nothing after the test."""
-    engine = open_database(Path(":memory:"))
-    try:
-        add_board(engine, BOARD)
-        yield engine
-    finally:
-        engine.dispose()
-
-
-@contextmanager
-def memory_exchange() -> Iterator[Exchange]:
-    """The exchange of the board BOARD in a database in memory."""
-    with memory_board() as engine:
-        yield Exchange(SqlStore(engine, BOARD))
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:
@@ -101,6 +75,11 @@ def send() -> Send:
 def as_json(*bodies: TBody) -> list[dict[str, Any]]:
     """The actions as an MCP client sends them."""
     return [body.model_dump(mode="json") for body in bodies]
+
+
+async def read_changes(client: Client[Any]) -> Board:
+    """The board that read_changes returns."""
+    return Board.model_validate((await client.call_tool("read_changes", {"name": BOARD})).structured_content)
 
 
 async def read_board(client: Client[Any], *, history: bool = False, **params: Any) -> Board:
