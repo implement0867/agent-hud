@@ -2,9 +2,9 @@ from typing import Annotated
 
 from pydantic import Field, StringConstraints
 
-from agent_hud.exchange import Exchange
 from agent_hud.models.base import Model
 from agent_hud.models.events import AgentState
+from agent_hud.models.state import BoardState
 
 type TBoardName = Annotated[
     str,
@@ -21,6 +21,6 @@ class BoardSummary(Model):
     agent: AgentState
 
 
-def summarize_board(exchange: Exchange) -> BoardSummary:
-    """Summarize the exchange's board for the list of boards."""
-    return BoardSummary(name=exchange.name, card_count=len(exchange.board.cards), agent=exchange.find_agent_state())
+def summarize_board(name: TBoardName, state: BoardState, agent: AgentState) -> BoardSummary:
+    """Summarize the board for the list of boards."""
+    return BoardSummary(name=name, card_count=len(state.board.cards), agent=agent)

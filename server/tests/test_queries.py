@@ -2,10 +2,9 @@ import pytest
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from agent_hud.exchange import Exchange
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.state import BoardState
-from agent_hud.queries.boards import add_board, list_board_names, load_board_state, remove_board, save_exchange
+from agent_hud.queries.boards import add_board, commit_board_state, list_board_names, load_board_state, remove_board
 from tests.factories import comment, put, send
 
 
@@ -24,21 +23,24 @@ def test_the_queries_add_list_and_remove_boards(engine: Engine) -> None:
         assert list_board_names(session) == ["one"]
 
 
-def test_a_saved_exchange_loads_again(engine: Engine) -> None:
-    """Assemble: a board whose exchange has a card, a sent turn and a comment the user has not sent.
-    Act: save the exchange, and load the board's state in a new session.
-    Assert: the loaded state is the exchange's state."""
+def test_a_committed_state_loads_again(engine: Engine) -> None:
+    """Assemble: a board, and a state with a card, a sent turn and a comment the user has not sent.
+    Act: commit the state, and load the board's state in a new session.
+    Assert: the loaded state is the committed state."""
     with Session(engine) as session:
         add_board(session, "plan")
         session.commit()
-        exchange = Exchange("plan", load_board_state(session, "plan"))
-    exchange.act([Action(id="a", author=Author.agent, body=put("plan", "1. a"))])
-    exchange.act([Action(id="s", author=Author.user, body=send())])
-    exchange.act([Action(id="r", author=Author.user, body=comment("plan", "yes", "a"))])
+    state = BoardState().apply_actions(
+        [
+            Action(id="a", author=Author.agent, body=put("plan", "1. a")),
+            Action(id="s", author=Author.user, body=send()),
+            Action(id="r", author=Author.user, body=comment("plan", "yes", "a")),
+        ]
+    )
     with Session(engine) as session:
-        save_exchange(session, exchange)
+        commit_board_state(session, "plan", state)
     with Session(engine) as session:
-        assert load_board_state(session, "plan") == exchange.state
+        assert load_board_state(session, "plan") == state
 
 
 def test_a_session_keeps_only_what_it_committed(engine: Engine) -> None:

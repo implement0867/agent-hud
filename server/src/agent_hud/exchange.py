@@ -2,10 +2,13 @@ import asyncio
 from collections.abc import AsyncIterator, Generator
 from contextlib import contextmanager
 
-from agent_hud.models.actions import Action, Author, Misfit, TActionId, TCardId
-from agent_hud.models.board import Board
+from sqlalchemy.orm import Session
+
+from agent_hud.boards import BoardSummary, TBoardName, summarize_board
+from agent_hud.models.actions import Action, Author, TActionId
 from agent_hud.models.events import AgentState, EventKind, Snapshot, Turn
 from agent_hud.models.state import BoardState
+from agent_hud.queries.boards import commit_board_state, list_board_names, load_board_state
 
 
 class Monitor:
@@ -16,52 +19,17 @@ class Monitor:
 
 
 class Exchange:
-    """A board's state, and what lives only while the app runs: the agents' open monitors and whether an agent works."""
+    """What lives only while the app runs for a board: the agents' open monitors, whether an agent works, and the change events."""
 
-    def __init__(self, name: str, state: BoardState) -> None:
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.state = state
         self.working = False
         self._monitors: list[Monitor] = []
         self._changed = asyncio.Event()
 
     @property
-    def board(self) -> Board:
-        return self.state.board
-
-    @property
     def monitors(self) -> int:
         return len(self._monitors)
-
-    def act(self, actions: list[Action]) -> None:
-        """Apply the actions in order, all or nothing. Misfit, with the index of the action, if one does not fit the board."""
-        state = self.state
-        for n, action in enumerate(actions, start=1):
-            try:
-                state = state.apply_action(action)
-            except ValueError as error:
-                raise Misfit(n, action.body.kind, str(error)) from error
-        self.state = state
-        if any(action.author is Author.agent for action in actions):
-            self.working = False
-        self._notify()
-
-    def mark_read(self, cards: frozenset[TCardId]) -> None:
-        """Mark the cards and every message as read by the agent."""
-        self.state = self.state.mark_read(cards)
-
-    def mark_delivered(self, monitor: Monitor, turn: Turn) -> None:
-        """
-        Mark the turn as delivered to the monitor, so that the agent works on it; remove each sent turn that was
-        delivered to every open monitor.
-        """
-        monitor.delivered.add(turn.id)
-        delivered_to_all = {
-            sent.id for sent in self.state.sent_turns if all(sent.id in each.delivered for each in self._monitors)
-        }
-        self.state = self.state.remove_turns(delivered_to_all)
-        self.working = True
-        self._notify()
 
     def find_agent_state(self) -> AgentState:
         """Find whether an agent is away, works, or waits for the user's turn."""
@@ -73,48 +41,73 @@ class Exchange:
             case _:
                 return AgentState.waiting
 
-    def take_snapshot(self) -> Snapshot:
+    def take_snapshot(self, state: BoardState) -> Snapshot:
         """Take the board and the agent's state, for the page."""
         return Snapshot(
             kind=EventKind.snapshot,
-            board=self.board,
+            board=state.board,
             agent=self.find_agent_state(),
-            pending=self.state.open_turn,
-            unsent=len(self.state.open_turn),
-            waiting=len(self.state.sent_turns),
+            pending=state.open_turn,
+            unsent=len(state.open_turn),
+            waiting=len(state.sent_turns),
         )
-
-    async def snapshots(self) -> AsyncIterator[Snapshot]:
-        """The snapshot now, then again after each change to the board or to the agents."""
-        last = None
-        while True:
-            changed = self._changed
-            if (snapshot := self.take_snapshot()) != last:
-                last = snapshot
-                yield snapshot
-            await changed.wait()
 
     @contextmanager
     def open_monitor(self) -> Generator[Monitor]:
         """Open an agent's monitor until the context ends."""
         monitor = Monitor()
         self._monitors.append(monitor)
-        self._notify()
+        self.notify_change()
         try:
             yield monitor
         finally:
             self._monitors.remove(monitor)
-            self._notify()
+            self.notify_change()
 
-    async def wait_for_turns(self, monitor: Monitor) -> AsyncIterator[Turn]:
-        """Wait for each sent turn not yet delivered to the monitor, oldest first; a turn comes again until it is marked delivered."""
-        while True:
-            changed = self._changed
-            if undelivered := [turn for turn in self.state.sent_turns if turn.id not in monitor.delivered]:
-                yield undelivered[0]
-            else:
-                await changed.wait()
+    def mark_delivered(self, monitor: Monitor, turn: Turn) -> None:
+        """Mark the turn as delivered to the monitor, so that the agent works on it."""
+        monitor.delivered.add(turn.id)
+        self.working = True
+        self.notify_change()
 
-    def _notify(self) -> None:
+    def find_turns_delivered_to_all(self, state: BoardState) -> set[TActionId]:
+        """Find the ids of the sent turns delivered to every open monitor."""
+        return {turn.id for turn in state.sent_turns if all(turn.id in each.delivered for each in self._monitors)}
+
+    def notify_change(self) -> None:
+        """Wake each watcher of the board, after a change to the board or to the agents."""
         self._changed.set()
         self._changed = asyncio.Event()
+
+    async def watch_changes(self) -> AsyncIterator[None]:
+        """Yield now, then again after each change to the board or to the agents."""
+        while True:
+            changed = self._changed
+            yield
+            await changed.wait()
+
+
+def act_on_board(session: Session, exchange: Exchange, actions: list[Action]) -> tuple[BoardState, BoardState]:
+    """
+    Apply the actions to the board's state, commit the new state, and wake the board's watchers.
+    Return the state before and after. Misfit, with the index of the action, if one does not fit the board.
+    """
+    before = load_board_state(session, exchange.name)
+    after = before.apply_actions(actions)
+    commit_board_state(session, exchange.name, after)
+    if any(action.author is Author.agent for action in actions):
+        exchange.working = False
+    exchange.notify_change()
+    return before, after
+
+
+def summarize_boards(session: Session, exchanges: dict[TBoardName, Exchange]) -> list[BoardSummary]:
+    """Summarize each board in the database, with the agent state of its live exchange, or away when it has none."""
+    return [
+        summarize_board(
+            name,
+            load_board_state(session, name),
+            exchanges[name].find_agent_state() if name in exchanges else AgentState.away,
+        )
+        for name in list_board_names(session)
+    ]

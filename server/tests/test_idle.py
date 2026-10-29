@@ -4,9 +4,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine
 
-from agent_hud.exchange import Exchange
 from tests.conversation import open_page, serve
-from tests.factories import BOARD
+from tests.factories import BOARD, BoardExchange
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -23,7 +22,7 @@ async def ask_health(host: str, port: int) -> bytes:
 
 
 async def test_the_app_stops_once_idle_and_not_while_a_page_is_connected(
-    static_dir: Path, tmp_path: Path, engine: Engine, exchange: Exchange
+    static_dir: Path, tmp_path: Path, engine: Engine, exchange: BoardExchange
 ) -> None:
     """Assemble: the app on a board, with an idle time of half a second, and a page connected to it.
     Act: wait a second with the page connected; then close the page and wait again.

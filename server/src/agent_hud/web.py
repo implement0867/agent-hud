@@ -1,13 +1,13 @@
 import asyncio
 import logging
 import signal
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
-from typing import Annotated, assert_never
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketException, status
 from fastapi.staticfiles import StaticFiles
@@ -19,23 +19,16 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardSummary, TBoardName, summarize_board
+from agent_hud.boards import BoardSummary, TBoardName
 from agent_hud.database import open_database
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
-from agent_hud.exchange import Exchange, Monitor
+from agent_hud.exchange import Exchange, Monitor, act_on_board, summarize_boards
 from agent_hud.frames import split_into_frames
 from agent_hud.models.actions import Action, Author
-from agent_hud.models.base import Model
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
-from agent_hud.queries.boards import list_board_names, load_board_state, save_exchange
+from agent_hud.queries.boards import check_board_exists, commit_board_state, load_board_state
 from agent_hud.server import build_mcp_server, make_board_uri
 from agent_hud.settings import get_settings
-
-
-async def send_each(websocket: WebSocket, events: AsyncIterator[Model]) -> None:
-    """Send each event as JSON text as it comes."""
-    async for event in events:
-        await websocket.send_text(event.model_dump_json())
 
 
 async def send_turn(websocket: WebSocket, turn: Turn, chars: int, gap: float) -> None:
@@ -133,7 +126,7 @@ def keep_token(token: str, state_dir: Path) -> None:
 def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
-    the boards in the database; exchanges holds the exchange of each board.
+    the boards in the database; exchanges holds the live exchange of each board in use.
     The agent's tools name their board in an argument, and the sockets in the board query parameter.
     The sockets and /boards need the socket token as a query parameter; /mcp/ needs the token as a bearer token when
     the settings give one. After the settings' idle seconds with no page or monitor connected and no request, the app
@@ -161,14 +154,14 @@ def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Call
                 watch.cancel()
 
     def require_exchange(board: Annotated[TBoardName, Query()]) -> Exchange:
-        """Find the exchange of the board that the socket's board query parameter names. A policy violation when there is none."""
-        match exchanges.get(board):
-            case Exchange() as exchange:
-                return exchange
-            case None:
+        """
+        Find the exchange of the board that the socket's board query parameter names, and make it on first use.
+        A policy violation when no board has the name.
+        """
+        with Session(engine) as session:
+            if not check_board_exists(session, board):
                 raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
-            case other:
-                assert_never(other)
+        return exchanges.setdefault(board, Exchange(board))
 
     app = FastAPI(lifespan=lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
@@ -185,23 +178,34 @@ def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Call
     async def board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
         with Session(engine) as session:
-            return [summarize_board(exchanges[name]) for name in list_board_names(session)]
+            return summarize_boards(session, exchanges)
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
     async def page(websocket: WebSocket, exchange: Annotated[Exchange, Depends(require_exchange)]) -> None:
         """Send the board's snapshot on connect and after each change, and act for the user, until the page disconnects."""
+
+        async def send_snapshots() -> None:
+            """Load the board's state on connect and after each change, and send its snapshot when it differs."""
+            last = None
+            async for _ in exchange.watch_changes():
+                with Session(engine) as session:
+                    snapshot = exchange.take_snapshot(load_board_state(session, exchange.name))
+                if snapshot != last:
+                    last = snapshot
+                    await websocket.send_text(snapshot.model_dump_json())
+
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
-            sender = tg.create_task(send_each(websocket, exchange.snapshots()))
+            sender = tg.create_task(send_snapshots())
             async for text in websocket.iter_text():
                 request = Request.model_validate_json(text)
+                action = Action(id=request.id, author=Author.user, body=request.body, at=datetime.now(UTC))
                 try:
-                    exchange.act([Action(id=request.id, author=Author.user, body=request.body, at=datetime.now(UTC))])
+                    with Session(engine) as session:
+                        act_on_board(session, exchange, [action])
                 except ValueError as error:
                     reply = Rejected(kind=EventKind.rejected, id=request.id, reason=str(error)).model_dump_json()
                 else:
-                    with Session(engine) as session:
-                        save_exchange(session, exchange)
                     reply = Accepted(kind=EventKind.accepted, id=request.id).model_dump_json()
                     await bus.publish(ResourceUpdated(uri=make_board_uri(exchange.name)))
                 await websocket.send_text(reply)
@@ -212,12 +216,22 @@ def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Call
         """Send each of the user's turns on the board to this agent's monitor, as frames of lines, until it disconnects."""
 
         async def deliver_turns(monitor: Monitor) -> None:
-            """Send each turn, then mark it had by the monitor, so that a turn whose send fails comes again."""
-            async for turn in exchange.wait_for_turns(monitor):
-                await send_turn(websocket, turn, settings.monitor_chars, settings.monitor_gap)
-                exchange.mark_delivered(monitor, turn)
+            """
+            Load the board's state on connect and after each change, and send each sent turn not yet delivered to the
+            monitor; then mark it delivered, so that a turn whose send fails comes again, and remove the turns that every
+            open monitor has.
+            """
+            async for _ in exchange.watch_changes():
                 with Session(engine) as session:
-                    save_exchange(session, exchange)
+                    state = load_board_state(session, exchange.name)
+                for turn in [turn for turn in state.sent_turns if turn.id not in monitor.delivered]:
+                    await send_turn(websocket, turn, settings.monitor_chars, settings.monitor_gap)
+                    exchange.mark_delivered(monitor, turn)
+                    with Session(engine) as session:
+                        state = load_board_state(session, exchange.name)
+                        commit_board_state(
+                            session, exchange.name, state.remove_turns(exchange.find_turns_delivered_to_all(state))
+                        )
 
         await websocket.accept()
         with exchange.open_monitor() as monitor:
@@ -233,8 +247,6 @@ def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Call
 
 
 def app_factory() -> FastAPI:
-    """Make the app as uvicorn serves it: on the database in the data folder, with each board's exchange, and the process stops when idle."""
+    """Make the app as uvicorn serves it: on the database in the data folder, with no live exchange yet, and the process stops when idle."""
     engine = open_database(get_settings().data_dir / "agent-hud.db")
-    with Session(engine) as session:
-        exchanges = {name: Exchange(name, load_board_state(session, name)) for name in list_board_names(session)}
-    return create_app(engine, exchanges, stop_process)
+    return create_app(engine, {}, stop_process)

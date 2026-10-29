@@ -9,6 +9,7 @@ from agent_hud.models.actions import (
     Clear,
     Comment,
     Link,
+    Misfit,
     Move,
     Place,
     Put,
@@ -26,30 +27,9 @@ from agent_hud.models.board import Board
 from agent_hud.models.events import Edit, Heard, Turn
 
 
-def make_heard(board: Board, action: Action) -> Heard:
-    """Make the action as the agent hears it, given the board before it: a put that replaces a card becomes a diff."""
-    match action.body:
-        case Put(id=card_id, md=md) if card_id in board.cards:
-            diff_lines = unified_diff(board.cards[card_id].md.splitlines(), md.splitlines(), lineterm="", n=1)
-            body = Edit(kind="edit", id=card_id, diff="\n".join(list(diff_lines)[2:]))
-        case (
-            Put()
-            | Remove()
-            | Restore()
-            | Comment()
-            | Say()
-            | Link()
-            | Unlink()
-            | Move()
-            | Resize()
-            | Place()
-            | Clear()
-            | Send()
-        ):
-            body = action.body
-        case _:
-            assert_never(action.body)
-    return Heard(id=action.id, author=action.author, body=body)
+def diff_markdown(before: str, after: str) -> str:
+    """Diff the markdown as a unified diff with one line of context, without the file header."""
+    return "\n".join(list(unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=1))[2:])
 
 
 class BoardState(Model):
@@ -63,7 +43,7 @@ class BoardState(Model):
     unread_cards: frozenset[TCardId] = Field(
         default=frozenset(), description="The cards that changed since the agent last read them"
     )
-    read_messages: int = Field(default=0, description="The number of the board's messages that the agent has read")
+    read_message_count: int = Field(default=0, description="The number of the board's messages that the agent has read")
 
     def apply_action(self, action: Action) -> Self:
         """Apply the action to the board and to what the agent has not had. ValueError when it does not fit the board."""
@@ -73,22 +53,23 @@ class BoardState(Model):
             case Author.user, Send():
                 open_turn, sent_turns = (), (*sent_turns, Turn.of(action.id, open_turn))
             case Author.user, Say():
-                open_turn, sent_turns = (
-                    (),
-                    (*sent_turns, Turn.of(action.id, (*open_turn, make_heard(self.board, action)))),
-                )
+                said = Heard(id=action.id, author=action.author, body=action.body)
+                open_turn, sent_turns = (), (*sent_turns, Turn.of(action.id, (*open_turn, said)))
             case Author.user, Move() | Resize() | Place():
                 pass
+            case Author.user, Put(id=card_id, md=md) if card_id in self.board.cards:
+                edit = Edit(kind="edit", id=card_id, diff=diff_markdown(self.board.cards[card_id].md, md))
+                open_turn = (*open_turn, Heard(id=action.id, author=action.author, body=edit))
             case Author.user, Put() | Remove() | Restore() | Comment() | Link() | Unlink() | Clear():
-                open_turn = (*open_turn, make_heard(self.board, action))
+                open_turn = (*open_turn, Heard(id=action.id, author=action.author, body=action.body))
             case Author.agent, _:
                 pass
             case unknown:
                 assert_never(unknown)
-        unread_cards, read_messages = self.unread_cards, self.read_messages
+        unread_cards, read_message_count = self.unread_cards, self.read_message_count
         match action.body:
             case Clear():
-                unread_cards, read_messages = frozenset[TCardId](), 0
+                unread_cards, read_message_count = frozenset[TCardId](), 0
             case (
                 Put(id=card_id)
                 | Remove(id=card_id)
@@ -111,14 +92,24 @@ class BoardState(Model):
                 "open_turn": open_turn,
                 "sent_turns": sent_turns,
                 "unread_cards": unread_cards,
-                "read_messages": read_messages,
+                "read_message_count": read_message_count,
             }
         )
+
+    def apply_actions(self, actions: list[Action]) -> Self:
+        """Apply the actions in order, all or nothing. Misfit, with the index of the action, if one does not fit the board."""
+        state = self
+        for n, action in enumerate(actions, start=1):
+            try:
+                state = state.apply_action(action)
+            except ValueError as error:
+                raise Misfit(n, action.body.kind, str(error)) from error
+        return state
 
     def mark_read(self, cards: frozenset[TCardId]) -> Self:
         """Mark the cards and every message as read by the agent."""
         return self.model_copy(
-            update={"unread_cards": self.unread_cards - cards, "read_messages": len(self.board.messages)}
+            update={"unread_cards": self.unread_cards - cards, "read_message_count": len(self.board.messages)}
         )
 
     def remove_turns(self, turn_ids: set[TActionId]) -> Self:

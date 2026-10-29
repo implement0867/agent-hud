@@ -261,7 +261,7 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
                 match author:
                     case Author.user:
                         for body in batch:
-                            pending = [heard.body for heard in exchange.take_snapshot().pending]
+                            pending = [heard.body for heard in exchange.state.open_turn]
                             answer = await user.act(body)
                             match answer, body.kind:
                                 case Accepted(), ActionKind.say:
@@ -276,7 +276,7 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
                         )
                 board = await read_board(agent.tools, history=True)
                 assert await user.sees(board) == board
-            taken += [heard.body for heard in exchange.take_snapshot().pending]
+            taken += [heard.body for heard in exchange.state.open_turn]
             await user.send()
             heard: list[TBody] = []
             while len(heard) < len(taken):
