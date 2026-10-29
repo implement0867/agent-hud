@@ -1,11 +1,12 @@
-from pathlib import Path
 from typing import Any
 
 from fastmcp import Client
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 
-from agent_hud.boards import exchange_on_file
-from agent_hud.exchange import Exchange
+from agent_hud.exchange import Exchange, act_on_board
 from agent_hud.models.actions import (
+    Action,
     ActionKind,
     Clear,
     Comment,
@@ -22,14 +23,41 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.board import Board
+from agent_hud.models.state import BoardState
+from agent_hud.queries.boards import add_board, load_board_state
 
 # The board that the tests' tools and sockets name.
 BOARD = "test"
 
 
-def memory_exchange() -> Exchange:
-    """An exchange whose state file is in memory, so that it keeps nothing after the test."""
-    return exchange_on_file(Path(":memory:"))
+class BoardExchange(Exchange):
+    """An exchange with its database, so that a test acts on the board and reads it as the app does."""
+
+    def __init__(self, engine: Engine, name: str) -> None:
+        super().__init__(name)
+        self.engine = engine
+
+    @property
+    def state(self) -> BoardState:
+        with Session(self.engine) as session:
+            return load_board_state(session, self.name)
+
+    @property
+    def board(self) -> Board:
+        return self.state.board
+
+    def act(self, actions: list[Action]) -> None:
+        """Act on the board as the page and the tools do."""
+        with Session(self.engine) as session:
+            act_on_board(session, self, actions)
+
+
+def create_exchange(engine: Engine, name: str = BOARD) -> BoardExchange:
+    """Add a board with the name to the database, and make its exchange."""
+    with Session(engine) as session:
+        add_board(session, name)
+        session.commit()
+    return BoardExchange(engine, name)
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:
@@ -83,6 +111,11 @@ def send() -> Send:
 def as_json(*bodies: TBody) -> list[dict[str, Any]]:
     """The actions as an MCP client sends them."""
     return [body.model_dump(mode="json") for body in bodies]
+
+
+async def read_changes(client: Client[Any]) -> Board:
+    """The board that read_changes returns."""
+    return Board.model_validate((await client.call_tool("read_changes", {"name": BOARD})).structured_content)
 
 
 async def read_board(client: Client[Any], *, history: bool = False, **params: Any) -> Board:

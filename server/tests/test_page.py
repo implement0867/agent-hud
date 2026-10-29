@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from playwright.async_api import Browser, Locator, Page, async_playwright, expect
+from sqlalchemy import Engine
 
-from agent_hud.boards import exchange_on_file
 from agent_hud.models.actions import Action, ActionKind, Author, Link
 from agent_hud.models.board import Card, Point
 from agent_hud.models.events import Edit
@@ -16,6 +16,7 @@ from agent_hud.settings import find_static_dir
 from tests.conversation import TOKEN, Agent, open_agent, open_page, serve
 from tests.factories import (
     BOARD,
+    BoardExchange,
     as_json,
     comment,
     link,
@@ -629,32 +630,27 @@ async def test_a_half_written_comment_survives_the_agents_new_version(page: Page
 
 
 async def test_the_page_keeps_the_board_and_a_draft_while_the_server_is_away(
-    browser: Browser, static_dir: Path, tmp_path: Path
+    browser: Browser, static_dir: Path, tmp_path: Path, engine: Engine, exchange: BoardExchange
 ) -> None:
     """Assemble: a page on a board with a card, and a half-written chat message.
     Act: stop the server; then start it again on the same port.
     Assert: while the server is away the page shows a banner and still the card; once it is back the banner goes,
     the draft is still in the box, and a message reaches the board."""
-    state_file = tmp_path / "boards" / f"{BOARD}.db"
-    exchange = exchange_on_file(state_file)
     exchange.act([Action(id="a", author=Author.agent, body=put("plan", "1. parse"))])
-    exchange.close()
-    async with serve({}, static_dir, tmp_path) as (host, port):
+    async with serve(engine, {}, static_dir, tmp_path) as (host, port):
         page = await browser.new_page(viewport={"width": 1440, "height": 900})
         await page.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
         await expect(card(page, "plan")).to_be_visible()
         await page.get_by_label("Message the agent").fill("half a thought")
     await expect(page.get_by_role("alert")).to_contain_text("not reachable")
     await expect(card(page, "plan")).to_be_visible()
-    async with serve({}, static_dir, tmp_path, port=port):
+    async with serve(engine, {}, static_dir, tmp_path, port=port):
         await expect(page.get_by_role("alert")).to_have_count(0, timeout=15000)
         await expect(page.get_by_label("Message the agent")).to_have_value("half a thought")
         await page.get_by_label("Message the agent").press("Enter")
         await expect(page.get_by_label("Chat with the agent")).to_contain_text("half a thought")
     await page.close()
-    again = exchange_on_file(state_file)
-    assert [said.text for said in again.board.messages] == ["half a thought"]
-    again.close()
+    assert [said.text for said in exchange.board.messages] == ["half a thought"]
 
 
 async def test_the_shortcut_sheet_names_the_keys_for_the_platform(page: Page) -> None:

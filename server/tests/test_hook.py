@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import Engine
 
 from tests.conversation import serve
 
@@ -23,6 +24,7 @@ async def run_hook(
     """The hook run for the port, or with --build, in a thread so that the servers in the test's loop can answer it."""
     env = os.environ | {
         "CLAUDE_PLUGIN_ROOT": str(ROOT),
+        "CLAUDE_PLUGIN_DATA": str(state_home / "plugin-data"),
         "AGENT_HUD_PORT": str(port),
         "XDG_STATE_HOME": str(state_home),
     }
@@ -91,11 +93,11 @@ async def fingerprint() -> str:
     return result.stdout.strip()
 
 
-async def test_hook_exits_at_once_when_this_build_answers(static_dir: Path, tmp_path: Path) -> None:
+async def test_hook_exits_at_once_when_this_build_answers(static_dir: Path, tmp_path: Path, engine: Engine) -> None:
     """Assemble: the app on a port, started with the fingerprint of these sources.
     Act: run the hook for that port.
     Assert: exit 0, no message, and no server of its own started."""
-    async with serve({}, static_dir, tmp_path, build=await fingerprint()) as (_, port):
+    async with serve(engine, {}, static_dir, tmp_path, build=await fingerprint()) as (_, port):
         result = await run_hook(port, tmp_path)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert not (tmp_path / "agent-hud" / "server.pid").exists()
