@@ -4,7 +4,6 @@ from pydantic import Field, StringConstraints
 
 from agent_hud.models.base import Model
 from agent_hud.models.events import AgentState
-from agent_hud.models.state import BoardState
 
 type TBoardName = Annotated[
     str,
@@ -19,8 +18,3 @@ class BoardSummary(Model):
     name: TBoardName
     card_count: int = Field(description="The number of cards on the board")
     agent: AgentState
-
-
-def summarize_board(name: TBoardName, state: BoardState, agent: AgentState) -> BoardSummary:
-    """Summarize the board for the list of boards."""
-    return BoardSummary(name=name, card_count=len(state.board.cards), agent=agent)

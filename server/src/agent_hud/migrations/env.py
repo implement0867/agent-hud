@@ -1,6 +1,7 @@
 from alembic import context
-from sqlalchemy import Connection, create_engine
+from sqlalchemy import URL, Connection, create_engine
 
+from agent_hud.settings import Settings
 from agent_hud.tables import Base
 
 
@@ -10,12 +11,14 @@ def run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
-# open_database passes its connection; the alembic command line, which has none, uses the URL of alembic.ini.
+# open_database passes its connection; the alembic command line, which has none, opens the app's own database.
 match context.config.attributes.get("connection"):
     case Connection() as connection:
         run_migrations(connection)
     case None:
-        with create_engine(context.config.get_main_option("sqlalchemy.url", "")).begin() as connection:
+        path = Settings().database_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with create_engine(URL.create("sqlite", database=str(path))).begin() as connection:
             run_migrations(connection)
     case other:
         raise TypeError(f"the alembic connection is a {type(other).__name__}, not a SQLAlchemy Connection")

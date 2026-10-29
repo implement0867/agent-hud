@@ -6,4 +6,4 @@
 - Each `match` must be provably exhaustive: name each remaining case, then end with `case _:` that calls `typing.assert_never`, even when the type checker reports that case as unreachable.
 - Judge the design of the code before you build on it. When a decision is wrong, such as a structure that exists only because an earlier change copied it, say so first and in plain words, and open an issue for it. Do not build on it, add a layer around it, or wait for the user to find it.
 - Nobody has installed this app. Do not keep code for compatibility with an earlier version: a breaking change is acceptable.
-- Each function name contains a verb.
+- Name each function `verb_noun`: the verb says what it does and the noun says to what, so the name reads as the call, such as `load_board` or `commit_board_state`, never a bare noun such as `summary` or a bare verb such as `find`.

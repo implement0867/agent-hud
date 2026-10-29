@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
@@ -5,9 +6,11 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import Engine
 
+from agent_hud.boards import TBoardName
 from agent_hud.database import open_database
+from agent_hud.presence import Presence
 from tests.conversation import serve
-from tests.factories import BOARD, BoardExchange, create_exchange
+from tests.factories import StoredBoard, create_board
 
 
 @pytest.fixture(scope="module")
@@ -31,15 +34,25 @@ def engine(tmp_path: Path) -> Iterator[Engine]:
 
 
 @pytest.fixture
-def exchange(engine: Engine) -> BoardExchange:
-    """The exchange of a new board BOARD in the test's database."""
-    return create_exchange(engine)
+def presences() -> defaultdict[TBoardName, Presence]:
+    """The live presence of each board, new for each test."""
+    return defaultdict(Presence)
+
+
+@pytest.fixture
+def board(engine: Engine) -> StoredBoard:
+    """A new board BOARD in the test's database."""
+    return create_board(engine)
 
 
 @pytest_asyncio.fixture(loop_scope="module")
 async def address(
-    static_dir: Path, tmp_path: Path, engine: Engine, exchange: BoardExchange
+    static_dir: Path,
+    tmp_path: Path,
+    engine: Engine,
+    presences: defaultdict[TBoardName, Presence],
+    board: StoredBoard,
 ) -> AsyncIterator[tuple[str, int]]:
-    """Host and port of the app on the test's exchange as its one board, on a free port, in the module's event loop."""
-    async with serve(engine, {BOARD: exchange}, static_dir, tmp_path) as address:
+    """Host and port of the app on the test's database, whose one board is BOARD, on a free port, in the module's event loop."""
+    async with serve(engine, presences, static_dir, tmp_path) as address:
         yield address

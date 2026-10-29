@@ -1,13 +1,14 @@
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, assert_never
 
 from fastmcp import Client
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from agent_hud.exchange import Exchange, act_on_board
 from agent_hud.models.actions import (
     Action,
     ActionKind,
+    Author,
     Clear,
     Comment,
     Link,
@@ -23,41 +24,50 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.board import Board
-from agent_hud.models.state import BoardState
-from agent_hud.queries.boards import add_board, load_board_state
+from agent_hud.models.draft import Draft
+from agent_hud.operations import apply_agent_actions, apply_user_action
+from agent_hud.queries.boards import add_board, load_board, load_draft
 
 # The board that the tests' tools and sockets name.
 BOARD = "test"
 
 
-class BoardExchange(Exchange):
-    """An exchange with its database, so that a test acts on the board and reads it as the app does."""
+@dataclass(frozen=True)
+class StoredBoard:
+    """A board in the test's database, acted on and read as the app does."""
 
-    def __init__(self, engine: Engine, name: str) -> None:
-        super().__init__(name)
-        self.engine = engine
-
-    @property
-    def state(self) -> BoardState:
-        with Session(self.engine) as session:
-            return load_board_state(session, self.name)
+    engine: Engine
+    name: str = BOARD
 
     @property
     def board(self) -> Board:
-        return self.state.board
+        with Session(self.engine) as session:
+            return load_board(session, self.name)
+
+    @property
+    def draft(self) -> Draft:
+        with Session(self.engine) as session:
+            return load_draft(session, self.name)
 
     def act(self, actions: list[Action]) -> None:
-        """Act on the board as the page and the tools do."""
+        """Take each action as its author does: the user one by one from the page, the agent in one write."""
         with Session(self.engine) as session:
-            act_on_board(session, self, actions)
+            for action in actions:
+                match action.author:
+                    case Author.user:
+                        apply_user_action(session, self.name, action)
+                    case Author.agent:
+                        apply_agent_actions(session, self.name, [action])
+                    case _:
+                        assert_never(action.author)
 
 
-def create_exchange(engine: Engine, name: str = BOARD) -> BoardExchange:
-    """Add a board with the name to the database, and make its exchange."""
+def create_board(engine: Engine, name: str = BOARD) -> StoredBoard:
+    """Add a board with the name to the database."""
     with Session(engine) as session:
         add_board(session, name)
         session.commit()
-    return BoardExchange(engine, name)
+    return StoredBoard(engine, name)
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:

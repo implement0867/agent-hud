@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections.abc import AsyncIterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,8 +12,9 @@ from agent_hud.database import open_database
 from agent_hud.models.actions import ActionKind, Author, TBody
 from agent_hud.models.board import Arrow, Board, Point, Version
 from agent_hud.models.events import Accepted, AgentState, Edit, EventKind, Rejected
+from agent_hud.presence import Presence
 from tests.conversation import Agent, User, open_agent, open_page, serve
-from tests.factories import BOARD, as_json, comment, create_exchange, link, move, put, read_board, remove, say
+from tests.factories import BOARD, as_json, comment, create_board, link, move, put, read_board, remove, say
 from tests.strategies import bodies, card_ids
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -221,11 +223,11 @@ async def test_the_page_shows_whose_turn_it_is(agent: Agent, user: User) -> None
     await agent.write(put("plan", "1. a"))
     assert (await user.notes(lambda snapshot: snapshot.agent is AgentState.waiting)).agent is AgentState.waiting
     await user.act(comment("plan", "fine", "a"))
-    assert (await user.notes(lambda snapshot: snapshot.unsent == 1)).unsent == 1
+    assert len((await user.notes(lambda snapshot: len(snapshot.pending) == 1)).pending) == 1
     await user.send()
     await agent.hear()
     working = await user.notes(lambda snapshot: snapshot.agent is AgentState.working)
-    assert (working.agent, working.unsent) == (AgentState.working, 0)
+    assert (working.agent, working.pending) == (AgentState.working, ())
     await agent.write(say("a is fine"))
     assert (await user.notes(lambda snapshot: snapshot.agent is AgentState.waiting)).agent is AgentState.waiting
     await agent.monitor.close()
@@ -251,9 +253,9 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
     taken: list[TBody] = []
     with TemporaryDirectory() as directory:
         engine = open_database(Path(directory) / "agent-hud.db")
-        exchange = create_exchange(engine)
+        stored = create_board(engine)
         async with (
-            serve(engine, {BOARD: exchange}, static_dir, Path(directory)) as address,
+            serve(engine, defaultdict(Presence), static_dir, Path(directory)) as address,
             open_agent(address) as agent,
             open_page(address) as user,
         ):
@@ -261,7 +263,7 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
                 match author:
                     case Author.user:
                         for body in batch:
-                            pending = [heard.body for heard in exchange.state.open_turn]
+                            pending = [heard.body for heard in stored.draft.heard]
                             answer = await user.act(body)
                             match answer, body.kind:
                                 case Accepted(), ActionKind.say:
@@ -276,7 +278,7 @@ async def test_the_page_and_the_agent_agree_after_each_turn(
                         )
                 board = await read_board(agent.tools, history=True)
                 assert await user.sees(board) == board
-            taken += [heard.body for heard in exchange.state.open_turn]
+            taken += [heard.body for heard in stored.draft.heard]
             await user.send()
             heard: list[TBody] = []
             while len(heard) < len(taken):

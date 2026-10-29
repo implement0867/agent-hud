@@ -42,11 +42,6 @@ export const snapshotSchema = z.strictObject({
   pending: z
     .array(heardSchema)
     .describe("The user's turn so far, as the agent will hear it on the send"),
-  unsent: z
-    .number()
-    .int()
-    .nonnegative()
-    .describe("The number of pending actions"),
   waiting: z
     .number()
     .int()

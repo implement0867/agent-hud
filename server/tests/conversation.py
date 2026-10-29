@@ -1,5 +1,6 @@
 import asyncio
 import socket
+from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -14,11 +15,11 @@ from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 
 from agent_hud.boards import TBoardName
-from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, THeardBody, Turn
+from agent_hud.presence import Presence
 from agent_hud.settings import get_settings
 from agent_hud.web import create_app
 from tests.factories import BOARD, as_json, send
@@ -134,7 +135,7 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
 @asynccontextmanager
 async def serve(
     engine: Engine,
-    exchanges: dict[TBoardName, Exchange],
+    presences: defaultdict[TBoardName, Presence],
     static_dir: Path,
     state_dir: Path,
     build: str = "",
@@ -145,7 +146,7 @@ async def serve(
     monitor_gap: float = 0,
 ) -> AsyncGenerator[tuple[str, int]]:
     """
-    Host and port of the app on the database, with the exchange of each board, with the UI in static_dir, its token in state_dir and the build fingerprint,
+    Host and port of the app on the database, with the presence of each board, with the UI in static_dir, its token in state_dir and the build fingerprint,
     on the port or a free one, until the context ends; after the idle seconds without a socket or a request, when
     they are above 0, the app calls on_idle instead of stopping its process. The monitor's frames are at most
     monitor_chars when given, with no gap between the frames of a turn unless one is given.
@@ -161,7 +162,7 @@ async def serve(
         if monitor_chars is not None:
             env.setenv("AGENT_HUD_MONITOR_CHARS", str(monitor_chars))
         get_settings.cache_clear()
-        app = create_app(engine, exchanges, on_idle)
+        app = create_app(engine, presences, on_idle)
     get_settings.cache_clear()
     # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)

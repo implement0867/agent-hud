@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import shlex
 import sys
+from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
 from contextlib import AsyncExitStack
 from importlib.metadata import version
@@ -27,15 +28,17 @@ from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
+from agent_hud.boards import TBoardName
 from agent_hud.database import open_database
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import ActionKind, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
+from agent_hud.presence import Presence
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings, get_settings
 from agent_hud.web import create_app, send_turn
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
-from tests.factories import BOARD, BoardExchange, as_json, comment, create_exchange, put, say
+from tests.factories import BOARD, StoredBoard, as_json, comment, create_board, put, say
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
@@ -63,29 +66,35 @@ def engine(state_dir: Path) -> Iterator[Engine]:
 
 
 @pytest.fixture(scope="module")
-def exchange(engine: Engine) -> BoardExchange:
-    """The exchange of a new board BOARD, for the app and the agent."""
-    return create_exchange(engine)
+def presences() -> defaultdict[TBoardName, Presence]:
+    """The live presence of each board, for the module."""
+    return defaultdict(Presence)
+
+
+@pytest.fixture(scope="module")
+def board(engine: Engine) -> StoredBoard:
+    """A new board BOARD in the module's database, for the app and the agent."""
+    return create_board(engine)
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def address(
-    static_dir: Path, state_dir: Path, engine: Engine, exchange: BoardExchange
+    static_dir: Path, state_dir: Path, engine: Engine, presences: defaultdict[TBoardName, Presence], board: StoredBoard
 ) -> AsyncIterator[tuple[str, int]]:
-    """Host and port of the app on the module's exchange."""
-    async with serve(engine, {BOARD: exchange}, static_dir, state_dir) as address:
+    """Host and port of the app on the module's database."""
+    async with serve(engine, presences, static_dir, state_dir) as address:
         yield address
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def user(address: tuple[str, int], exchange: BoardExchange) -> AsyncIterator[User]:
+async def user(address: tuple[str, int]) -> AsyncIterator[User]:
     """A page from the app's origin."""
     async with open_page(address) as user:
         yield user
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def listeners(address: tuple[str, int], exchange: BoardExchange) -> AsyncIterator[list[ClientConnection]]:
+async def listeners(address: tuple[str, int]) -> AsyncIterator[list[ClientConnection]]:
     """Two agents' sockets for the user's actions, at the URL that the listen tool returns."""
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
@@ -95,10 +104,12 @@ async def listeners(address: tuple[str, int], exchange: BoardExchange) -> AsyncI
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def agent(engine: Engine, exchange: BoardExchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
-    """The MCP tools in memory, on the same exchange as the app. MCP over HTTP is slower per call."""
+async def agent(
+    engine: Engine, presences: defaultdict[TBoardName, Presence], state_dir: Path
+) -> AsyncIterator[Client[Any]]:
+    """The MCP tools in memory, on the same database and presences as the app. MCP over HTTP is slower per call."""
     settings = Settings(state_dir=state_dir, static_dir=state_dir, data_dir=state_dir)
-    async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, engine, presences, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -132,7 +143,7 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
     monkeypatch.delenv("AGENT_HUD_TOKEN", raising=False)
     get_settings.cache_clear()
     try:
-        create_app(engine, {}, lambda: None)
+        create_app(engine, defaultdict(Presence), lambda: None)
     finally:
         get_settings.cache_clear()
     path = tmp_path / "state" / "token"
@@ -148,9 +159,9 @@ def list_boards(address: tuple[str, int]) -> dict[str, dict[str, Any]]:
 
 
 async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
-    address: tuple[str, int], exchange: BoardExchange
+    address: tuple[str, int], board: StoredBoard
 ) -> None:
-    """Assemble: the app, whose one board is the module's exchange.
+    """Assemble: the app, whose one board is the module's board.
     Act: an agent creates the board alpha, puts a card on it, and listens; a page opens alpha; the agent deletes alpha.
     Assert: the card is on alpha alone, listen names alpha in its URL, the page sees the card, /boards and list_boards
     list alpha with its card; a second create of alpha fails; after the delete, alpha is gone, and a
@@ -165,7 +176,7 @@ async def test_an_agent_creates_a_board_acts_on_it_by_name_and_deletes_it(
         listening = (await remote.call_tool("listen", {"name": "alpha"})).structured_content
         assert listening is not None
         assert "board=alpha" in str(listening["url"]) and listening["board"] == "alpha"
-        assert "plan" not in exchange.board.cards
+        assert "plan" not in board.board.cards
         origin = f"http://{host}:{port}"
         async with connect(f"ws://{host}:{port}/ws?token={TOKEN}&board=alpha", origin=origin, proxy=None) as page:
             assert list(Snapshot.model_validate_json(await page.recv()).board.cards) == ["plan"]
@@ -204,11 +215,11 @@ async def test_a_tool_refuses_a_name_that_is_not_a_board_name(agent: Client[Any]
 
 
 async def test_a_monitor_on_one_board_counts_for_that_board_alone(
-    address: tuple[str, int], exchange: BoardExchange
+    address: tuple[str, int], presences: defaultdict[TBoardName, Presence]
 ) -> None:
     """Assemble: the app, and the board gamma.
     Act: open a monitor on gamma.
-    Assert: gamma says an agent waits and the module's board says what its exchange says; and a socket on a board that
+    Assert: gamma says an agent waits and the module's board says what its presence says; and a socket on a board that
     there is not, or without a board, fails, and /boards without the token fails."""
     host, port = address
     async with Client(f"http://{host}:{port}/mcp/", auth=TOKEN) as remote:
@@ -217,7 +228,7 @@ async def test_a_monitor_on_one_board_counts_for_that_board_alone(
     async with connect(url, proxy=None):
         await asyncio.sleep(0.1)
         boards = await asyncio.to_thread(list_boards, address)
-        assert boards["gamma"]["agent"] == AgentState.waiting and boards[BOARD]["agent"] == exchange.find_agent_state()
+        assert boards["gamma"]["agent"] == AgentState.waiting and boards[BOARD]["agent"] == presences[BOARD].agent_state
     with pytest.raises(InvalidStatus):
         await connect(f"ws://{host}:{port}/agent?token={TOKEN}&board=nowhere", proxy=None)
     with pytest.raises(InvalidStatus):
@@ -269,7 +280,7 @@ async def test_health_names_the_app_and_its_version(address: tuple[str, int]) ->
         )
 
 
-async def test_page_gets_the_board_on_connect(address: tuple[str, int], exchange: BoardExchange) -> None:
+async def test_page_gets_the_board_on_connect(address: tuple[str, int], board: StoredBoard) -> None:
     """Assemble: the app.
     Act: open a page from the app's origin.
     Assert: the first event carries the board."""
@@ -277,7 +288,7 @@ async def test_page_gets_the_board_on_connect(address: tuple[str, int], exchange
     async with connect(
         f"ws://{host}:{port}/ws?board={BOARD}&token={TOKEN}", origin=f"http://{host}:{port}", proxy=None
     ) as page:
-        assert Snapshot.model_validate_json(await page.recv()).board == exchange.board
+        assert Snapshot.model_validate_json(await page.recv()).board == board.board
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
@@ -313,14 +324,14 @@ async def test_the_agent_socket_takes_the_token_without_origin(address: tuple[st
 @given(writes())
 @settings(deadline=None)
 async def test_page_gets_the_board_after_each_write(
-    user: User, agent: Client[Any], exchange: BoardExchange, writes: list[list[TBody]]
+    user: User, agent: Client[Any], board: StoredBoard, writes: list[list[TBody]]
 ) -> None:
     """Assemble: a page on the app.
     Act: the agent writes each batch of actions.
     Assert: after each write, the page shows the board."""
     for batch in writes:
         await agent.call_tool("write", {"name": BOARD, "actions": as_json(*batch)}, raise_on_error=False)
-        assert await user.sees(exchange.board) == exchange.board
+        assert await user.sees(board.board) == board.board
 
 
 @given(card_ids(), mds(), st.data())
@@ -329,7 +340,7 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     user: User,
     listeners: list[ClientConnection],
     agent: Client[Any],
-    exchange: BoardExchange,
+    board: StoredBoard,
     card_id: str,
     md: str,
     data: st.DataObject,
@@ -339,20 +350,20 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     Assert: accepted, the page shows the board and each listener gets a turn of what the page listed as pending; or rejected, and the board is as it was."""
     body = data.draw(bodies(st.just(card_id)))
     await agent.call_tool("write", {"name": BOARD, "actions": as_json(put(card_id, md))})
-    before = exchange.board
-    pending = [heard.body for heard in exchange.state.open_turn]
+    before = board.board
+    pending = [heard.body for heard in board.draft.heard]
     match await user.act(body):
         case Accepted():
-            assert await user.sees(exchange.board) == exchange.board
+            assert await user.sees(board.board) == board.board
             if body.kind not in {ActionKind.send, ActionKind.say}:
-                heard = [heard.body for heard in exchange.state.open_turn]
+                heard = [heard.body for heard in board.draft.heard]
                 await user.send()
             else:
                 heard = [*pending, body] if body.kind is ActionKind.say else pending
             for listener in listeners:
                 assert list((await receive_turn(listener)).actions) == heard
         case Rejected():
-            assert exchange.board == before
+            assert board.board == before
 
 
 @pytest.mark.parametrize("path", ["/ws", "/agent"])
@@ -417,10 +428,10 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
     Act: the user comments on each item and sends.
     Assert: the monitor gets several frames, each within the size, whose turn is the comments."""
     engine = open_database(tmp_path / "agent-hud.db")
-    exchange = create_exchange(engine)
+    create_board(engine)
     texts = [f"step {n} of the plan, with words that fill the line" for n in range(1, 9)]
     async with (
-        serve(engine, {BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
+        serve(engine, defaultdict(Presence), static_dir, tmp_path, monitor_chars=300) as address,
         open_agent(address) as agent,
         open_page(address) as user,
     ):

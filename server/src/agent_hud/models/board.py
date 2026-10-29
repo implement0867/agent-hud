@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Self, assert_never
 
 from pydantic import AwareDatetime, Field, ValidationError, field_validator
@@ -8,6 +9,7 @@ from agent_hud.models.actions import (
     Clear,
     Comment,
     Link,
+    Misfit,
     Move,
     Place,
     Put,
@@ -127,6 +129,16 @@ class Board(Model):
     history: dict[TCardId, tuple[Version, ...]] = Field(
         default_factory=dict, description="The earlier versions of each card, oldest first"
     )
+
+    def apply_all(self, actions: Sequence[Action]) -> "Board":
+        """The board after the actions, in order. Misfit, with the index of the action, when one does not fit the board."""
+        board = self
+        for n, action in enumerate(actions, start=1):
+            try:
+                board = board.apply(action)
+            except ValueError as error:
+                raise Misfit(n, action.body.kind, str(error)) from error
+        return board
 
     def apply(self, action: Action) -> "Board":
         """The board after the action. ValueError, which names the valid choices, if the action does not fit the board."""

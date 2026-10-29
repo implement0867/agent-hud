@@ -59,6 +59,10 @@ class Settings(BaseSettings):
         description="Seconds between the events of one turn, so that the Monitor shows them apart: it joins events closer than 0.2 s",
     )
 
+    @property
+    def database_path(self) -> Path:
+        return self.data_dir / "agent-hud.db"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

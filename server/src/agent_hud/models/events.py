@@ -48,7 +48,6 @@ class Snapshot(Model):
     board: Board
     agent: AgentState
     pending: tuple[Heard, ...] = Field(description="The user's turn so far, as the agent will hear it on the send")
-    unsent: int = Field(description="The number of pending actions")
     waiting: int = Field(description="The user's turns that were sent and that no agent has taken")
 
 

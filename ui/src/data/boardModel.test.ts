@@ -27,7 +27,6 @@ const snapshot = (of: TBoard): TSnapshot => ({
   board: of,
   agent: "waiting",
   pending: [],
-  unsent: 0,
   waiting: 0,
 });
 

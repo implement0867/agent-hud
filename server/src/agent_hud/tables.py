@@ -1,7 +1,5 @@
-from sqlalchemy import Text
+from sqlalchemy import ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
-from agent_hud.models.state import BoardState
 
 
 class Base(DeclarativeBase):
@@ -9,10 +7,33 @@ class Base(DeclarativeBase):
 
 
 class BoardRow(Base):
-    """A board: its name, and its state as JSON, which the queries parse."""
+    """A board: its name, the board as JSON, and the user's draft of the next turn as JSON."""
 
     __tablename__ = "boards"
     __table_args__ = ({"sqlite_strict": True},)
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
-    state: Mapped[str] = mapped_column(Text, default=BoardState().model_dump_json())
+    board: Mapped[str] = mapped_column(Text)
+    draft: Mapped[str] = mapped_column(Text)
+
+
+class TurnRow(Base):
+    """A turn that the user sent and that some open monitor has not had, in the order sent; the actions as JSON."""
+
+    __tablename__ = "turns"
+    __table_args__ = (UniqueConstraint("board", "id"), {"sqlite_strict": True})
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    board: Mapped[str] = mapped_column(ForeignKey("boards.name", ondelete="CASCADE"))
+    id: Mapped[str] = mapped_column(Text)
+    actions: Mapped[str] = mapped_column(Text)
+
+
+class CursorRow(Base):
+    """The agent's read cursor on a board, as JSON."""
+
+    __tablename__ = "agent_cursors"
+    __table_args__ = ({"sqlite_strict": True},)
+
+    board: Mapped[str] = mapped_column(ForeignKey("boards.name", ondelete="CASCADE"), primary_key=True)
+    cursor: Mapped[str] = mapped_column(Text)

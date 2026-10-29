@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from agent_hud.models.actions import Action, Author, TBody
+from agent_hud.models.actions import Action, ActionKind, Author, Misfit, TBody
 from agent_hud.models.base import Model
 from agent_hud.models.board import Arrow, Board, Card, Point, Said, Size, Thread, Version
 from agent_hud.text import quote_offsets, strip_whitespace, visible_text
@@ -509,3 +509,29 @@ def test_an_action_on_an_empty_board_says_it_has_no_cards() -> None:
     Assert: ValueError says that the board has no cards."""
     with pytest.raises(ValueError, match=r"^no card 'a': the board has no cards$"):
         act(Board(), remove("a"))
+
+
+@given(st.lists(actions(st.sampled_from(["a", "b"])), min_size=1))
+def test_apply_all_takes_every_action_or_none(batch: list[Action]) -> None:
+    """Act: apply any batch of actions to a new board, and each action in turn.
+    Assert: the batch gives the board of the actions in turn, or raises when one of them does."""
+    expected = Board()
+    try:
+        for action in batch:
+            expected = expected.apply(action)
+    except ValueError:
+        with pytest.raises(ValueError):
+            Board().apply_all(batch)
+    else:
+        assert Board().apply_all(batch) == expected
+
+
+def test_apply_all_names_the_action_that_does_not_fit() -> None:
+    """Act: apply a put, a comment on words that the card does not show, and a say.
+    Assert: Misfit with the index and kind of the second action and the board's reason, which in a batch says that no action was applied."""
+    batch = [put("plan", "1. a"), comment("plan", "why?", "b"), say("hi")]
+    reason = "card 'plan' does not show the words 'b': quote its text without markdown"
+    with pytest.raises(Misfit, match=f"^{re.escape(reason)}$") as info:
+        Board().apply_all([Action(id=str(n), author=Author.agent, body=body) for n, body in enumerate(batch)])
+    assert (info.value.index, info.value.kind) == (2, ActionKind.comment)
+    assert info.value.in_batch() == f"action 2 (comment): {reason}; no actions were applied"
