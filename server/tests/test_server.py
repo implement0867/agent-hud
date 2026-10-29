@@ -1,9 +1,8 @@
 import asyncio
 import re
 from collections.abc import AsyncIterator
-from contextlib import nullcontext
-from functools import partial
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import jsonschema
@@ -15,14 +14,14 @@ from mcp.client.subscriptions import ServerEvent, Subscription, listen
 from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.subscriptions import ResourcesListChanged, ResourceUpdated
 from mcp.types import TextResourceContents, Tool
+from sqlalchemy import Engine
 
+from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import Action, ActionKind, Author, TAgentBody
 from agent_hud.models.board import Board
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings
-from agent_hud.store import StoreFactory
-from agent_hud.stores.memory import MemoryStore
 from tests.factories import (
     BOARD,
     as_json,
@@ -45,10 +44,10 @@ async def listed_write(client: Client[Any]) -> Tool:
 
 
 @pytest.fixture
-async def client(stores: StoreFactory, exchange: Exchange, tmp_path: Path) -> AsyncIterator[Client[Any]]:
-    """The MCP tools in memory, on the test's store, with the test's exchange as their one board."""
+async def client(engine: Engine, exchange: Exchange, tmp_path: Path) -> AsyncIterator[Client[Any]]:
+    """The MCP tools in memory, on the test's database, with the test's exchange as their one board."""
     settings = Settings(state_dir=tmp_path, static_dir=tmp_path, data_dir=tmp_path)
-    async with Client(build_mcp_server(settings, stores, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -195,9 +194,11 @@ async def test_listed_write_schema_takes_each_action_that_write_takes(body: TAge
     Act: check an action of each kind against the listed schema of write.
     Assert: the schema takes it, so that a client that checks the schema sends each action that the server takes."""
     unused = Settings(state_dir=Path("unused"), data_dir=Path("unused"))
-    server = build_mcp_server(unused, partial(nullcontext, MemoryStore()), {}, InMemorySubscriptionBus())
-    async with Client(server) as client:
-        jsonschema.validate({"name": BOARD, "actions": as_json(body)}, (await listed_write(client)).input_schema)
+    with TemporaryDirectory() as directory:
+        engine = open_database(Path(directory) / "agent-hud.db")
+        async with Client(build_mcp_server(unused, engine, {}, InMemorySubscriptionBus())) as client:
+            jsonschema.validate({"name": BOARD, "actions": as_json(body)}, (await listed_write(client)).input_schema)
+        engine.dispose()
 
 
 @pytest.mark.parametrize(

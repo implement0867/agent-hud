@@ -2,9 +2,8 @@ import asyncio
 import itertools
 import shlex
 import sys
-from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, nullcontext
-from functools import partial
+from collections.abc import AsyncIterator, Iterator
+from contextlib import AsyncExitStack
 from importlib.metadata import version
 from json import load
 from pathlib import Path
@@ -24,20 +23,20 @@ from hypothesis.provisional import domains
 from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
+from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
+from agent_hud.database import open_database
 from agent_hud.exchange import Exchange
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import ActionKind, TBody
 from agent_hud.models.events import Accepted, AgentState, Rejected, Snapshot, Turn
 from agent_hud.server import build_mcp_server
 from agent_hud.settings import Settings, get_settings
-from agent_hud.store import StoreFactory
-from agent_hud.stores.memory import MemoryStore
 from agent_hud.web import create_app, send_turn
 from tests.conversation import TOKEN, User, listen_url, open_agent, open_page, receive_turn, serve
-from tests.factories import BOARD, as_json, comment, put, say
+from tests.factories import BOARD, as_json, comment, create_exchange, put, say
 from tests.strategies import blanks, bodies, card_ids, mds, messages
 
 # One server for the module, because Hypothesis runs each test's examples on the same fixtures.
@@ -57,31 +56,25 @@ def host_names() -> st.SearchStrategy[str]:
 
 
 @pytest.fixture(scope="module")
-def store() -> MemoryStore:
-    """A new store in memory for the module, with the board BOARD, for the app and the agent."""
-    store = MemoryStore()
-    store.add_board(BOARD)
-    return store
+def engine(state_dir: Path) -> Iterator[Engine]:
+    """A new database for the module, for the app and the agent."""
+    engine = open_database(state_dir / "agent-hud.db")
+    yield engine
+    engine.dispose()
 
 
 @pytest.fixture(scope="module")
-def stores(store: MemoryStore) -> StoreFactory:
-    """Open the module's store."""
-    return partial(nullcontext, store)
-
-
-@pytest.fixture(scope="module")
-def exchange(store: MemoryStore) -> Exchange:
-    """The exchange of the board BOARD, for the app and the agent."""
-    return Exchange(store.load_board_state(BOARD))
+def exchange(engine: Engine) -> Exchange:
+    """The exchange of a new board BOARD, for the app and the agent."""
+    return create_exchange(engine)
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def address(
-    static_dir: Path, state_dir: Path, stores: StoreFactory, exchange: Exchange
+    static_dir: Path, state_dir: Path, engine: Engine, exchange: Exchange
 ) -> AsyncIterator[tuple[str, int]]:
     """Host and port of the app on the module's exchange."""
-    async with serve(stores, {BOARD: exchange}, static_dir, state_dir) as address:
+    async with serve(engine, {BOARD: exchange}, static_dir, state_dir) as address:
         yield address
 
 
@@ -103,10 +96,10 @@ async def listeners(address: tuple[str, int], exchange: Exchange) -> AsyncIterat
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def agent(stores: StoreFactory, exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
+async def agent(engine: Engine, exchange: Exchange, state_dir: Path) -> AsyncIterator[Client[Any]]:
     """The MCP tools in memory, on the same exchange as the app. MCP over HTTP is slower per call."""
     settings = Settings(state_dir=state_dir, static_dir=state_dir, data_dir=state_dir)
-    async with Client(build_mcp_server(settings, stores, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
+    async with Client(build_mcp_server(settings, engine, {BOARD: exchange}, InMemorySubscriptionBus())) as client:
         yield client
 
 
@@ -130,7 +123,7 @@ async def test_tools_need_the_token_when_the_settings_give_one(address: tuple[st
 
 
 async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, engine: Engine
 ) -> None:
     """Assemble: settings with a state dir and no token.
     Act: create the app.
@@ -140,7 +133,7 @@ async def test_the_token_is_kept_in_the_state_dir_for_the_user_only(
     monkeypatch.delenv("AGENT_HUD_TOKEN", raising=False)
     get_settings.cache_clear()
     try:
-        create_app(partial(nullcontext, MemoryStore()), {}, lambda: None)
+        create_app(engine, {}, lambda: None)
     finally:
         get_settings.cache_clear()
     path = tmp_path / "state" / "token"
@@ -223,7 +216,9 @@ async def test_a_monitor_on_one_board_counts_for_that_board_alone(address: tuple
     async with connect(url, proxy=None):
         await asyncio.sleep(0.1)
         boards = await asyncio.to_thread(list_boards, address)
-        assert boards["gamma"]["agent"] == AgentState.waiting and boards[BOARD]["agent"] == exchange.snapshot().agent
+        assert (
+            boards["gamma"]["agent"] == AgentState.waiting and boards[BOARD]["agent"] == exchange.take_snapshot().agent
+        )
     with pytest.raises(InvalidStatus):
         await connect(f"ws://{host}:{port}/agent?token={TOKEN}&board=nowhere", proxy=None)
     with pytest.raises(InvalidStatus):
@@ -346,12 +341,12 @@ async def test_a_page_action_reaches_the_board_and_each_agent_on_send_or_is_reje
     body = data.draw(bodies(st.just(card_id)))
     await agent.call_tool("write", {"name": BOARD, "actions": as_json(put(card_id, md))})
     before = exchange.board
-    pending = [heard.body for heard in exchange.snapshot().pending]
+    pending = [heard.body for heard in exchange.take_snapshot().pending]
     match await user.act(body):
         case Accepted():
             assert await user.sees(exchange.board) == exchange.board
             if body.kind not in {ActionKind.send, ActionKind.say}:
-                heard = [heard.body for heard in exchange.snapshot().pending]
+                heard = [heard.body for heard in exchange.take_snapshot().pending]
                 await user.send()
             else:
                 heard = [*pending, body] if body.kind is ActionKind.say else pending
@@ -422,12 +417,11 @@ async def test_a_long_turn_reaches_the_monitor_as_frames_of_the_size(static_dir:
     """Assemble: an app whose monitor frames hold 300 characters, with a list of eight items on its board.
     Act: the user comments on each item and sends.
     Assert: the monitor gets several frames, each within the size, whose turn is the comments."""
-    store = MemoryStore()
-    store.add_board(BOARD)
-    exchange = Exchange(store.load_board_state(BOARD))
+    engine = open_database(tmp_path / "agent-hud.db")
+    exchange = create_exchange(engine)
     texts = [f"step {n} of the plan, with words that fill the line" for n in range(1, 9)]
     async with (
-        serve(partial(nullcontext, store), {BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
+        serve(engine, {BOARD: exchange}, static_dir, tmp_path, monitor_chars=300) as address,
         open_agent(address) as agent,
         open_page(address) as user,
     ):

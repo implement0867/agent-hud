@@ -21,5 +21,6 @@ class BoardSummary(Model):
     agent: AgentState
 
 
-def summarize(name: TBoardName, exchange: Exchange) -> BoardSummary:
-    return BoardSummary(name=name, card_count=len(exchange.board.cards), agent=exchange.snapshot().agent)
+def summarize_board(exchange: Exchange) -> BoardSummary:
+    """Summarize the exchange's board for the list of boards."""
+    return BoardSummary(name=exchange.name, card_count=len(exchange.board.cards), agent=exchange.find_agent_state())

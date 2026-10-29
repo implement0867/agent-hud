@@ -9,16 +9,17 @@ from agent_hud.models.state import BoardState
 
 
 class Monitor:
-    """An agent's open monitor, and the ids of the turns that it has had."""
+    """An agent's open monitor, and the ids of the turns delivered to it."""
 
     def __init__(self) -> None:
-        self.had: set[TActionId] = set()
+        self.delivered: set[TActionId] = set()
 
 
 class Exchange:
     """A board's state, and what lives only while the app runs: the agents' open monitors and whether an agent works."""
 
-    def __init__(self, state: BoardState) -> None:
+    def __init__(self, name: str, state: BoardState) -> None:
+        self.name = name
         self.state = state
         self.working = False
         self._monitors: list[Monitor] = []
@@ -49,29 +50,35 @@ class Exchange:
         """Mark the cards and every message as read by the agent."""
         self.state = self.state.mark_read(cards)
 
-    def mark_had(self, monitor: Monitor, turn: Turn) -> None:
+    def mark_delivered(self, monitor: Monitor, turn: Turn) -> None:
         """
-        Mark the turn as had by the monitor, so that the agent works on it; remove each sent turn that every open
-        monitor has had.
+        Mark the turn as delivered to the monitor, so that the agent works on it; remove each sent turn that was
+        delivered to every open monitor.
         """
-        monitor.had.add(turn.id)
-        had_by_all = {sent.id for sent in self.state.sent_turns if all(sent.id in each.had for each in self._monitors)}
-        self.state = self.state.remove_turns(had_by_all)
+        monitor.delivered.add(turn.id)
+        delivered_to_all = {
+            sent.id for sent in self.state.sent_turns if all(sent.id in each.delivered for each in self._monitors)
+        }
+        self.state = self.state.remove_turns(delivered_to_all)
         self.working = True
         self._notify()
 
-    def snapshot(self) -> Snapshot:
+    def find_agent_state(self) -> AgentState:
+        """Find whether an agent is away, works, or waits for the user's turn."""
         match self.monitors, self.working:
             case 0, _:
-                agent = AgentState.away
+                return AgentState.away
             case _, True:
-                agent = AgentState.working
+                return AgentState.working
             case _:
-                agent = AgentState.waiting
+                return AgentState.waiting
+
+    def take_snapshot(self) -> Snapshot:
+        """Take the board and the agent's state, for the page."""
         return Snapshot(
             kind=EventKind.snapshot,
             board=self.board,
-            agent=agent,
+            agent=self.find_agent_state(),
             pending=self.state.open_turn,
             unsent=len(self.state.open_turn),
             waiting=len(self.state.sent_turns),
@@ -82,13 +89,13 @@ class Exchange:
         last = None
         while True:
             changed = self._changed
-            if (snapshot := self.snapshot()) != last:
+            if (snapshot := self.take_snapshot()) != last:
                 last = snapshot
                 yield snapshot
             await changed.wait()
 
     @contextmanager
-    def monitor(self) -> Generator[Monitor]:
+    def open_monitor(self) -> Generator[Monitor]:
         """Open an agent's monitor until the context ends."""
         monitor = Monitor()
         self._monitors.append(monitor)
@@ -100,11 +107,11 @@ class Exchange:
             self._notify()
 
     async def wait_for_turns(self, monitor: Monitor) -> AsyncIterator[Turn]:
-        """Wait for each sent turn that the monitor has not had, oldest first; a turn comes again until it is marked had."""
+        """Wait for each sent turn not yet delivered to the monitor, oldest first; a turn comes again until it is marked delivered."""
         while True:
             changed = self._changed
-            if unhad := [turn for turn in self.state.sent_turns if turn.id not in monitor.had]:
-                yield unhad[0]
+            if undelivered := [turn for turn in self.state.sent_turns if turn.id not in monitor.delivered]:
+                yield undelivered[0]
             else:
                 await changed.wait()
 

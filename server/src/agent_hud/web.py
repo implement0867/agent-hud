@@ -4,7 +4,6 @@ import signal
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
-from functools import partial
 from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
@@ -13,12 +12,14 @@ from typing import Annotated, assert_never
 from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketException, status
 from fastapi.staticfiles import StaticFiles
 from mcp.server.subscriptions import InMemorySubscriptionBus, ResourceUpdated
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardSummary, TBoardName, summarize
+from agent_hud.boards import BoardSummary, TBoardName, summarize_board
 from agent_hud.database import open_database
 from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
 from agent_hud.exchange import Exchange, Monitor
@@ -26,10 +27,9 @@ from agent_hud.frames import split_into_frames
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.base import Model
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
+from agent_hud.queries.boards import list_board_names, load_board_state, save_exchange
 from agent_hud.server import build_mcp_server, make_board_uri
 from agent_hud.settings import get_settings
-from agent_hud.store import StoreFactory
-from agent_hud.stores.sql import open_sql_store
 
 
 async def send_each(websocket: WebSocket, events: AsyncIterator[Model]) -> None:
@@ -130,10 +130,10 @@ def keep_token(token: str, state_dir: Path) -> None:
     path.write_text(token)
 
 
-def create_app(stores: StoreFactory, exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) -> FastAPI:
+def create_app(engine: Engine, exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
-    the boards in the stores; exchanges holds the exchange of each board.
+    the boards in the database; exchanges holds the exchange of each board.
     The agent's tools name their board in an argument, and the sockets in the board query parameter.
     The sockets and /boards need the socket token as a query parameter; /mcp/ needs the token as a bearer token when
     the settings give one. After the settings' idle seconds with no page or monitor connected and no request, the app
@@ -142,7 +142,7 @@ def create_app(stores: StoreFactory, exchanges: dict[TBoardName, Exchange], stop
     settings = get_settings()
     keep_token(settings.socket_token, settings.state_dir)
     bus = InMemorySubscriptionBus()
-    mcp_app = build_mcp_server(settings, stores, exchanges, bus).http_app(path="/")
+    mcp_app = build_mcp_server(settings, engine, exchanges, bus).http_app(path="/")
     activity = Activity()
 
     @asynccontextmanager
@@ -160,11 +160,11 @@ def create_app(stores: StoreFactory, exchanges: dict[TBoardName, Exchange], stop
             if watch is not None:
                 watch.cancel()
 
-    def require_board(board: Annotated[TBoardName, Query()]) -> tuple[TBoardName, Exchange]:
-        """The board that the socket's board query parameter names, and its exchange. A policy violation when there is none."""
+    def require_exchange(board: Annotated[TBoardName, Query()]) -> Exchange:
+        """Find the exchange of the board that the socket's board query parameter names. A policy violation when there is none."""
         match exchanges.get(board):
             case Exchange() as exchange:
-                return board, exchange
+                return exchange
             case None:
                 raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
             case other:
@@ -184,13 +184,12 @@ def create_app(stores: StoreFactory, exchanges: dict[TBoardName, Exchange], stop
     @app.get("/boards", dependencies=[with_token])
     async def board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
-        with stores() as store:
-            return [summarize(name, exchanges[name]) for name in store.list_board_names()]
+        with Session(engine) as session:
+            return [summarize_board(exchanges[name]) for name in list_board_names(session)]
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
-    async def page(websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]) -> None:
+    async def page(websocket: WebSocket, exchange: Annotated[Exchange, Depends(require_exchange)]) -> None:
         """Send the board's snapshot on connect and after each change, and act for the user, until the page disconnects."""
-        name, exchange = board
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
             sender = tg.create_task(send_each(websocket, exchange.snapshots()))
@@ -201,32 +200,27 @@ def create_app(stores: StoreFactory, exchanges: dict[TBoardName, Exchange], stop
                 except ValueError as error:
                     reply = Rejected(kind=EventKind.rejected, id=request.id, reason=str(error)).model_dump_json()
                 else:
-                    with stores() as store:
-                        store.save_board_state(name, exchange.state)
-                        store.commit()
+                    with Session(engine) as session:
+                        save_exchange(session, exchange)
                     reply = Accepted(kind=EventKind.accepted, id=request.id).model_dump_json()
-                    await bus.publish(ResourceUpdated(uri=make_board_uri(name)))
+                    await bus.publish(ResourceUpdated(uri=make_board_uri(exchange.name)))
                 await websocket.send_text(reply)
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[AgentOriginDep, with_token])
-    async def agent(
-        websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]
-    ) -> None:
+    async def agent(websocket: WebSocket, exchange: Annotated[Exchange, Depends(require_exchange)]) -> None:
         """Send each of the user's turns on the board to this agent's monitor, as frames of lines, until it disconnects."""
-        name, exchange = board
 
         async def deliver_turns(monitor: Monitor) -> None:
             """Send each turn, then mark it had by the monitor, so that a turn whose send fails comes again."""
             async for turn in exchange.wait_for_turns(monitor):
                 await send_turn(websocket, turn, settings.monitor_chars, settings.monitor_gap)
-                exchange.mark_had(monitor, turn)
-                with stores() as store:
-                    store.save_board_state(name, exchange.state)
-                    store.commit()
+                exchange.mark_delivered(monitor, turn)
+                with Session(engine) as session:
+                    save_exchange(session, exchange)
 
         await websocket.accept()
-        with exchange.monitor() as monitor:
+        with exchange.open_monitor() as monitor:
             async with asyncio.TaskGroup() as tg:
                 sender = tg.create_task(deliver_turns(monitor))
                 # The monitor sends nothing, so this returns when it disconnects.
@@ -241,6 +235,6 @@ def create_app(stores: StoreFactory, exchanges: dict[TBoardName, Exchange], stop
 def app_factory() -> FastAPI:
     """Make the app as uvicorn serves it: on the database in the data folder, with each board's exchange, and the process stops when idle."""
     engine = open_database(get_settings().data_dir / "agent-hud.db")
-    with open_sql_store(engine) as store:
-        exchanges = {name: Exchange(store.load_board_state(name)) for name in store.list_board_names()}
-    return create_app(partial(open_sql_store, engine), exchanges, stop_process)
+    with Session(engine) as session:
+        exchanges = {name: Exchange(name, load_board_state(session, name)) for name in list_board_names(session)}
+    return create_app(engine, exchanges, stop_process)

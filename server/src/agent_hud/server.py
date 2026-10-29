@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from shlex import quote
 from typing import Annotated, assert_never
@@ -14,8 +15,10 @@ from fastmcp.tools import FunctionTool
 from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, ResourcesListChanged, ResourceUpdated
 from mcp.types import SubscriptionsListenRequestParams, ToolAnnotations
 from pydantic import AfterValidator, Field
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 
-from agent_hud.boards import BoardSummary, TBoardName, summarize
+from agent_hud.boards import BoardSummary, TBoardName, summarize_board
 from agent_hud.exchange import Exchange
 from agent_hud.models.actions import (
     Action,
@@ -29,9 +32,9 @@ from agent_hud.models.actions import (
 )
 from agent_hud.models.base import Model
 from agent_hud.models.board import Board, Said
+from agent_hud.queries.boards import add_board, list_board_names, load_board_state, remove_board, save_exchange
 from agent_hud.schema import compact_actions_schema
 from agent_hud.settings import Settings
-from agent_hud.store import Store, StoreFactory
 
 
 def check_each_card_put_once(bodies: list[TAgentBody]) -> list[TAgentBody]:
@@ -134,10 +137,10 @@ def make_board_uri(name: TBoardName) -> str:
 
 
 def build_mcp_server(
-    settings: Settings, stores: StoreFactory, exchanges: dict[TBoardName, Exchange], bus: InMemorySubscriptionBus
+    settings: Settings, engine: Engine, exchanges: dict[TBoardName, Exchange], bus: InMemorySubscriptionBus
 ) -> FastMCP:
     """
-    The MCP server whose tools create, list and delete the boards in the stores, and act on the board that each call
+    The MCP server whose tools create, list and delete the boards in the database, and act on the board that each call
     names; exchanges holds the exchange of each board. Each board is the resource board://<name>, and bus carries an
     update of it at each write, and a change of the list at each create and delete.
     """
@@ -177,36 +180,38 @@ def build_mcp_server(
                 assert_never(other)
 
     board_exchange = Depends(find_exchange, name=CallArgument())
-    store_of_call = Depends(stores)
+    call_session = Depends(partial(Session, engine))
 
-    async def create_board(name: TBoardName, store: Store = store_of_call) -> BoardSummary:
+    async def create_board(name: TBoardName, session: Session = call_session) -> BoardSummary:
         """Create an empty board with the name. ValueError when a board has the name."""
-        store.add_board(name)
-        store.commit()
-        exchanges[name] = Exchange(store.load_board_state(name))
+        add_board(session, name)
+        session.commit()
+        exchanges[name] = Exchange(name, load_board_state(session, name))
         add_resource(name)
         await bus.publish(ResourcesListChanged())
-        return summarize(name, exchanges[name])
+        return summarize_board(exchanges[name])
 
-    async def list_boards(store: Store = store_of_call) -> list[BoardSummary]:
+    async def list_boards(session: Session = call_session) -> list[BoardSummary]:
         """Each board with its number of cards and whether an agent follows it."""
-        return [summarize(name, exchanges[name]) for name in store.list_board_names()]
+        return [summarize_board(exchanges[name]) for name in list_board_names(session)]
 
-    async def delete_board(name: TBoardName, exchange: Exchange = board_exchange, store: Store = store_of_call) -> None:
+    async def delete_board(
+        name: TBoardName, exchange: Exchange = board_exchange, session: Session = call_session
+    ) -> None:
         """
         Delete the board.
         ValueError when no board has the name, or when a monitor is open on it.
         """
         if exchange.monitors:
             raise ValueError(f"the board '{name}' has {exchange.monitors} open monitors: stop them first")
-        store.remove_board(name)
-        store.commit()
+        remove_board(session, name)
+        session.commit()
         del exchanges[name]
         mcp.local_provider.remove_resource(make_board_uri(name))
         await bus.publish(ResourcesListChanged())
 
     async def write(
-        name: TBoardName, actions: TActions, exchange: Exchange = board_exchange, store: Store = store_of_call
+        name: TBoardName, actions: TActions, exchange: Exchange = board_exchange, session: Session = call_session
     ) -> WriteResult:
         """
         Act on the board as the agent. Actions run in order, all or nothing.
@@ -220,15 +225,14 @@ def build_mcp_server(
             exchange.act([Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in actions])
         except Misfit as misfit:
             raise ValueError(misfit.in_batch()) from misfit
-        store.save_board_state(name, exchange.state)
-        store.commit()
+        save_exchange(session, exchange)
         await bus.publish(ResourceUpdated(uri=make_board_uri(name)))
         return summarize_write(before, exchange.board, actions)
 
     async def read(
         name: TBoardName,
         exchange: Exchange = board_exchange,
-        store: Store = store_of_call,
+        session: Session = call_session,
         *,
         history: Annotated[bool, Field(description="Also return the earlier versions of each card")] = False,
         cards: Annotated[
@@ -242,12 +246,11 @@ def build_mcp_server(
         """
         board = exchange.board if history else exchange.board.model_copy(update={"history": {}})
         exchange.mark_read(frozenset(board.cards if cards is None else cards))
-        store.save_board_state(name, exchange.state)
-        store.commit()
+        save_exchange(session, exchange)
         return select_cards(board, cards, board.messages)
 
     async def read_changes(
-        name: TBoardName, exchange: Exchange = board_exchange, store: Store = store_of_call
+        name: TBoardName, exchange: Exchange = board_exchange, session: Session = call_session
     ) -> Board:
         """
         The cards that changed since you last read them, with what is on them, and the messages since you last read
@@ -257,8 +260,7 @@ def build_mcp_server(
         board = exchange.board.model_copy(update={"history": {}})
         changed = [card_id for card_id in board.cards if card_id in state.unread_cards]
         exchange.mark_read(state.unread_cards)
-        store.save_board_state(name, exchange.state)
-        store.commit()
+        save_exchange(session, exchange)
         return select_cards(board, changed, board.messages[state.read_messages :])
 
     async def listen(name: TBoardName, exchange: Exchange = board_exchange) -> Listening:

@@ -1,7 +1,10 @@
 from typing import Any
 
 from fastmcp import Client
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 
+from agent_hud.exchange import Exchange
 from agent_hud.models.actions import (
     ActionKind,
     Clear,
@@ -19,9 +22,18 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.board import Board
+from agent_hud.queries.boards import add_board, load_board_state
 
 # The board that the tests' tools and sockets name.
 BOARD = "test"
+
+
+def create_exchange(engine: Engine, name: str = BOARD) -> Exchange:
+    """Add a board with the name to the database, and make its exchange."""
+    with Session(engine) as session:
+        add_board(session, name)
+        session.commit()
+        return Exchange(name, load_board_state(session, name))
 
 
 def put(card_id: str, md: str, version: int | None = None) -> Put:

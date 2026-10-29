@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 import uvicorn
 from fastmcp import Client
+from sqlalchemy import Engine
 from websockets.asyncio.client import ClientConnection, connect
 
 from agent_hud.boards import TBoardName
@@ -19,7 +20,6 @@ from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
 from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, THeardBody, Turn
 from agent_hud.settings import get_settings
-from agent_hud.store import StoreFactory
 from agent_hud.web import create_app
 from tests.factories import BOARD, as_json, send
 
@@ -133,7 +133,7 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
 
 @asynccontextmanager
 async def serve(
-    stores: StoreFactory,
+    engine: Engine,
     exchanges: dict[TBoardName, Exchange],
     static_dir: Path,
     state_dir: Path,
@@ -161,7 +161,7 @@ async def serve(
         if monitor_chars is not None:
             env.setenv("AGENT_HUD_MONITOR_CHARS", str(monitor_chars))
         get_settings.cache_clear()
-        app = create_app(stores, exchanges, on_idle)
+        app = create_app(engine, exchanges, on_idle)
     get_settings.cache_clear()
     # With IPPROTO_TCP, asyncio turns off Nagle's algorithm on each connection, as for the socket uvicorn binds itself.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
