@@ -9,7 +9,7 @@ from sqlalchemy import Engine
 from agent_hud.boards import TBoardName
 from agent_hud.database import open_database
 from agent_hud.presence import Presence
-from tests.conversation import serve
+from tests.conversation import serve_app
 from tests.factories import StoredBoard, create_board
 
 
@@ -54,5 +54,5 @@ async def address(
     board: StoredBoard,
 ) -> AsyncIterator[tuple[str, int]]:
     """Host and port of the app on the test's database, whose one board is BOARD, on a free port, in the module's event loop."""
-    async with serve(engine, presences, static_dir, tmp_path) as address:
+    async with serve_app(engine, presences, static_dir, tmp_path) as address:
         yield address

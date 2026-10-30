@@ -18,19 +18,19 @@ from agent_hud.boards import TBoardName
 from agent_hud.frames import FrameHead, join_frames
 from agent_hud.models.actions import TBody
 from agent_hud.models.board import Board
-from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, THeardBody, Turn
+from agent_hud.models.events import Accepted, PageEventAdapter, Rejected, Request, Snapshot, TTurnActionBody, Turn
 from agent_hud.presence import Presence
 from agent_hud.settings import get_settings
 from agent_hud.web import create_app
-from tests.factories import BOARD, as_json, send
+from tests.factories import BOARD, dump_bodies, make_send
 
 # The app's token in the tests: /mcp/ needs it as a bearer token, and the sockets as a query parameter.
 TOKEN = "test-token"
 
 
-async def listen_url(tools: Client[Any], board: TBoardName = BOARD) -> str:
+async def fetch_listen_url(tools: Client[Any], board: TBoardName = BOARD) -> str:
     """The websocket URL of the user's turns on the board that listen returns."""
-    listening = (await tools.call_tool("listen", {"name": board})).structured_content
+    listening = (await tools.call_tool("listen_board", {"name": board})).structured_content
     assert listening is not None
     return str(listening["url"])
 
@@ -53,21 +53,21 @@ class Agent:
     tools: Client[Any]
     monitor: ClientConnection
 
-    async def write(self, *bodies: TBody) -> None:
-        await self.tools.call_tool("write", {"name": BOARD, "actions": as_json(*bodies)})
+    async def write_board(self, *bodies: TBody) -> None:
+        await self.tools.call_tool("write_board", {"name": BOARD, "actions": dump_bodies(*bodies)})
 
-    async def turn(self) -> Turn:
+    async def receive_turn(self) -> Turn:
         """The next turn of the user that the monitor gets. TimeoutError if none comes in five seconds."""
         return await receive_turn(self.monitor)
 
-    async def hear(self) -> list[THeardBody]:
+    async def receive_actions(self) -> list[TTurnActionBody]:
         """The user's actions in the next turn that the monitor gets, in order."""
-        return list((await self.turn()).actions)
+        return list((await self.receive_turn()).actions)
 
     @asynccontextmanager
-    async def listen(self) -> AsyncGenerator[None]:
+    async def open_monitor(self) -> AsyncGenerator[None]:
         """Open a new monitor, as the agent does when its last monitor ended, until the context ends."""
-        async with connect(await listen_url(self.tools), proxy=None) as self.monitor:
+        async with connect(await fetch_listen_url(self.tools), proxy=None) as self.monitor:
             yield
 
 
@@ -82,7 +82,7 @@ class User:
     def board(self) -> Board:
         return self.snapshot.board
 
-    async def act(self, body: TBody) -> Accepted | Rejected:
+    async def request_action(self, body: TBody) -> Accepted | Rejected:
         """Ask the board to take the action, as the page does on a click, and take the boards that come before the reply."""
         request = Request(id=uuid4().hex, body=body)
         await self.page.send(request.model_dump_json())
@@ -96,11 +96,11 @@ class User:
                     case other:
                         raise AssertionError(f"a reply to another request: {other}")
 
-    async def send(self) -> None:
+    async def send_turn(self) -> None:
         """End the turn, as the page's Send button does."""
-        assert isinstance(await self.act(send()), Accepted)
+        assert isinstance(await self.request_action(make_send()), Accepted)
 
-    async def notes(self, check: Callable[[Snapshot], bool]) -> Snapshot:
+    async def await_snapshot(self, check: Callable[[Snapshot], bool]) -> Snapshot:
         """The first snapshot that passes the check, or the last one after a second without it."""
         with suppress(TimeoutError):
             async with asyncio.timeout(1):
@@ -108,9 +108,9 @@ class User:
                     self.snapshot = Snapshot.model_validate_json(await self.page.recv())
         return self.snapshot
 
-    async def sees(self, board: Board) -> Board:
+    async def await_board(self, board: Board) -> Board:
         """The board that the page shows once it shows the board, or after a second without it."""
-        return (await self.notes(lambda snapshot: snapshot.board == board)).board
+        return (await self.await_snapshot(lambda snapshot: snapshot.board == board)).board
 
 
 @asynccontextmanager
@@ -129,11 +129,11 @@ async def open_agent(address: tuple[str, int]) -> AsyncGenerator[Agent]:
     host, port = address
     async with AsyncExitStack() as stack:
         tools = await stack.enter_async_context(Client(f"http://{host}:{port}/mcp/", auth=TOKEN))
-        yield Agent(tools, await stack.enter_async_context(connect(await listen_url(tools), proxy=None)))
+        yield Agent(tools, await stack.enter_async_context(connect(await fetch_listen_url(tools), proxy=None)))
 
 
 @asynccontextmanager
-async def serve(
+async def serve_app(
     engine: Engine,
     presences: defaultdict[TBoardName, Presence],
     static_dir: Path,

@@ -14,11 +14,11 @@ from agent_hud.models.actions import (
     Link,
     Move,
     Place,
+    Post,
     Put,
     Remove,
     Resize,
     Restore,
-    Say,
     Send,
     TBody,
     Unlink,
@@ -49,7 +49,7 @@ class StoredBoard:
         with Session(self.engine) as session:
             return load_draft(session, self.name)
 
-    def act(self, actions: list[Action]) -> None:
+    def apply_actions(self, actions: list[Action]) -> None:
         """Take each action as its author does: the user one by one from the page, the agent in one write."""
         with Session(self.engine) as session:
             for action in actions:
@@ -70,60 +70,62 @@ def create_board(engine: Engine, name: str = BOARD) -> StoredBoard:
     return StoredBoard(engine, name)
 
 
-def put(card_id: str, md: str, version: int | None = None) -> Put:
+def make_put(card_id: str, md: str, version: int | None = None) -> Put:
     return Put(kind=ActionKind.put, id=card_id, md=md, version=version)
 
 
-def remove(card_id: str) -> Remove:
+def make_remove(card_id: str) -> Remove:
     return Remove(kind=ActionKind.remove, id=card_id)
 
 
-def restore(card_id: str) -> Restore:
+def make_restore(card_id: str) -> Restore:
     return Restore(kind=ActionKind.restore, id=card_id)
 
 
-def comment(card_id: str, text: str, quote: str = "", occurrence: int | None = None) -> Comment:
+def make_comment(card_id: str, text: str, quote: str = "", occurrence: int | None = None) -> Comment:
     return Comment(kind=ActionKind.comment, card=card_id, quote=quote, occurrence=occurrence, text=text)
 
 
-def say(text: str) -> Say:
-    return Say(kind=ActionKind.say, text=text)
+def make_post(text: str) -> Post:
+    return Post(kind=ActionKind.post, text=text)
 
 
-def link(arrow_id: str, card_id: str, dst: str, text: str = "", quote: str = "", occurrence: int | None = None) -> Link:
+def make_link(
+    arrow_id: str, card_id: str, dst: str, text: str = "", quote: str = "", occurrence: int | None = None
+) -> Link:
     return Link(kind=ActionKind.link, id=arrow_id, card=card_id, quote=quote, occurrence=occurrence, dst=dst, text=text)
 
 
-def unlink(arrow_id: str) -> Unlink:
+def make_unlink(arrow_id: str) -> Unlink:
     return Unlink(kind=ActionKind.unlink, id=arrow_id)
 
 
-def move(card_id: str, x: float, y: float) -> Move:
+def make_move(card_id: str, x: float, y: float) -> Move:
     return Move(kind=ActionKind.move, id=card_id, x=x, y=y)
 
 
-def resize(card_id: str, width: float | None = None, height: float | None = None) -> Resize:
+def make_resize(card_id: str, width: float | None = None, height: float | None = None) -> Resize:
     return Resize(kind=ActionKind.resize, id=card_id, width=width, height=height)
 
 
-def place(card_id: str, x: float, y: float) -> Place:
+def make_place(card_id: str, x: float, y: float) -> Place:
     return Place(kind=ActionKind.place, id=card_id, x=x, y=y)
 
 
-def clear() -> Clear:
+def make_clear() -> Clear:
     return Clear(kind=ActionKind.clear)
 
 
-def send() -> Send:
+def make_send() -> Send:
     return Send(kind=ActionKind.send)
 
 
-def as_json(*bodies: TBody) -> list[dict[str, Any]]:
+def dump_bodies(*bodies: TBody) -> list[dict[str, Any]]:
     """The actions as an MCP client sends them."""
     return [body.model_dump(mode="json") for body in bodies]
 
 
-async def read_changes(client: Client[Any]) -> Board:
+async def read_board_changes(client: Client[Any]) -> Board:
     """The board that read_changes returns."""
     return Board.model_validate((await client.call_tool("read_changes", {"name": BOARD})).structured_content)
 
@@ -131,5 +133,5 @@ async def read_changes(client: Client[Any]) -> Board:
 async def read_board(client: Client[Any], *, history: bool = False, **params: Any) -> Board:
     """The board that read returns."""
     return Board.model_validate(
-        (await client.call_tool("read", {"name": BOARD, "history": history, **params})).structured_content
+        (await client.call_tool("read_board", {"name": BOARD, "history": history, **params})).structured_content
     )

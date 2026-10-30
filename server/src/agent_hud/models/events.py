@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 from enum import StrEnum
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal
 
 from pydantic import Discriminator, Field, TypeAdapter
 
@@ -32,22 +32,22 @@ class Edit(Model):
     diff: str = Field(description="A unified diff of the card's markdown, without the file header")
 
 
-type THeardBody = Annotated[TBody | Edit, Discriminator("kind")]
+type TTurnActionBody = Annotated[TBody | Edit, Discriminator("kind")]
 
 
-class Heard(Model):
+class TurnAction(Model):
     """A user's action as the agent's monitor gets it."""
 
     id: TActionId
     author: Author
-    body: THeardBody
+    body: TTurnActionBody
 
 
 class Snapshot(Model):
     kind: Literal[EventKind.snapshot]
     board: Board
     agent: AgentState
-    pending: tuple[Heard, ...] = Field(description="The user's turn so far, as the agent will hear it on the send")
+    pending: tuple[TurnAction, ...] = Field(description="The user's turn so far, as the agent will hear it on the send")
     waiting: int = Field(description="The user's turns that were sent and that no agent has taken")
 
 
@@ -74,7 +74,7 @@ type TPageEvent = Annotated[Snapshot | Accepted | Rejected, Discriminator("kind"
 PageEventAdapter = TypeAdapter[TPageEvent](TPageEvent)
 
 
-HeardBodyAdapter = TypeAdapter[THeardBody](THeardBody)
+TurnActionBodyAdapter = TypeAdapter[TTurnActionBody](TTurnActionBody)
 
 
 class Turn(Model):
@@ -83,9 +83,9 @@ class Turn(Model):
     id: TActionId = Field(
         description="The id of the send or chat message that ended the turn; the same id from two monitors is one turn"
     )
-    actions: tuple[THeardBody, ...]
+    actions: tuple[TTurnActionBody, ...]
 
-    @classmethod
-    def of(cls, turn_id: TActionId, heard: Iterable[Heard]) -> Self:
-        """The turn of the actions as the agent hears them."""
-        return cls(id=turn_id, actions=tuple(action.body for action in heard))
+
+def make_turn(turn_id: TActionId, actions: Iterable[TurnAction]) -> Turn:
+    """Make the turn of the actions as the agent's monitor gets them, with the id of the send or message that ended it."""
+    return Turn(id=turn_id, actions=tuple(action.body for action in actions))

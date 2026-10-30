@@ -31,7 +31,7 @@ from agent_hud.models.actions import (
     Unlink,
 )
 from agent_hud.models.base import Model
-from agent_hud.models.board import Board, Said
+from agent_hud.models.board import Board, Message
 from agent_hud.operations import apply_agent_actions, list_board_summaries
 from agent_hud.presence import Presence
 from agent_hud.queries.boards import (
@@ -103,7 +103,7 @@ class WriteResult(Model):
     dropped: list[TCardId] = Field(description="The arrows the write dropped, since their words or a card went")
 
 
-def select_cards(board: Board, cards: list[TCardId] | None, chat: Sequence[Said]) -> Board:
+def select_cards(board: Board, cards: list[TCardId] | None, chat: Sequence[Message]) -> Board:
     """
     The board with the given cards only, if given, with everything keyed by card or by a ref on it kept for those cards;
     and with the chat in place of its messages.
@@ -212,7 +212,7 @@ def build_mcp_server(
         mcp.local_provider.remove_resource(make_board_uri(name))
         await bus.publish(ResourcesListChanged())
 
-    async def write(
+    async def write_board(
         name: TBoardName, actions: TActions, presence: Presence = board_presence, session: Session = call_session
     ) -> WriteResult:
         """
@@ -227,13 +227,13 @@ def build_mcp_server(
                 session, name, [Action(id=uuid4().hex, author=Author.agent, body=body, at=now) for body in actions]
             )
         except Misfit as misfit:
-            raise ValueError(misfit.in_batch()) from misfit
+            raise ValueError(misfit.describe_in_batch()) from misfit
         presence.note_agent_wrote()
         presence.notify_change()
         await bus.publish(ResourceUpdated(uri=make_board_uri(name)))
         return summarize_write(change.before, change.after, actions)
 
-    async def read(
+    async def read_board(
         name: TBoardName,
         presence: Presence = board_presence,
         session: Session = call_session,
@@ -269,7 +269,7 @@ def build_mcp_server(
         session.commit()
         return select_cards(board, changed, board.messages[cursor.read_message_count :])
 
-    async def listen(name: TBoardName, presence: Presence = board_presence) -> Listening:
+    async def listen_board(name: TBoardName, presence: Presence = board_presence) -> Listening:
         """
         Where the user's turns on the board come from: a websocket URL, and a shell command that prints each turn as its lines.
         Open the URL with the Monitor tool's websocket source, or run the command with its command source, with the description board, and again when the monitor ends.
@@ -282,7 +282,7 @@ def build_mcp_server(
         url = str(request_url.include_query_params(board=name, token=settings.socket_token))
         return Listening(url=url, command=make_turns_command(url), board=name, monitors=len(presence.monitors))
 
-    tool = FunctionTool.from_function(write)
+    tool = FunctionTool.from_function(write_board)
     parameters, kinds = compact_actions_schema(tool.parameters)
     mcp.add_tool(
         tool.model_copy(update={"parameters": parameters, "description": f"{tool.description}\nActions: {kinds}."})
@@ -290,9 +290,9 @@ def build_mcp_server(
     mcp.tool(create_board)
     mcp.tool(list_boards, annotations=ToolAnnotations(read_only_hint=True))
     mcp.tool(delete_board, annotations=ToolAnnotations(destructive_hint=True))
-    mcp.tool(read, annotations=ToolAnnotations(read_only_hint=True))
+    mcp.tool(read_board, annotations=ToolAnnotations(read_only_hint=True))
     mcp.tool(read_changes, annotations=ToolAnnotations(read_only_hint=True))
-    mcp.tool(listen, annotations=ToolAnnotations(read_only_hint=True))
+    mcp.tool(listen_board, annotations=ToolAnnotations(read_only_hint=True))
     with Session(engine) as session:
         for name in list_board_names(session):
             add_resource(name)

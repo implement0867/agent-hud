@@ -1,20 +1,20 @@
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
-from agent_hud.models.actions import Action, Author, TAgentBody, TBody, TCardId, TMessage
+from agent_hud.models.actions import Action, Author, TAgentBody, TBody, TCardId, TMessageText
 from tests.factories import (
-    clear,
-    comment,
-    link,
-    move,
-    place,
-    put,
-    remove,
-    resize,
-    restore,
-    say,
-    send,
-    unlink,
+    make_clear,
+    make_comment,
+    make_link,
+    make_move,
+    make_place,
+    make_post,
+    make_put,
+    make_remove,
+    make_resize,
+    make_restore,
+    make_send,
+    make_unlink,
 )
 
 
@@ -27,7 +27,7 @@ def action_ids() -> st.SearchStrategy[str]:
 
 
 def messages() -> st.SearchStrategy[str]:
-    return st.from_regex(TypeAdapter(TMessage).json_schema()["pattern"])
+    return st.from_regex(TypeAdapter(TMessageText).json_schema()["pattern"])
 
 
 def item_texts() -> st.SearchStrategy[str]:
@@ -35,11 +35,11 @@ def item_texts() -> st.SearchStrategy[str]:
     return st.from_regex(r"[A-Za-z]([A-Za-z0-9 ]*[A-Za-z0-9])?", fullmatch=True)
 
 
-def list_md(marker: str, texts: list[str]) -> str:
+def make_list_md(marker: str, texts: list[str]) -> str:
     return "\n".join(f"{marker}{text}" for text in texts)
 
 
-def table_md(rows: list[list[str]]) -> str:
+def make_table_md(rows: list[list[str]]) -> str:
     """A table with a header row of the width of the first row."""
     width = len(rows[0])
     lines = [[f"h{n}" for n in range(width)], ["---"] * width, *rows]
@@ -55,8 +55,8 @@ def tables() -> st.SearchStrategy[list[list[str]]]:
 
 def mds() -> st.SearchStrategy[str]:
     """Card markdown, often with a list of words, so that quotes of those words fit some cards and not others."""
-    lists = st.builds(list_md, st.sampled_from(["- ", "1. "]), st.lists(item_texts(), min_size=1, max_size=3))
-    return st.one_of(st.text(st.characters(codec="utf-8"), min_size=1), lists, st.builds(table_md, tables()))
+    lists = st.builds(make_list_md, st.sampled_from(["- ", "1. "]), st.lists(item_texts(), min_size=1, max_size=3))
+    return st.one_of(st.text(st.characters(codec="utf-8"), min_size=1), lists, st.builds(make_table_md, tables()))
 
 
 def quotes() -> st.SearchStrategy[str]:
@@ -83,21 +83,21 @@ def sizes() -> st.SearchStrategy[tuple[float | None, float | None]]:
 
 def agent_bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TAgentBody]:
     return st.one_of(
-        st.builds(put, ids, mds()),
-        st.builds(remove, ids),
-        st.builds(restore, ids),
-        st.builds(comment, ids, messages(), quotes(), occurrences()),
-        st.builds(say, messages()),
-        st.builds(link, ids, ids, ids, st.text(), quotes(), occurrences()),
-        st.builds(unlink, ids),
-        st.builds(move, ids, coordinates(), coordinates()),
-        sizes().flatmap(lambda size: st.builds(resize, ids, st.just(size[0]), st.just(size[1]))),
-        st.builds(clear),
+        st.builds(make_put, ids, mds()),
+        st.builds(make_remove, ids),
+        st.builds(make_restore, ids),
+        st.builds(make_comment, ids, messages(), quotes(), occurrences()),
+        st.builds(make_post, messages()),
+        st.builds(make_link, ids, ids, ids, st.text(), quotes(), occurrences()),
+        st.builds(make_unlink, ids),
+        st.builds(make_move, ids, coordinates(), coordinates()),
+        sizes().flatmap(lambda size: st.builds(make_resize, ids, st.just(size[0]), st.just(size[1]))),
+        st.builds(make_clear),
     )
 
 
 def bodies(ids: st.SearchStrategy[str]) -> st.SearchStrategy[TBody]:
-    return st.one_of(agent_bodies(ids), st.builds(place, ids, coordinates(), coordinates()), st.builds(send))
+    return st.one_of(agent_bodies(ids), st.builds(make_place, ids, coordinates(), coordinates()), st.builds(make_send))
 
 
 def actions(ids: st.SearchStrategy[str]) -> st.SearchStrategy[Action]:

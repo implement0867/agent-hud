@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agent-hud-turns = "agent_hud.turns:main"
+agent-hud-turns = "agent_hud.turns:run_turns_command"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]

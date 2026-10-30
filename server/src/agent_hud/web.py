@@ -22,7 +22,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from agent_hud.boards import BoardSummary, TBoardName
 from agent_hud.database import open_database
-from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
+from agent_hud.deps import AgentOriginDep, PageOriginDep, make_token_dep
 from agent_hud.frames import split_into_frames
 from agent_hud.models.actions import Action, Author
 from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Snapshot, Turn
@@ -71,13 +71,13 @@ class Activity:
         self.sockets = 0
         self.changed = asyncio.Event()
 
-    def note(self, sockets: int = 0) -> None:
+    def note_activity(self, sockets: int = 0) -> None:
         """A request, or a socket that opened (1) or closed (-1), now."""
         self.last = monotonic()
         self.sockets += sockets
         self.changed.set()
 
-    def idle_for(self) -> float:
+    def measure_idle(self) -> float:
         """How long the app has been idle: 0 while a page or a monitor is connected."""
         return 0 if self.sockets > 0 else monotonic() - self.last
 
@@ -94,11 +94,11 @@ class Watched:
             await self.app(scope, receive, send)
             return
         socket = scope["type"] == "websocket"
-        self.activity.note(1 if socket else 0)
+        self.activity.note_activity(1 if socket else 0)
         try:
             await self.app(scope, receive, send)
         finally:
-            self.activity.note(-1 if socket else 0)
+            self.activity.note_activity(-1 if socket else 0)
 
 
 def stop_process() -> None:
@@ -108,7 +108,7 @@ def stop_process() -> None:
 
 async def stop_when_idle(activity: Activity, after: float, stop: Callable[[], None]) -> None:
     """Call stop once the app has been idle for the seconds: no page or monitor connected, and no request."""
-    while (idle := activity.idle_for()) < after:
+    while (idle := activity.measure_idle()) < after:
         activity.changed.clear()
         with suppress(TimeoutError):
             async with asyncio.timeout(after - idle):
@@ -142,7 +142,7 @@ def create_app(engine: Engine, presences: defaultdict[TBoardName, Presence], sto
     activity = Activity()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    async def run_lifespan(app: FastAPI) -> AsyncGenerator[None]:
         """The MCP session manager and the idle watch while the app runs."""
         watch = (
             asyncio.create_task(stop_when_idle(activity, settings.idle_seconds, stop))
@@ -163,25 +163,25 @@ def create_app(engine: Engine, presences: defaultdict[TBoardName, Presence], sto
                 raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
         return board
 
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI(lifespan=run_lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     app.add_middleware(Watched, activity=activity)
-    with_token = token_dep(settings.socket_token)
+    with_token = make_token_dep(settings.socket_token)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    def report_health() -> dict[str, str]:
         """The app, its version and the build fingerprint it was started with, for the hook that starts it: any other answer on the port is another program."""
         return {"app": "agent-hud", "version": version("agent-hud"), "build": settings.build}
 
     @app.get("/boards", dependencies=[with_token])
-    async def board_summaries() -> list[BoardSummary]:
+    async def serve_board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
         with Session(engine) as session:
             return list_board_summaries(session, presences)
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
-    async def page(websocket: WebSocket, board: Annotated[TBoardName, Depends(require_board)]) -> None:
+    async def serve_page(websocket: WebSocket, board: Annotated[TBoardName, Depends(require_board)]) -> None:
         """Send the board's snapshot on connect and after each change, and act for the user, until the page disconnects."""
         presence = presences[board]
 
@@ -194,7 +194,7 @@ def create_app(engine: Engine, presences: defaultdict[TBoardName, Presence], sto
                         kind=EventKind.snapshot,
                         board=load_board(session, board),
                         agent=presence.agent_state,
-                        pending=load_draft(session, board).heard,
+                        pending=load_draft(session, board).actions,
                         waiting=len(list_turns(session, board)),
                     )
                 if snapshot != last:
@@ -220,7 +220,7 @@ def create_app(engine: Engine, presences: defaultdict[TBoardName, Presence], sto
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[AgentOriginDep, with_token])
-    async def agent(websocket: WebSocket, board: Annotated[TBoardName, Depends(require_board)]) -> None:
+    async def serve_agent(websocket: WebSocket, board: Annotated[TBoardName, Depends(require_board)]) -> None:
         """Send each of the user's turns on the board to this agent's monitor, as frames of lines, until it disconnects."""
         presence = presences[board]
 
@@ -252,6 +252,6 @@ def create_app(engine: Engine, presences: defaultdict[TBoardName, Presence], sto
     return app
 
 
-def app_factory() -> FastAPI:
+def make_app() -> FastAPI:
     """Make the app as uvicorn serves it: on the database in the data folder, with no presence yet, and the process stops when idle."""
     return create_app(open_database(get_settings().database_path), defaultdict(Presence), stop_process)

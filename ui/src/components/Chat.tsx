@@ -175,7 +175,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
       return;
     }
     setSending(true);
-    if (await store.act({ kind: ActionKind.enum.say, text })) setText("");
+    if (await store.act({ kind: ActionKind.enum.post, text })) setText("");
     setSending(false);
   };
   return (

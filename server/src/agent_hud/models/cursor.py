@@ -9,11 +9,11 @@ from agent_hud.models.actions import (
     Link,
     Move,
     Place,
+    Post,
     Put,
     Remove,
     Resize,
     Restore,
-    Say,
     Send,
     TCardId,
     Unlink,
@@ -29,7 +29,7 @@ class ReadCursor(Model):
     )
     read_message_count: int = Field(default=0, description="How many of the board's messages the agent has read")
 
-    def note(self, action: Action) -> Self:
+    def note_action(self, action: Action) -> Self:
         """The cursor with the cards that the action changed unread; a clear starts the board again."""
         match action.body:
             case Clear():
@@ -46,7 +46,7 @@ class ReadCursor(Model):
                 return self.model_copy(update={"unread_cards": self.unread_cards | {card_id}})
             case Link(card=card_id, dst=dst):
                 return self.model_copy(update={"unread_cards": self.unread_cards | {card_id, dst}})
-            case Say() | Unlink() | Send():
+            case Post() | Unlink() | Send():
                 return self
             case _:
                 assert_never(action.body)

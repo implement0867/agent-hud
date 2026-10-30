@@ -7,7 +7,7 @@ from agent_hud.models.base import Model
 
 type TCardId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
 type TActionId = Annotated[str, StringConstraints(min_length=1, max_length=64)]
-type TMessage = Annotated[str, StringConstraints(pattern=r"\S")]
+type TMessageText = Annotated[str, StringConstraints(pattern=r"\S")]
 type TQuote = Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)]
 
 
@@ -21,7 +21,7 @@ class ActionKind(StrEnum):
     remove = "remove"
     restore = "restore"
     comment = "comment"
-    say = "say"
+    post = "post"
     link = "link"
     unlink = "unlink"
     move = "move"
@@ -68,12 +68,12 @@ class Comment(Model):
         ge=0,
         description="Which place of the quote, from 0, when the card has the quote at more than one place",
     )
-    text: TMessage
+    text: TMessageText
 
 
-class Say(Model):
-    kind: Literal[ActionKind.say]
-    text: TMessage
+class Post(Model):
+    kind: Literal[ActionKind.post]
+    text: TMessageText
 
 
 class Link(Model):
@@ -115,7 +115,7 @@ class Resize(Model):
     )
 
     @model_validator(mode="after")
-    def _some(self) -> Self:
+    def check_some_dimension(self) -> Self:
         if self.width is None and self.height is None:
             raise ValueError("resize takes a width, a height or both")
         return self
@@ -146,12 +146,12 @@ class Send(Model):
 
 
 type TAgentBody = Annotated[
-    Put | Remove | Restore | Comment | Say | Link | Unlink | Move | Resize | Clear,
+    Put | Remove | Restore | Comment | Post | Link | Unlink | Move | Resize | Clear,
     Discriminator("kind"),
 ]
 """An action of the agent: each kind but place and send, which only the user's page sends."""
 type TBody = Annotated[
-    Put | Remove | Restore | Comment | Say | Link | Unlink | Move | Resize | Place | Clear | Send,
+    Put | Remove | Restore | Comment | Post | Link | Unlink | Move | Resize | Place | Clear | Send,
     Discriminator("kind"),
 ]
 
@@ -166,7 +166,7 @@ class Action(Model):
     def ends_turn(self) -> bool:
         """A send or a chat message from the user ends the user's turn."""
         match self.author, self.body:
-            case Author.user, Send() | Say():
+            case Author.user, Send() | Post():
                 return True
             case _:
                 return False
@@ -181,7 +181,7 @@ class Misfit(ValueError):
         self.kind = kind
         self.reason = reason
 
-    def in_batch(self) -> str:
+    def describe_in_batch(self) -> str:
         """The reason with the action's index and kind, and that the batch was not applied."""
         action = f"action {self.index} ({self.kind})" if self.kind else f"action {self.index}"
         return f"{action}: {self.reason}; no actions were applied"

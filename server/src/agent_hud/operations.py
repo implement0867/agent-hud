@@ -30,8 +30,8 @@ def apply_user_action(session: Session, name: TBoardName, action: Action) -> Dra
     ValueError when the action does not fit the board. The draft with the action, or the turn that the action ended.
     """
     board = load_board(session, name)
-    save_board(session, name, board.apply(action))
-    taken = load_draft(session, name).take(board, action)
+    save_board(session, name, board.apply_action(action))
+    taken = load_draft(session, name).take_action(board, action)
     match taken:
         case Draft() as draft:
             save_draft(session, name, draft)
@@ -40,7 +40,7 @@ def apply_user_action(session: Session, name: TBoardName, action: Action) -> Dra
             save_draft(session, name, Draft())
         case _:
             assert_never(taken)
-    save_cursor(session, name, load_cursor(session, name).note(action))
+    save_cursor(session, name, load_cursor(session, name).note_action(action))
     session.commit()
     return taken
 
@@ -51,10 +51,10 @@ def apply_agent_actions(session: Session, name: TBoardName, actions: Sequence[Ac
     Misfit, with the index of the action, when one does not fit the board.
     """
     before = load_board(session, name)
-    after = before.apply_all(actions)
+    after = before.apply_actions(actions)
     cursor = load_cursor(session, name)
     for action in actions:
-        cursor = cursor.note(action)
+        cursor = cursor.note_action(action)
     save_board(session, name, after)
     save_cursor(session, name, cursor)
     session.commit()

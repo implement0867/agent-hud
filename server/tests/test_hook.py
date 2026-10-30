@@ -11,7 +11,7 @@ import pytest_asyncio
 from sqlalchemy import Engine
 
 from agent_hud.presence import Presence
-from tests.conversation import serve
+from tests.conversation import serve_app
 
 # The app fixture serves in the module's loop, so the tests run there too.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -23,7 +23,7 @@ TOOLS = ("sh", "curl", "sed", "grep", "mkdir", "cat", "sleep", "kill", "nohup")
 async def run_hook(
     port: int, state_home: Path, path: str | None = None, *, build: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    """The hook run for the port, or with --build, in a thread so that the servers in the test's loop can answer it."""
+    """The hook run for the port, or with --build, in a thread so that the servers in the test's loop can answer_request it."""
     env = os.environ | {
         "CLAUDE_PLUGIN_ROOT": str(ROOT),
         "CLAUDE_PLUGIN_DATA": str(state_home / "plugin-data"),
@@ -58,13 +58,13 @@ def path_without_uv(tmp_path: Path) -> str:
 async def other_program() -> AsyncIterator[int]:
     """The port of a server that answers 200 with another body, as a program that is not the app does."""
 
-    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def answer_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await reader.readuntil(b"\r\n\r\n")
         writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
         await writer.drain()
         writer.close()
 
-    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    server = await asyncio.start_server(answer_request, "127.0.0.1", 0)
     async with server:
         yield server.sockets[0].getsockname()[1]
 
@@ -73,7 +73,7 @@ async def other_program() -> AsyncIterator[int]:
 async def old_agent_hud() -> AsyncIterator[int]:
     """The port of a server that answers 404 on /health and the board page's title at /, as an agent-hud from before /health does."""
 
-    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def answer_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         request = await reader.readuntil(b"\r\n\r\n")
         if request.startswith(b"GET /health "):
             writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -83,12 +83,12 @@ async def old_agent_hud() -> AsyncIterator[int]:
         await writer.drain()
         writer.close()
 
-    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    server = await asyncio.start_server(answer_request, "127.0.0.1", 0)
     async with server:
         yield server.sockets[0].getsockname()[1]
 
 
-async def fingerprint() -> str:
+async def compute_fingerprint() -> str:
     """The fingerprint of the server's sources, as the hook computes it."""
     result = await run_hook(0, Path("/nonexistent"), build=True)
     assert result.returncode == 0, result.stderr
@@ -99,7 +99,10 @@ async def test_hook_exits_at_once_when_this_build_answers(static_dir: Path, tmp_
     """Assemble: the app on a port, started with the fingerprint of these sources.
     Act: run the hook for that port.
     Assert: exit 0, no message, and no server of its own started."""
-    async with serve(engine, defaultdict(Presence), static_dir, tmp_path, build=await fingerprint()) as (_, port):
+    async with serve_app(engine, defaultdict(Presence), static_dir, tmp_path, build=await compute_fingerprint()) as (
+        _,
+        port,
+    ):
         result = await run_hook(port, tmp_path)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert not (tmp_path / "agent-hud" / "server.pid").exists()

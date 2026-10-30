@@ -6,7 +6,7 @@ from agent_hud.models.actions import Action, Author
 from agent_hud.models.board import Board
 from agent_hud.models.cursor import ReadCursor
 from agent_hud.models.draft import Draft
-from agent_hud.models.events import Heard, Turn
+from agent_hud.models.events import Turn, TurnAction
 from agent_hud.queries.boards import (
     add_board,
     check_board_exists,
@@ -20,7 +20,7 @@ from agent_hud.queries.boards import (
 )
 from agent_hud.queries.cursors import load_cursor, save_cursor
 from agent_hud.queries.turns import add_turn, list_turns, remove_turns
-from tests.factories import comment, put, say
+from tests.factories import make_comment, make_post, make_put
 
 
 def test_the_queries_add_list_and_remove_boards(engine: Engine) -> None:
@@ -42,23 +42,23 @@ def test_the_queries_add_list_and_remove_boards(engine: Engine) -> None:
 
 def test_a_new_board_is_empty_and_each_saved_record_loads_again(engine: Engine) -> None:
     """Assemble: a new board.
-    Act: save a board with a card, a draft with a comment, and a cursor, and load each in a new session.
+    Act: save a board with a card, a draft with a make_comment, and a cursor, and load each in a new session.
     Assert: the new board, draft and cursor are empty, and each loads as saved."""
-    board = Board().apply(Action(id="a", author=Author.agent, body=put("plan", "1. a")))
-    heard = Heard(id="r", author=Author.user, body=comment("plan", "yes", "a"))
+    board = Board().apply_action(Action(id="a", author=Author.agent, body=make_put("plan", "1. a")))
+    heard = TurnAction(id="r", author=Author.user, body=make_comment("plan", "yes", "a"))
     cursor = ReadCursor(unread_cards=frozenset({"plan"}), read_message_count=2)
     with Session(engine) as session:
         add_board(session, "plan")
         session.commit()
         assert (load_board(session, "plan"), load_draft(session, "plan")) == (Board(), Draft())
         save_board(session, "plan", board)
-        save_draft(session, "plan", Draft(heard=(heard,)))
+        save_draft(session, "plan", Draft(actions=(heard,)))
         save_cursor(session, "plan", cursor)
         session.commit()
     with Session(engine) as session:
         assert (load_board(session, "plan"), load_draft(session, "plan"), load_cursor(session, "plan")) == (
             board,
-            Draft(heard=(heard,)),
+            Draft(actions=(heard,)),
             cursor,
         )
 
@@ -70,7 +70,7 @@ def test_the_card_counts_come_from_the_database(engine: Engine) -> None:
     with Session(engine) as session:
         add_board(session, "full")
         add_board(session, "empty")
-        board = Board().apply_all([Action(id=n, author=Author.agent, body=put(n, "1. a")) for n in ["a", "b"]])
+        board = Board().apply_actions([Action(id=n, author=Author.agent, body=make_put(n, "1. a")) for n in ["a", "b"]])
         save_board(session, "full", board)
         session.commit()
         assert count_cards_of_each_board(session) == {"full": 2, "empty": 0}
@@ -80,7 +80,7 @@ def test_turns_wait_in_order_until_removed_and_go_with_their_board(engine: Engin
     """Assemble: a board with two turns.
     Act: list the turns, remove the first, then remove the board.
     Assert: both turns oldest first, then the second alone, then none."""
-    turns = [Turn(id="one", actions=(say("one"),)), Turn(id="two", actions=(say("two"),))]
+    turns = [Turn(id="one", actions=(make_post("one"),)), Turn(id="two", actions=(make_post("two"),))]
     with Session(engine) as session:
         add_board(session, "plan")
         add_turn(session, "plan", turns[0])

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import Engine
 
 from agent_hud.presence import Presence
-from tests.conversation import open_page, serve
+from tests.conversation import open_page, serve_app
 from tests.factories import StoredBoard
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
@@ -30,7 +30,7 @@ async def test_the_app_stops_once_idle_and_not_while_a_page_is_connected(
     Act: wait a second with the page connected; then close the page and wait again.
     Assert: the app does not stop while the page is connected, and stops within three seconds of its going."""
     stopped = asyncio.Event()
-    async with serve(
+    async with serve_app(
         engine, defaultdict(Presence), static_dir, tmp_path, idle_seconds=0.5, on_idle=stopped.set
     ) as address:
         async with open_page(address):
@@ -45,7 +45,7 @@ async def test_a_request_starts_the_idle_time_again(static_dir: Path, tmp_path: 
     Act: ask /health every 0.4 s for 1.6 s; then stop asking.
     Assert: the app has not stopped while the requests came, and stops within three seconds after the last."""
     stopped = asyncio.Event()
-    async with serve(engine, defaultdict(Presence), static_dir, tmp_path, idle_seconds=1, on_idle=stopped.set) as (
+    async with serve_app(engine, defaultdict(Presence), static_dir, tmp_path, idle_seconds=1, on_idle=stopped.set) as (
         host,
         port,
     ):
@@ -62,6 +62,6 @@ async def test_an_idle_time_of_zero_keeps_the_app_running(static_dir: Path, tmp_
     Act: wait a second.
     Assert: the app has not stopped."""
     stopped = asyncio.Event()
-    async with serve(engine, defaultdict(Presence), static_dir, tmp_path, idle_seconds=0, on_idle=stopped.set):
+    async with serve_app(engine, defaultdict(Presence), static_dir, tmp_path, idle_seconds=0, on_idle=stopped.set):
         await asyncio.sleep(1)
         assert not stopped.is_set()

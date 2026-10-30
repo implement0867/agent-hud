@@ -84,7 +84,7 @@ describe("groupPending", () => {
           quote: "",
           text: "fine",
         }),
-        heard({ kind: ActionKind.enum.say, text: "go ahead" }),
+        heard({ kind: ActionKind.enum.post, text: "go ahead" }),
         heard({ kind: "edit", id: "checklist", diff: "-| [ ] |\n+| [x] |" }),
         heard({
           kind: ActionKind.enum.link,
@@ -146,7 +146,7 @@ describe("unsentOf", () => {
       }),
       heard({ kind: ActionKind.enum.put, id: "note-1", md: "hi" }),
       heard({ kind: "edit", id: "checklist", diff: "" }),
-      heard({ kind: ActionKind.enum.say, text: "go" }),
+      heard({ kind: ActionKind.enum.post, text: "go" }),
     ];
     const { cards, ids } = unsentOf(pending);
     expect([...cards]).toEqual(["note-1", "checklist"]);
