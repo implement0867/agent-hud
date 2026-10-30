@@ -188,7 +188,7 @@ const Span = ({
 const Pre = ({ node, children }: ComponentProps<"pre"> & ExtraProps) => {
   const file = node?.properties["dataFile"];
   const block = (
-    <pre className="my-0 overflow-x-auto rounded-code bg-surface-sunken py-2 font-mono text-[0.8125rem] leading-[1.625] text-ink-soft">
+    <pre className="my-0 overflow-x-auto rounded-code bg-surface-sunken py-2 font-mono text-[0.875em] leading-[1.625] text-ink-soft">
       {children}
     </pre>
   );
@@ -197,7 +197,7 @@ const Pre = ({ node, children }: ComponentProps<"pre"> & ExtraProps) => {
       {typeof file === "string" && (
         <figcaption
           data-chrome=""
-          className="mb-1 font-mono text-[0.6875rem] leading-[1.45] text-ink-muted"
+          className="mb-1 font-mono text-[0.75em] leading-[1.45] text-ink-muted"
         >
           {file}
         </figcaption>
