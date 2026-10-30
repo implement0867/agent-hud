@@ -1,6 +1,6 @@
 [project]
 name = "agent-hud"
-version = "0.1.19"
+version = "0.1.20"
 description = "Shared browser canvas between a coding agent and its user, over MCP"
 requires-python = ">=3.12"
 dependencies = [
