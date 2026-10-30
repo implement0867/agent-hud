@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Self, assert_never
 
 from pydantic import AwareDatetime, Field, ValidationError, field_validator
@@ -8,22 +9,23 @@ from agent_hud.models.actions import (
     Clear,
     Comment,
     Link,
+    Misfit,
     Move,
     Place,
+    Post,
     Put,
     Remove,
     Resize,
     Restore,
-    Say,
     Send,
     TActionId,
     TCardId,
-    TMessage,
+    TMessageText,
     TQuote,
     Unlink,
 )
 from agent_hud.models.base import Model
-from agent_hud.text import quote_offsets, strip_whitespace, visible_text
+from agent_hud.text import extract_visible_text, find_quote_offsets, strip_whitespace
 
 
 def join_error_messages(error: ValidationError) -> str:
@@ -41,17 +43,17 @@ class Card(Model):
 
     @field_validator("md")
     @classmethod
-    def _readable(cls, md: str) -> str:
-        visible_text(md)
+    def check_readable(cls, md: str) -> str:
+        extract_visible_text(md)
         return md
 
 
-class Said(Model):
+class Message(Model):
     """A chat message, or a comment in the thread that thread names."""
 
     id: TActionId
     author: Author
-    text: TMessage
+    text: TMessageText
     thread: TActionId | None = Field(default=None, description="The thread of a comment; none for a chat message")
     at: AwareDatetime | None = Field(default=None, description="When it was said")
 
@@ -63,15 +65,15 @@ class Anchor(Model):
     quote: TQuote = Field(default="", description="The words, as the card shows them; empty for the card as a whole")
     occurrence: int = Field(default=0, description="Which place of the quote in the card's text, from 0")
 
-    def follow(self, before: str, after: str) -> Self | None:
+    def follow_text(self, before: str, after: str) -> Self | None:
         """
         The anchor on the new markdown of its card: at the place of the quote nearest to where it was, or None when
         the new text does not have the quote. An anchor on the card as a whole stays.
         """
         if not self.quote:
             return self
-        was = quote_offsets(before, self.quote)
-        found = quote_offsets(after, self.quote)
+        was = find_quote_offsets(before, self.quote)
+        found = find_quote_offsets(after, self.quote)
         if not found:
             return None
         at = was[min(self.occurrence, len(was) - 1)] if was else 0
@@ -82,10 +84,10 @@ class Anchor(Model):
 class Thread(Anchor):
     """The comments on one place of a card, oldest first."""
 
-    comments: tuple[Said, ...] = ()
+    comments: tuple[Message, ...] = ()
 
-    def comment(self, said: Said) -> "Thread":
-        return self.model_copy(update={"comments": (*self.comments, said)})
+    def add_comment(self, message: Message) -> "Thread":
+        return self.model_copy(update={"comments": (*self.comments, message)})
 
 
 class Arrow(Anchor):
@@ -119,7 +121,7 @@ class Board(Model):
         default_factory=dict, description="The threads of comments, by the id of the comment that started each"
     )
     arrows: dict[TCardId, Arrow] = Field(default_factory=dict)
-    messages: tuple[Said, ...] = Field(default=(), description="The chat, and each comment, in order")
+    messages: tuple[Message, ...] = Field(default=(), description="The chat, and each comment, in order")
     positions: dict[TCardId, Point] = Field(default_factory=dict)
     sizes: dict[TCardId, Size] = Field(
         default_factory=dict, description="The size of each card that the user or the agent resized, in pixels"
@@ -128,34 +130,44 @@ class Board(Model):
         default_factory=dict, description="The earlier versions of each card, oldest first"
     )
 
-    def apply(self, action: Action) -> "Board":
+    def apply_actions(self, actions: Sequence[Action]) -> "Board":
+        """The board after the actions, in order. Misfit, with the index of the action, when one does not fit the board."""
+        board = self
+        for n, action in enumerate(actions, start=1):
+            try:
+                board = board.apply_action(action)
+            except ValueError as error:
+                raise Misfit(n, action.body.kind, str(error)) from error
+        return board
+
+    def apply_action(self, action: Action) -> "Board":
         """The board after the action. ValueError, which names the valid choices, if the action does not fit the board."""
         match action.body:
             case Put(id=card_id, md=md, version=version):
                 if version is not None:
-                    self._check_version(card_id, version)
+                    self.check_version(card_id, version)
                 try:
                     card = Card(md=md, author=action.author)
                 except ValidationError as error:
                     raise ValueError(f"card '{card_id}': {join_error_messages(error)}") from error
-                return self._revise(card_id, card)
+                return self.revise_card(card_id, card)
             case Restore(id=card_id):
                 if card_id in self.cards:
                     raise ValueError(f"card '{card_id}' is on the board")
                 if not (versions := self.history.get(card_id)):
                     raise ValueError(f"no card '{card_id}' in the history")
-                return self._revise(card_id, versions[-1].card)
+                return self.revise_card(card_id, versions[-1].card)
             case Remove(id=card_id):
-                self._check_card(card_id)
-                return self._retire(card_id)
+                self.check_card(card_id)
+                return self.retire_card(card_id)
             case Comment(card=card_id, quote=quote, occurrence=occurrence, text=text):
-                thread_id = self._thread_at(card_id, quote, occurrence) or action.id
+                thread_id = self.find_thread_at(card_id, quote, occurrence) or action.id
                 thread = self.threads.get(thread_id) or Thread(
-                    card=card_id, quote=quote, occurrence=self._occurrence(card_id, quote, occurrence)
+                    card=card_id, quote=quote, occurrence=self.find_occurrence(card_id, quote, occurrence)
                 )
-                said = Said(id=action.id, author=action.author, text=text, thread=thread_id, at=action.at)
-                threads = {**self.threads, thread_id: thread.comment(said)}
-                return self.model_copy(update={"threads": threads, "messages": (*self.messages, said)})
+                message = Message(id=action.id, author=action.author, text=text, thread=thread_id, at=action.at)
+                threads = {**self.threads, thread_id: thread.add_comment(message)}
+                return self.model_copy(update={"threads": threads, "messages": (*self.messages, message)})
             case Link(id=arrow_id, card=card_id, quote=quote, occurrence=occurrence, dst=dst, text=text):
                 kept = self.arrows.get(arrow_id)
                 at = (
@@ -163,9 +175,9 @@ class Board(Model):
                     if kept is not None
                     and occurrence is None
                     and (kept.card, strip_whitespace(kept.quote)) == (card_id, strip_whitespace(quote))
-                    else self._occurrence(card_id, quote, occurrence)
+                    else self.find_occurrence(card_id, quote, occurrence)
                 )
-                self._check_card(dst)
+                self.check_card(dst)
                 arrow = Arrow(card=card_id, quote=quote, occurrence=at, dst=dst, text=text, author=action.author)
                 return self.model_copy(update={"arrows": {**self.arrows, arrow_id: arrow}})
             case Unlink(id=arrow_id):
@@ -173,40 +185,40 @@ class Board(Model):
                     raise ValueError(f"no arrow '{arrow_id}'")
                 return self.model_copy(update={"arrows": {k: v for k, v in self.arrows.items() if k != arrow_id}})
             case Move(id=card_id, x=x, y=y):
-                self._check_card(card_id)
+                self.check_card(card_id)
                 return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
             case Place(id=card_id, x=x, y=y):
-                self._check_card(card_id)
+                self.check_card(card_id)
                 if card_id in self.positions:
                     return self
                 return self.model_copy(update={"positions": {**self.positions, card_id: Point(x=x, y=y)}})
             case Resize(id=card_id, width=width, height=height):
-                self._check_card(card_id)
+                self.check_card(card_id)
                 size = self.sizes.get(card_id, Size())
                 size = Size(
                     width=size.width if width is None else width, height=size.height if height is None else height
                 )
                 return self.model_copy(update={"sizes": {**self.sizes, card_id: size}})
-            case Say(text=text):
-                said = Said(id=action.id, author=action.author, text=text, at=action.at)
+            case Post(text=text):
+                said = Message(id=action.id, author=action.author, text=text, at=action.at)
                 return self.model_copy(update={"messages": (*self.messages, said)})
             case Clear():
                 retired = self
                 for card_id in self.cards:
-                    retired = retired._retire(card_id)
+                    retired = retired.retire_card(card_id)
                 return retired.model_copy(update={"messages": ()})
             case Send():
                 return self
             case _:
                 assert_never(action.body)
 
-    def _check_card(self, card_id: TCardId) -> None:
+    def check_card(self, card_id: TCardId) -> None:
         """ValueError, which lists the cards, if the board has no such card."""
         if card_id not in self.cards:
             cards = f"the cards are {', '.join(self.cards)}" if self.cards else "the board has no cards"
             raise ValueError(f"no card '{card_id}': {cards}")
 
-    def _check_version(self, card_id: TCardId, version: int) -> None:
+    def check_version(self, card_id: TCardId, version: int) -> None:
         """ValueError unless the card is on the board with that number of earlier versions."""
         earlier = len(self.history.get(card_id, ()))
         if card_id not in self.cards:
@@ -214,15 +226,15 @@ class Board(Model):
         if earlier != version:
             raise ValueError(f"card '{card_id}' changed: it has {earlier} earlier versions, not {version}")
 
-    def _occurrence(self, card_id: TCardId, quote: str, occurrence: int | None) -> int:
+    def find_occurrence(self, card_id: TCardId, quote: str, occurrence: int | None) -> int:
         """
         The place of the quote in the card: the one given, or the only one. ValueError, which says how many places the
         card has the quote at, when the card does not have it there, or has it at more than one place and none is given.
         """
-        self._check_card(card_id)
+        self.check_card(card_id)
         if not quote:
             return 0
-        count = len(quote_offsets(self.cards[card_id].md, quote))
+        count = len(find_quote_offsets(self.cards[card_id].md, quote))
         match count, occurrence:
             case 0, _:
                 raise ValueError(f"card '{card_id}' does not show the words '{quote}': quote its text without markdown")
@@ -239,7 +251,7 @@ class Board(Model):
             case _, found:
                 return found
 
-    def _thread_at(self, card_id: TCardId, quote: str, occurrence: int | None) -> TActionId | None:
+    def find_thread_at(self, card_id: TCardId, quote: str, occurrence: int | None) -> TActionId | None:
         """The thread on the same words of the card, at the occurrence when one is given, if there is one."""
         return next(
             (
@@ -252,7 +264,7 @@ class Board(Model):
             None,
         )
 
-    def _revise(self, card_id: TCardId, card: Card) -> "Board":
+    def revise_card(self, card_id: TCardId, card: Card) -> "Board":
         """
         The board with the card in place of the one with its id, if there was one; the card keeps that one's author,
         and counts as edited when the other author put it.
@@ -268,14 +280,14 @@ class Board(Model):
         for thread_id, thread in self.threads.items():
             if thread.card != card_id:
                 threads[thread_id] = thread
-            elif (moved := thread.follow(old.md, card.md)) is not None:
+            elif (moved := thread.follow_text(old.md, card.md)) is not None:
                 threads[thread_id] = moved
             else:
                 gone[thread_id] = thread
         arrows = {
             arrow_id: moved
             for arrow_id, arrow in self.arrows.items()
-            if (moved := arrow if arrow.card != card_id else arrow.follow(old.md, card.md)) is not None
+            if (moved := arrow if arrow.card != card_id else arrow.follow_text(old.md, card.md)) is not None
         }
         version = Version(card=old, threads=gone)
         return self.model_copy(
@@ -287,7 +299,7 @@ class Board(Model):
             }
         )
 
-    def _retire(self, card_id: TCardId) -> "Board":
+    def retire_card(self, card_id: TCardId) -> "Board":
         """
         The board without the card, its place, its size, its threads and the arrows at it, with the card and its
         threads at the end of its history.

@@ -10,7 +10,7 @@ export const ActionKind = z
     "remove",
     "restore",
     "comment",
-    "say",
+    "post",
     "link",
     "unlink",
     "move",
@@ -68,7 +68,10 @@ export const bodySchema = z.discriminatedUnion("kind", [
     occurrence: occurrenceSchema,
     text: messageSchema,
   }),
-  z.strictObject({ kind: z.literal(ActionKind.enum.say), text: messageSchema }),
+  z.strictObject({
+    kind: z.literal(ActionKind.enum.post),
+    text: messageSchema,
+  }),
   z.strictObject({
     kind: z.literal(ActionKind.enum.link),
     id: z.string().describe("Arrow id"),

@@ -11,7 +11,7 @@ async def print_frames(url: str) -> None:
             print(frame, flush=True)
 
 
-def main() -> None:
+def run_turns_command() -> None:
     """agent-hud-turns URL: the turns of the user as their lines on stdout, for a monitor that takes a command."""
     match sys.argv[1:]:
         case [url]:
@@ -21,4 +21,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_turns_command()

@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import signal
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections import defaultdict
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -12,38 +13,36 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketException, status
 from fastapi.staticfiles import StaticFiles
 from mcp.server.subscriptions import InMemorySubscriptionBus, ResourceUpdated
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_hud.boards import BoardSummary, TBoardName, board_names, open_exchange, summarize
-from agent_hud.deps import AgentOriginDep, PageOriginDep, token_dep
-from agent_hud.exchange import Exchange
+from agent_hud.boards import BoardSummary, TBoardName
+from agent_hud.database import open_database
+from agent_hud.deps import AgentOriginDep, PageOriginDep, make_token_dep
 from agent_hud.frames import split_into_frames
 from agent_hud.models.actions import Action, Author
-from agent_hud.models.base import Model
-from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Turn
-from agent_hud.server import board_uri, build_mcp_server
+from agent_hud.models.events import Accepted, EventKind, Rejected, Request, Snapshot, Turn
+from agent_hud.operations import apply_user_action, list_board_summaries
+from agent_hud.presence import Monitor, Presence
+from agent_hud.queries.boards import check_board_exists, load_board, load_draft
+from agent_hud.queries.turns import list_turns, remove_turns
+from agent_hud.server import build_mcp_server, make_board_uri
 from agent_hud.settings import get_settings
 
 
-async def send_each(websocket: WebSocket, events: AsyncIterator[Model]) -> None:
-    """Send each event as JSON text as it comes."""
-    async for event in events:
-        await websocket.send_text(event.model_dump_json())
-
-
-async def send_turns(websocket: WebSocket, turns: AsyncIterator[Turn], chars: int, gap: float) -> None:
+async def send_turn(websocket: WebSocket, turn: Turn, chars: int, gap: float) -> None:
     """
-    Send each turn as its frames of at most the chars, with the gap in seconds between the frames of one turn, so that
-    the monitor shows each frame as an event of its own.
+    Send the turn as its frames of at most the chars, with the gap in seconds between the frames, so that the monitor
+    shows each frame as an event of its own.
     """
-    async for turn in turns:
-        for n, frame in enumerate(split_into_frames(turn, chars)):
-            if n:
-                await asyncio.sleep(gap)
-            await websocket.send_text(frame)
+    for n, frame in enumerate(split_into_frames(turn, chars)):
+        if n:
+            await asyncio.sleep(gap)
+        await websocket.send_text(frame)
 
 
 class Bearer:
@@ -72,13 +71,13 @@ class Activity:
         self.sockets = 0
         self.changed = asyncio.Event()
 
-    def note(self, sockets: int = 0) -> None:
+    def note_activity(self, sockets: int = 0) -> None:
         """A request, or a socket that opened (1) or closed (-1), now."""
         self.last = monotonic()
         self.sockets += sockets
         self.changed.set()
 
-    def idle_for(self) -> float:
+    def measure_idle(self) -> float:
         """How long the app has been idle: 0 while a page or a monitor is connected."""
         return 0 if self.sockets > 0 else monotonic() - self.last
 
@@ -95,21 +94,21 @@ class Watched:
             await self.app(scope, receive, send)
             return
         socket = scope["type"] == "websocket"
-        self.activity.note(1 if socket else 0)
+        self.activity.note_activity(1 if socket else 0)
         try:
             await self.app(scope, receive, send)
         finally:
-            self.activity.note(-1 if socket else 0)
+            self.activity.note_activity(-1 if socket else 0)
 
 
 def stop_process() -> None:
-    """Stop the server as the hook does: uvicorn takes the signal and shuts down, so the boards compact and close."""
+    """Stop the server as the hook does: uvicorn takes the signal and shuts down."""
     signal.raise_signal(signal.SIGTERM)
 
 
 async def stop_when_idle(activity: Activity, after: float, stop: Callable[[], None]) -> None:
     """Call stop once the app has been idle for the seconds: no page or monitor connected, and no request."""
-    while (idle := activity.idle_for()) < after:
+    while (idle := activity.measure_idle()) < after:
         activity.changed.clear()
         with suppress(TimeoutError):
             async with asyncio.timeout(after - idle):
@@ -127,24 +126,24 @@ def keep_token(token: str, state_dir: Path) -> None:
     path.write_text(token)
 
 
-def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) -> FastAPI:
+def create_app(engine: Engine, presences: defaultdict[TBoardName, Presence], stop: Callable[[], None]) -> FastAPI:
     """
     MCP for the agent at /mcp/, the board websocket at /ws, the list of boards at /boards and the built UI at /, on
-    the boards in the settings' boards dir; exchanges holds each board that is open.
+    the boards in the database; presences holds the live presence of each board.
     The agent's tools name their board in an argument, and the sockets in the board query parameter.
     The sockets and /boards need the socket token as a query parameter; /mcp/ needs the token as a bearer token when
     the settings give one. After the settings' idle seconds with no page or monitor connected and no request, the app
-    calls stop. RuntimeError when another process holds a board's file, as a second uvicorn worker would.
+    calls stop.
     """
     settings = get_settings()
     keep_token(settings.socket_token, settings.state_dir)
     bus = InMemorySubscriptionBus()
-    mcp_app = build_mcp_server(settings, exchanges, bus).http_app(path="/")
+    mcp_app = build_mcp_server(settings, engine, presences, bus).http_app(path="/")
     activity = Activity()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """The MCP session manager and the idle watch while the app runs, and each board's file compacted and let go on shutdown."""
+    async def run_lifespan(app: FastAPI) -> AsyncGenerator[None]:
+        """The MCP session manager and the idle watch while the app runs."""
         watch = (
             asyncio.create_task(stop_when_idle(activity, settings.idle_seconds, stop))
             if settings.idle_seconds > 0
@@ -156,70 +155,94 @@ def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) 
         finally:
             if watch is not None:
                 watch.cancel()
-            for exchange in exchanges.values():
-                exchange.compact()
-                exchange.close()
 
-    async def require_board(board: Annotated[TBoardName, Query()]) -> tuple[TBoardName, Exchange]:
-        """
-        The board that the socket's board query parameter names, and its exchange. A policy violation when there is none.
-        Async, so that the exchange's SQLite file opens on the event loop's thread, which uses it.
-        """
-        try:
-            return board, open_exchange(exchanges, settings.boards_dir, board)
-        except ValueError as error:
-            raise WebSocketException(status.WS_1008_POLICY_VIOLATION, str(error)) from error
+    def require_board(board: Annotated[TBoardName, Query()]) -> TBoardName:
+        """The board that the socket's board query parameter names. A policy violation when no board has the name."""
+        with Session(engine) as session:
+            if not check_board_exists(session, board):
+                raise WebSocketException(status.WS_1008_POLICY_VIOLATION, f"no board '{board}'")
+        return board
 
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI(lifespan=run_lifespan)
     # A DNS rebinding page sends its own name as Host, which passes the origin check.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     app.add_middleware(Watched, activity=activity)
-    with_token = token_dep(settings.socket_token)
+    with_token = make_token_dep(settings.socket_token)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    def report_health() -> dict[str, str]:
         """The app, its version and the build fingerprint it was started with, for the hook that starts it: any other answer on the port is another program."""
         return {"app": "agent-hud", "version": version("agent-hud"), "build": settings.build}
 
     @app.get("/boards", dependencies=[with_token])
-    async def board_summaries() -> list[BoardSummary]:
+    async def serve_board_summaries() -> list[BoardSummary]:
         """Each board with its card count and agent state, for the page's list; 403 without the token as a query parameter."""
-        return [
-            summarize(name, open_exchange(exchanges, settings.boards_dir, name))
-            for name in board_names(settings.boards_dir)
-        ]
+        with Session(engine) as session:
+            return list_board_summaries(session, presences)
 
     @app.websocket("/ws", dependencies=[PageOriginDep, with_token])
-    async def page(websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]) -> None:
+    async def serve_page(websocket: WebSocket, board: Annotated[TBoardName, Depends(require_board)]) -> None:
         """Send the board's snapshot on connect and after each change, and act for the user, until the page disconnects."""
-        name, exchange = board
+        presence = presences[board]
+
+        async def send_snapshots() -> None:
+            """Send the board's snapshot on connect, and after each change when it differs from the last."""
+            last = None
+            async for _ in presence.watch_changes():
+                with Session(engine) as session:
+                    snapshot = Snapshot(
+                        kind=EventKind.snapshot,
+                        board=load_board(session, board),
+                        agent=presence.agent_state,
+                        pending=load_draft(session, board).actions,
+                        waiting=len(list_turns(session, board)),
+                    )
+                if snapshot != last:
+                    last = snapshot
+                    await websocket.send_text(snapshot.model_dump_json())
+
         await websocket.accept()
         async with asyncio.TaskGroup() as tg:
-            sender = tg.create_task(send_each(websocket, exchange.snapshots()))
+            sender = tg.create_task(send_snapshots())
             async for text in websocket.iter_text():
                 request = Request.model_validate_json(text)
+                action = Action(id=request.id, author=Author.user, body=request.body, at=datetime.now(UTC))
                 try:
-                    exchange.act([Action(id=request.id, author=Author.user, body=request.body, at=datetime.now(UTC))])
+                    with Session(engine) as session:
+                        apply_user_action(session, board, action)
                 except ValueError as error:
                     reply = Rejected(kind=EventKind.rejected, id=request.id, reason=str(error)).model_dump_json()
                 else:
+                    presence.notify_change()
                     reply = Accepted(kind=EventKind.accepted, id=request.id).model_dump_json()
-                    await bus.publish(ResourceUpdated(uri=board_uri(name)))
+                    await bus.publish(ResourceUpdated(uri=make_board_uri(board)))
                 await websocket.send_text(reply)
             sender.cancel()
 
     @app.websocket("/agent", dependencies=[AgentOriginDep, with_token])
-    async def agent(
-        websocket: WebSocket, board: Annotated[tuple[TBoardName, Exchange], Depends(require_board)]
-    ) -> None:
+    async def serve_agent(websocket: WebSocket, board: Annotated[TBoardName, Depends(require_board)]) -> None:
         """Send each of the user's turns on the board to this agent's monitor, as frames of lines, until it disconnects."""
-        _, exchange = board
+        presence = presences[board]
+
+        async def deliver_turns(monitor: Monitor) -> None:
+            """
+            On connect and after each change, send each turn not yet delivered to the monitor, mark it delivered once
+            sent, so that a turn whose send fails comes again, and remove the turns that every open monitor has.
+            """
+            async for _ in presence.watch_changes():
+                with Session(engine) as session:
+                    turns = list_turns(session, board)
+                for turn in [turn for turn in turns if turn.id not in monitor.delivered]:
+                    await send_turn(websocket, turn, settings.monitor_chars, settings.monitor_gap)
+                    presence.mark_delivered(monitor, turn)
+                    with Session(engine) as session:
+                        remove_turns(session, board, presence.find_turns_delivered_to_all(list_turns(session, board)))
+                        session.commit()
+
         await websocket.accept()
-        with exchange.monitor():
+        with presence.open_monitor() as monitor:
             async with asyncio.TaskGroup() as tg:
-                sender = tg.create_task(
-                    send_turns(websocket, exchange.user_turns(), settings.monitor_chars, settings.monitor_gap)
-                )
+                sender = tg.create_task(deliver_turns(monitor))
                 # The monitor sends nothing, so this returns when it disconnects.
                 await websocket.receive()
                 sender.cancel()
@@ -229,6 +252,6 @@ def create_app(exchanges: dict[TBoardName, Exchange], stop: Callable[[], None]) 
     return app
 
 
-def app_factory() -> FastAPI:
-    """The app as uvicorn serves it: no board open yet, and the process stops when idle."""
-    return create_app({}, stop_process)
+def make_app() -> FastAPI:
+    """Make the app as uvicorn serves it: on the database in the data folder, with no presence yet, and the process stops when idle."""
+    return create_app(open_database(get_settings().database_path), defaultdict(Presence), stop_process)

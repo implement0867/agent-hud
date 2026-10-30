@@ -25,7 +25,7 @@ const cardOf = ({ body }: THeard): string | null => {
     case ActionKind.enum.place:
       return body.id;
     case ActionKind.enum.unlink:
-    case ActionKind.enum.say:
+    case ActionKind.enum.post:
     case ActionKind.enum.clear:
     case ActionKind.enum.send:
       return null;
@@ -91,7 +91,7 @@ const describe = (heard: THeard, board: TBoard): Omit<TLine, "id"> => {
         what: `“${body.text}”`,
         where: body.quote === "" ? "the card" : short(body.quote),
       };
-    case ActionKind.enum.say:
+    case ActionKind.enum.post:
       return { card: null, thread: null, what: body.text, where: "" };
     case ActionKind.enum.link:
       return at(
@@ -122,7 +122,7 @@ const groupOf = (
   board: TBoard,
 ): { key: string; title: string } => {
   const apart: Partial<Record<string, { key: string; title: string }>> = {
-    [ActionKind.enum.say]: { key: "chat", title: "Chat" },
+    [ActionKind.enum.post]: { key: "chat", title: "Chat" },
     [ActionKind.enum.unlink]: { key: "arrows", title: "Arrows" },
     [ActionKind.enum.clear]: { key: "board", title: "The board" },
   };

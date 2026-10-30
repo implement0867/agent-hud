@@ -6,7 +6,7 @@ from pydantic import Field
 
 from agent_hud.models.actions import TActionId
 from agent_hud.models.base import Model
-from agent_hud.models.events import HeardBodyAdapter, THeardBody, Turn
+from agent_hud.models.events import TTurnActionBody, Turn, TurnActionBodyAdapter
 
 
 class FrameHead(Model):
@@ -18,7 +18,7 @@ class FrameHead(Model):
     of: int | None = Field(default=None, description="How many frames the turn has, when it has several")
 
 
-def action_lines(turn: Turn) -> list[str]:
+def format_action_lines(turn: Turn) -> list[str]:
     """The lines of the turn after its head: one action each, as JSON with the action's fields."""
     # A field that is none, such as the version of a note or the occurrence of a quote at one place, stays out.
     return [
@@ -34,10 +34,10 @@ def split_into_frames(turn: Turn, chars: int) -> list[str]:
     chars unless one line is longer, with a head that says which frame it is and how many there are.
     """
     head = FrameHead(turn=turn.id, actions=len(turn.actions))
-    whole = "\n".join([head.model_dump_json(exclude_none=True), *action_lines(turn)])
+    whole = "\n".join([head.model_dump_json(exclude_none=True), *format_action_lines(turn)])
     room = chars - len(head.model_copy(update={"frame": 99, "of": 99}).model_dump_json())
     chunks: list[list[str]] = [[]]
-    for line in action_lines(turn):
+    for line in format_action_lines(turn):
         if chunks[-1] and sum(len(kept) + 1 for kept in chunks[-1]) + len(line) + 1 > room:
             chunks.append([])
         chunks[-1].append(line)
@@ -60,11 +60,11 @@ def join_frames(frames: Sequence[str]) -> Turn:
         raise ValueError(
             f"not the frames of one turn, in order: {[(head.turn, head.frame, head.of) for head in heads]}"
         )
-    actions: list[THeardBody] = []
+    actions: list[TTurnActionBody] = []
     for frame in frames:
         for line in frame.split("\n")[1:]:
             data: dict[str, Any] = json.loads(line)
-            actions.append(HeardBodyAdapter.validate_python(data))
+            actions.append(TurnActionBodyAdapter.validate_python(data))
     if len(actions) != heads[0].actions:
         raise ValueError(f"the head counts {heads[0].actions} actions, the frames hold {len(actions)}")
     return Turn(id=heads[0].turn, actions=tuple(actions))

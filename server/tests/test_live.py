@@ -26,7 +26,7 @@ from websockets.asyncio.client import connect
 from agent_hud.models.actions import Author
 from agent_hud.models.events import AgentState, Snapshot
 from tests.conversation import User
-from tests.factories import comment, say
+from tests.factories import make_comment, make_post
 
 pytestmark = pytest.mark.skipif(not os.environ.get("AGENT_HUD_LIVE"), reason="set AGENT_HUD_LIVE to run the live check")
 
@@ -54,7 +54,7 @@ class Session:
     """The write calls so far."""
     lines: list[str] = field(default_factory=list)
 
-    async def follow(self) -> None:
+    async def follow_text(self) -> None:
         """Read the session's events to the end, and note the Monitor's cap and each write."""
         assert self.process.stdout is not None
         with self.log.open("a") as log:
@@ -68,7 +68,7 @@ class Session:
                 if '"name":"mcp__plugin_agent-hud_board__write"' in line:
                     self.writes += 1
 
-    async def until(self, check: str, seconds: float) -> None:
+    async def wait_until(self, check: str, seconds: float) -> None:
         """Wait until the check, an attribute that is set or counts above 0, holds. AssertionError after the seconds."""
         deadline = monotonic() + seconds
         while not getattr(self, check):
@@ -77,7 +77,7 @@ class Session:
             await asyncio.sleep(1)
 
 
-def free_port() -> int:
+def find_free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
@@ -116,7 +116,7 @@ def stop_app(state: Path) -> None:
 
 
 @asynccontextmanager
-async def nested_session(tmp_path: Path, port: int, token: str) -> AsyncIterator[Session]:
+async def open_nested_session(tmp_path: Path, port: int, token: str) -> AsyncIterator[Session]:
     """A Claude Code session with the plugin in a project of its own, whose hook starts the app on the port, until the context ends."""
     project, state = tmp_path / "project", tmp_path / "state"
     project.mkdir()
@@ -129,7 +129,7 @@ async def nested_session(tmp_path: Path, port: int, token: str) -> AsyncIterator
         stderr=asyncio.subprocess.DEVNULL,
     )
     session = Session(process, tmp_path / "session.jsonl")
-    reader = asyncio.create_task(session.follow())
+    reader = asyncio.create_task(session.follow_text())
     try:
         yield session
     finally:
@@ -152,8 +152,8 @@ async def test_the_agent_answers_a_turn_sent_after_the_monitors_cap(tmp_path: Pa
     """Assemble: a nested Claude Code session with the plugin, which opens its monitor and puts a plan on its board.
     Act: after the Monitor's cap has passed, the user approves a step and sends a message.
     Assert: the session's first Monitor result names the cap, and the agent writes within a minute of the turn."""
-    port, token = free_port(), token_urlsafe(16)
-    async with nested_session(tmp_path, port, token) as session:
+    port, token = find_free_port(), token_urlsafe(16)
+    async with open_nested_session(tmp_path, port, token) as session:
         await session.until("cap", 180)
         assert session.cap is not None and session.opened is not None
         await session.until("writes", 180)
@@ -162,7 +162,7 @@ async def test_the_agent_answers_a_turn_sent_after_the_monitors_cap(tmp_path: Pa
             deadline = monotonic() + 120
             while "plan" not in user.board.cards or user.snapshot.agent is AgentState.away:
                 assert monotonic() < deadline, f"the page shows no plan with an agent waiting; see {session.log}"
-                await user.notes(
+                await user.await_snapshot(
                     lambda snapshot: "plan" in snapshot.board.cards and snapshot.agent is not AgentState.away
                 )
         after = float(os.environ.get("AGENT_HUD_LIVE_AFTER", session.cap + 60))
@@ -172,8 +172,8 @@ async def test_the_agent_answers_a_turn_sent_after_the_monitors_cap(tmp_path: Pa
         async with open_page(port, token, board) as user:
             said = sum(message.author is Author.agent for message in user.board.messages)
             writes = session.writes
-            await user.act(comment("plan", "The steps read well."))
-            await user.act(say("The first step is fine. Add a third step."))
+            await user.request_action(make_comment("plan", "The steps read well."))
+            await user.request_action(make_post("The first step is fine. Add a third step."))
             sent = monotonic()
             while session.writes == writes:
                 assert monotonic() < sent + 60, (
@@ -181,9 +181,9 @@ async def test_the_agent_answers_a_turn_sent_after_the_monitors_cap(tmp_path: Pa
                 )
                 await asyncio.sleep(1)
             answered = monotonic() - sent
-            await user.notes(
+            await user.await_snapshot(
                 lambda snapshot: sum(message.author is Author.agent for message in snapshot.board.messages) > said
             )
             assert sum(message.author is Author.agent for message in user.board.messages) > said
             print(f"the agent wrote {answered:.0f} s after the turn", file=sys.stderr)
-            await user.act(say("You are done."))
+            await user.request_action(make_post("You are done."))

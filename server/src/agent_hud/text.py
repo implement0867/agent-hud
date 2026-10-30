@@ -5,7 +5,7 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 
-def fence_options(info: str) -> dict[str, str]:
+def parse_fence_options(info: str) -> dict[str, str]:
     """The key=value words after the language of a fenced code block, such as file=src/app.py start=40."""
     return {key: value for word in info.split()[1:] for key, sep, value in [word.partition("=")] if sep}
 
@@ -18,13 +18,13 @@ def strip_whitespace(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
-def inline_text(token: Token) -> str:
+def extract_inline_text(token: Token) -> str:
     """The text that an inline token shows: its text and code, without images and raw HTML."""
     return "".join(child.content for child in token.children or [] if child.type in {"text", "code_inline"})
 
 
 @lru_cache(maxsize=256)
-def visible_text(md: str) -> str:
+def extract_visible_text(md: str) -> str:
     """
     The text of the markdown as the page shows it: the text of each block, and each line of code, one per line.
     A task item's box and a table cell of a box alone, [ ] or [x], show as a checkbox, which has no text.
@@ -35,7 +35,7 @@ def visible_text(md: str) -> str:
     for token in parser.parse(md):
         match token.type:
             case "inline":
-                text = inline_text(token)
+                text = extract_inline_text(token)
                 match opened[-2:]:
                     case ["list_item_open", "paragraph_open"]:
                         text = re.sub(r"^\[[ xX]\](\s|$)", "", text)
@@ -55,9 +55,9 @@ def visible_text(md: str) -> str:
     return "\n".join(lines)
 
 
-def quote_offsets(md: str, quote: str) -> list[int]:
+def find_quote_offsets(md: str, quote: str) -> list[int]:
     """Where the quote starts in the card's text, squeezed, at each place it occurs; every place for an empty quote."""
-    text, wanted = strip_whitespace(visible_text(md)), strip_whitespace(quote)
+    text, wanted = strip_whitespace(extract_visible_text(md)), strip_whitespace(quote)
     if not wanted:
         return [0]
     found: list[int] = []
