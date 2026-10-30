@@ -36,7 +36,7 @@ const defaults = (): TLook => ({
   accent: "sky",
   density: "comfortable",
   radius: "12",
-  text: "0.75",
+  text: "0.875",
   marks: "margin",
   diff: "word",
 });
