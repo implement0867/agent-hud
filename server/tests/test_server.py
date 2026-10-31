@@ -28,6 +28,7 @@ from tests.factories import (
     BOARD,
     StoredBoard,
     dump_bodies,
+    make_clear,
     make_comment,
     make_link,
     make_move,
@@ -183,6 +184,25 @@ async def test_write_reports_the_threads_and_arrows_a_put_moves_aside(client: Cl
         "replaced": ["plan"],
         "retired": [{"card": "plan", "quote": "b"}],
         "dropped": ["one", "two"],
+    }
+
+
+@pytest.mark.xfail(
+    strict=True, reason="#155: the write compares a put with the board before the batch, not before the put"
+)
+async def test_write_reports_a_put_after_a_clear_of_its_card_as_added(client: Client[Any], board: StoredBoard) -> None:
+    """Assemble: a server with a plan that the user commented on.
+    Act: write a clear, then a put of the plan with new markdown, in one batch.
+    Assert: the result names the plan as added, since the clear took it off the board, and the clear's thread as gone to the history."""
+    await client.call_tool("write_board", {"name": BOARD, "actions": dump_bodies(make_put("plan", "1. a"))})
+    board.apply_actions([Action(id="c", author=Author.user, body=make_comment("plan", "yes", "a"))])
+    actions = dump_bodies(make_clear(), make_put("plan", "1. b"))
+    result = await client.call_tool("write_board", {"name": BOARD, "actions": actions})
+    assert result.structured_content == {
+        "added": ["plan"],
+        "replaced": [],
+        "retired": [{"card": "plan", "quote": "a"}],
+        "dropped": [],
     }
 
 
