@@ -20,6 +20,7 @@ from tests.factories import (
     BOARD,
     StoredBoard,
     dump_bodies,
+    make_clear,
     make_comment,
     make_link,
     make_move,
@@ -498,6 +499,31 @@ async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them
         assert (await read_board(agent.tools)).positions["d"] == board.positions["d"]
         assert tall["d"] == first["d"]
         assert await find_on_top(page, tall["d"][0] + 40, tall["d"][1] + 10) == "a"
+
+
+@pytest.mark.xfail(
+    strict=True, reason="#155: the page places a card only when it mounts, and the clear and put keep it mounted"
+)
+async def test_a_card_that_a_clear_takes_and_a_put_brings_back_in_one_write_shows_at_a_new_place(
+    page: Page, agent: Agent, address: tuple[str, int]
+) -> None:
+    """Assemble: the agent puts a card, and the page places it.
+    Act: the agent writes a clear, then a put of the card with new markdown, in one batch.
+    Assert: the page shows the card with the new markdown, and the board gets a place for it."""
+    async with open_page(address) as user:
+        await agent.write_board(make_put("item1", "first"))
+        assert (
+            "item1" in (await user.await_snapshot(lambda snapshot: "item1" in snapshot.board.positions)).board.positions
+        )
+        await agent.write_board(make_clear(), make_put("item1", "second"))
+        await expect(find_card(page, "item1")).to_contain_text("second")
+        await expect(find_card(page, "item1")).to_be_visible()
+        board = (
+            await user.await_snapshot(
+                lambda snapshot: snapshot.board.cards["item1"].md == "second" and "item1" in snapshot.board.positions
+            )
+        ).board
+        assert "item1" in board.positions
 
 
 async def test_an_edit_does_not_replace_a_newer_version_unless_the_user_says_so(page: Page, agent: Agent) -> None:
