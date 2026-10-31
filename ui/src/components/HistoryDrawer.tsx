@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 
-import { CardBody } from "~/components/CardBody";
+import { VersionBody } from "~/components/CardBody";
 import { IconButton } from "~/components/IconButton";
 import { TextButton } from "~/components/TextButton";
 import { useBoard, useStore } from "~/data/context";
@@ -114,7 +114,7 @@ export const HistoryDrawer = ({
                   <span>replaced</span>
                 )}
               </header>
-              <CardBody md={version.card.md} />
+              <VersionBody md={version.card.md} />
               <Threads threads={version.threads} />
             </section>
           ),

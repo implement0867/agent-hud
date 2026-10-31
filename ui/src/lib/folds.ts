@@ -16,6 +16,14 @@ export type TFolds = {
   sections: string[];
 };
 
+/** The open card's folds as its headings and sections take them: the card's own, and each section's by its key. */
+export type TCardFolds = {
+  label: string;
+  toggleCard: () => void;
+  sections: readonly string[];
+  toggleSection: (section: string) => void;
+};
+
 /** The folds that still hold on the card: the user's last ones, unless the agent wrote a version since; else all open. */
 export const findHeldFolds = (
   last: TFolds | null,

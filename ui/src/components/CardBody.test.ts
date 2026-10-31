@@ -2,28 +2,28 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CardBody } from "~/components/CardBody";
+import { CardBody, VersionBody } from "~/components/CardBody";
 
-const renderCard = (md: string, sections: string[] | null) =>
+const renderCard = (md: string, sections: string[]) =>
   renderToStaticMarkup(
     createElement(CardBody, {
       md,
-      folds:
-        sections === null
-          ? null
-          : {
-              label: "card plan",
-              toggleCard: () => undefined,
-              sections,
-              toggle: () => undefined,
-            },
+      before: null,
+      diffStyle: "word",
+      toggle: () => undefined,
+      folds: {
+        label: "card plan",
+        toggleCard: () => undefined,
+        sections,
+        toggleSection: () => undefined,
+      },
     }),
   );
 
 describe("CardBody", () => {
   const md = "Lead.\n\n## Steps\n\nDo it.\n\n## Risks\n\nNone.";
 
-  it("gives each heading a triangle that folds its section where the card folds", () => {
+  it("gives each heading a triangle that folds its section", () => {
     const html = renderCard(md, []);
     expect(html).toContain('<section data-section="0:Steps">');
     expect(html).toContain('aria-label="Fold the section Steps"');
@@ -44,7 +44,26 @@ describe("CardBody", () => {
     expect(html).toContain('aria-label="Fold the section Steps"');
   });
 
-  it("shows no triangles on a card that does not fold, such as an earlier version", () => {
-    expect(renderCard(md, null)).not.toContain("<button");
+  it("lets a click flip a box", () => {
+    expect(renderCard("- [ ] Do it", [])).not.toContain("disabled");
+  });
+});
+
+describe("VersionBody", () => {
+  it("shows no triangles on an earlier version", () => {
+    const html = renderToStaticMarkup(
+      createElement(VersionBody, {
+        md: "Lead.\n\n## Steps\n\nDo it.",
+      }),
+    );
+    expect(html).not.toContain("<button");
+  });
+
+  it("shows an earlier version's boxes, which do not flip", () => {
+    const html = renderToStaticMarkup(
+      createElement(VersionBody, { md: "| Done |\n| --- |\n| [x] |" }),
+    );
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain("disabled");
   });
 });
