@@ -1,6 +1,8 @@
 export const invariant: (
-  condition: boolean,
+  condition: unknown,
   message: string,
 ) => asserts condition = (condition, message) => {
-  if (!condition) throw new Error(message);
+  if (!condition) {
+    throw new Error(`Invariant failed: ${message}`);
+  }
 };
