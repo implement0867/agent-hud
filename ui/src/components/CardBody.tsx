@@ -19,13 +19,18 @@ type TToggle = ((start: number, end: number) => void) | null;
 
 const ToggleContext = createContext<TToggle>(null);
 
-/** The keys of the folded sections and the toggle of a section by its key; none where the card does not fold. */
-type TSectionFolds = {
+/**
+ * The folds of an open card: the label of the card's own fold, its toggle, the keys of the folded sections and the
+ * toggle of a section by its key; none where the card does not fold.
+ */
+type TCardFolds = {
+  label: string;
+  toggleCard: () => void;
   sections: readonly string[];
   toggle: (section: string) => void;
 } | null;
 
-const FoldContext = createContext<TSectionFolds>(null);
+const FoldContext = createContext<TCardFolds>(null);
 
 const stop = (event: SyntheticEvent) => {
   event.stopPropagation();
@@ -244,13 +249,24 @@ type THeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 type THeadingProps = ComponentProps<THeadingTag> &
   ExtraProps & { tag: THeadingTag };
 
-/** A heading, with the triangle that folds its section where the card folds. */
+/**
+ * A heading, with the triangle that folds its section where the card folds. A heading that is the card's first block
+ * has the card's own triangle instead, in the card's left padding, level with the heading's line.
+ */
 const Heading = ({ tag: Tag, node, children, ...props }: THeadingProps) => {
   const folds = useContext(FoldContext);
   const key = node?.properties["dataSectionHeading"];
   const folded = useFolded(key);
   return (
     <Tag {...props}>
+      {folds !== null && node?.properties["dataLeadHeading"] !== undefined && (
+        <FoldButton
+          folded={false}
+          label={folds.label}
+          toggle={folds.toggleCard}
+          className="-ml-[var(--pad)] inline-grid h-[1lh] w-[var(--pad)] align-top"
+        />
+      )}
       {folds !== null && typeof key === "string" && (
         <FoldButton
           folded={folded}
@@ -258,7 +274,7 @@ const Heading = ({ tag: Tag, node, children, ...props }: THeadingProps) => {
           toggle={() => {
             folds.toggle(key);
           }}
-          className="mr-1.5 -ml-0.5 inline-grid size-4 align-middle"
+          className="mr-1.5 -ml-0.5 inline-grid h-[1lh] w-4 align-top"
         />
       )}
       {children}
@@ -310,7 +326,7 @@ type TCardBodyProps = {
   diffStyle?: TDiffStyle;
   toggle?: TToggle;
   /** The folds of the card's sections, or none for a card that does not fold, such as an earlier version. */
-  folds?: TSectionFolds;
+  folds?: TCardFolds;
 };
 
 /** Whether the markdown has a fenced code block, which the colouring loads the highlighter for. */

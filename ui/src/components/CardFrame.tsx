@@ -11,6 +11,7 @@ import { ActionKind } from "~/domain/actions";
 import type { TPoint } from "~/domain/board";
 import { firstLine, plainText, toggledBox } from "~/domain/text";
 import { useFolds } from "~/hooks/useFolds";
+import { startsWithHeading } from "~/lib/sections";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
 import {
   clampCardWidth,
@@ -310,10 +311,17 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     card.md,
     model.board,
   );
-  const sectionFolds = useMemo(
-    () => ({ sections: folds.sections, toggle: toggleSection }),
-    [folds.sections, toggleSection],
+  const cardFolds = useMemo(
+    () => ({
+      label: `card ${id}`,
+      toggleCard,
+      sections: folds.sections,
+      toggle: toggleSection,
+    }),
+    [id, toggleCard, folds.sections, toggleSection],
   );
+  /** Whether the card's first block is a heading, which shows the open card's triangle on its own line. */
+  const leadHeading = useMemo(() => startsWithHeading(card.md), [card.md]);
   /** The rect that a resize shows before the server has it, and the handle that makes it. */
   const [resizing, setResizing] = useState<{
     rect: TRect;
@@ -469,7 +477,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
                 before={before}
                 diffStyle={look.diff}
                 toggle={toggle}
-                folds={sectionFolds}
+                folds={cardFolds}
               />
             </div>
             <ThreadMarks
@@ -494,14 +502,14 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
           />
         )}
       </div>
-      {editor === null && (
+      {editor === null && (folded || !leadHeading) ? (
         <FoldButton
           folded={folded}
           label={`card ${id}`}
           toggle={toggleCard}
           className="absolute top-[var(--pad-y)] left-0 z-10 h-[calc(var(--text-body)*var(--lh))] w-[var(--pad)]"
         />
-      )}
+      ) : null}
       {height !== null && !folded && ends.top ? (
         <span
           aria-hidden
