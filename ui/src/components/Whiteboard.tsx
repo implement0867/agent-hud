@@ -677,6 +677,7 @@ export const Whiteboard = () => {
       arrowright: { x: step, y: 0 },
     };
     if (key === "escape") {
+      if (document.querySelector(":popover-open") !== null) return;
       if (sheet) setSheet(false);
       else if (lookOpen) setLookOpen(false);
       else if (picked !== null) {
