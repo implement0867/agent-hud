@@ -11,8 +11,8 @@ import { ActionKind } from "~/domain/actions";
 import type { TPoint } from "~/domain/board";
 import { firstLine, plainText, toggledBox } from "~/domain/text";
 import { useFolds } from "~/hooks/useFolds";
-import { startsWithHeading } from "~/lib/sections";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
+import { startsWithHeading } from "~/lib/sections";
 import {
   clampCardWidth,
   columnWidth,
