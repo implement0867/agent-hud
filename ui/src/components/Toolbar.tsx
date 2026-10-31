@@ -6,7 +6,7 @@ import {
   Palette,
   Plus,
   RotateCcw,
-  StickyNote,
+  SquarePlus,
 } from "lucide-react";
 
 import { IconButton } from "~/components/IconButton";
@@ -23,7 +23,7 @@ type TToolbarProps = {
   zoom: (steps: number) => void;
   reset: () => void;
   fit: () => void;
-  note: () => void;
+  startCard: () => void;
   history: boolean;
   toggleHistory: () => void;
   shortcuts: boolean;
@@ -37,7 +37,7 @@ type TToolbarProps = {
 };
 
 /**
- * The board's tools at the bottom, each with a visible label: a note, the history, the shortcuts, the look and the view, where
+ * The board's tools at the bottom, each with a visible label: a new card, the history, the shortcuts, the look and the view, where
  * Fit shows every card and the zoom button, which reads the zoom, resets the view. Its controls are the same whatever
  * the board holds, so that none of them moves. Send is in the chat beside the message box, and Clear in the board menu.
  */
@@ -47,7 +47,7 @@ export const Toolbar = ({
   zoom,
   reset,
   fit,
-  note,
+  startCard,
   history,
   toggleHistory,
   shortcuts,
@@ -65,12 +65,12 @@ export const Toolbar = ({
   >
     <IconButton
       variant="tool"
-      label="New note"
-      title="New note (N)"
-      onClick={note}
+      label="New card"
+      title="New card (N)"
+      onClick={startCard}
     >
-      <StickyNote className="size-4" />
-      Note
+      <SquarePlus className="size-4" />
+      Card
     </IconButton>
     <IconButton
       variant="tool"

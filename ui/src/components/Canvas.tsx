@@ -39,7 +39,7 @@ type TCanvasProps = {
   world: RefObject<HTMLDivElement | null>;
   /** Ends the selection, on a click on empty space. */
   clear: () => void;
-  /** Starts a note at the point, on a double click on empty space. */
+  /** Starts a card at the point, on a double click on empty space. */
   create: (at: TPoint) => void;
   /** Greys the board, while the server is away. */
   dimmed: boolean;

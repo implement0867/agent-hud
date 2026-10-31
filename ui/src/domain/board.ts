@@ -8,7 +8,7 @@ const cardSchema = z.strictObject({
   edited: z
     .boolean()
     .describe(
-      "Whether the latest version is by the other author: the user edited the agent's card, or the agent the user's note",
+      "Whether the latest version is by the other author: the user edited the agent's card, or the agent the user's card",
     ),
 });
 

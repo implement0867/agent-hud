@@ -356,7 +356,7 @@ async def drag_handle(page: Page, handle: Locator, dx: float, dy: float) -> None
 async def test_a_corner_drag_sets_the_width_and_the_height_which_the_board_keeps(
     page: Page, agent: Agent, tmp_path: Path
 ) -> None:
-    """Assemble: the agent puts a plan, and the user writes a note.
+    """Assemble: the agent puts a plan, and the user writes a card.
     Act: the user drags the bottom right corner of the plan 200 pixels right and 100 down, and reloads the page.
     Assert: the card shows its markdown from its first line, with no strip above it; the plan is 200 pixels wider and
     100 taller after the reload, the agent reads its size, and the user's turn does not carry the resize; a screenshot
@@ -365,8 +365,8 @@ async def test_a_corner_drag_sets_the_width_and_the_height_which_the_board_keeps
     plan = find_card(page, "plan")
     await expect(plan.locator("header")).to_have_count(0)
     await page.mouse.dblclick(300, 600)
-    await page.get_by_role("textbox", name="New note").fill("check the docs")
-    await page.get_by_role("textbox", name="New note").press("Control+Enter")
+    await page.get_by_role("textbox", name="New card").fill("check the docs")
+    await page.get_by_role("textbox", name="New card").press("Control+Enter")
     await expect(page.locator("article").filter(has_text="check the docs")).to_be_visible()
     await expect(page.get_by_label("1 unsent")).to_be_visible()
 
@@ -570,16 +570,16 @@ async def test_the_editor_shows_the_save_key_alone_and_asks_only_when_a_question
     await expect(box).to_have_count(0)
 
 
-async def test_a_note_lands_in_view_saves_on_a_click_outside_and_opens_no_thread(page: Page, agent: Agent) -> None:
+async def test_a_new_card_lands_in_view_saves_on_a_click_outside_and_opens_no_thread(page: Page, agent: Agent) -> None:
     """Assemble: an empty board with the chat at the bottom right.
-    Act: the user double-clicks near the bottom right of the free space, types a note and clicks elsewhere on the board.
-    Assert: the draft is whole inside the viewport and left of the chat; the click outside saves the note as a card by
+    Act: the user double-clicks near the bottom right of the free space, types a card and clicks elsewhere on the board.
+    Assert: the draft is whole inside the viewport and left of the chat; the click outside saves the card by
     the user, with no thread open."""
     await agent.write_board(make_post("hello"))
     chat = await page.get_by_role("complementary", name="Chat with the agent").bounding_box()
     assert chat is not None
     await page.mouse.dblclick(chat["x"] - 40, 860)
-    draft = page.get_by_role("textbox", name="New note")
+    draft = page.get_by_role("textbox", name="New card")
     await expect(draft).to_be_visible()
     box = await draft.locator("xpath=ancestor::div[contains(@class, 'absolute')][1]").bounding_box()
     assert box is not None
@@ -587,8 +587,8 @@ async def test_a_note_lands_in_view_saves_on_a_click_outside_and_opens_no_thread
     assert box["y"] + box["height"] <= 900, "the draft is above the bottom of the viewport"
     await draft.fill("remember the docs")
     await page.mouse.click(600, 100)
-    note = page.locator("article").filter(has_text="remember the docs")
-    await expect(note).to_be_visible()
+    card = page.locator("article").filter(has_text="remember the docs")
+    await expect(card).to_be_visible()
     board = await read_board(agent.tools)
     assert [found.author for found in board.cards.values()] == [Author.user]
     await expect(page.locator('section[aria-label^="Thread on"]')).to_have_count(0)
@@ -1204,7 +1204,7 @@ async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
     """Assemble: two cards with an arrow between them.
     Act: the user reads the toolbar, fits the cards and resets the view; opens the board menu, chooses Clear this board
     and keeps the board; chooses it again and clears.
-    Assert: Note, History, Shortcuts, Look and Fit show their names, and the toolbar has no Clear; after Fit the zoom
+    Assert: Card, History, Shortcuts, Look and Fit show their names, and the toolbar has no Clear; after Fit the zoom
     button reads another percentage and resets the view to 100 %, where it is disabled; the confirm is in the page and
     names the board, 2 cards and 1 arrow; Keep leaves the cards; Clear empties the board; screenshots go in tmp_path."""
     await agent.write_board(
@@ -1217,7 +1217,7 @@ async def test_the_toolbar_labels_its_controls_and_clear_asks_in_the_board_menu(
     await expect(page.locator("article")).to_have_count(2)
     toolbar = page.get_by_role("navigation", name="Tools")
     for name, text in [
-        ("New note", "Note"),
+        ("New card", "Card"),
         ("History", "History"),
         ("Shortcuts", "Shortcuts"),
         ("Look", "Look"),

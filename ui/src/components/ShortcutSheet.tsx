@@ -7,8 +7,8 @@ const groups: { title: string; rows: [string, string][] }[] = [
   {
     title: "Board",
     rows: [
-      ["N", "New note"],
-      ["Double-click empty space", "New note there"],
+      ["N", "New card"],
+      ["Double-click empty space", "New card there"],
       ["H", "History"],
       ["1", "Fit all cards"],
       ["0", "Reset the view"],

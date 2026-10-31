@@ -242,7 +242,7 @@
   @apply rounded-2xl bg-surface shadow-pop ring-1 ring-edge;
 }
 
-/* A card on the board, and a note that the user is writing. */
+/* A card on the board, and a card that the user is writing. */
 @utility card {
   @apply rounded-card bg-surface shadow-card;
 }
