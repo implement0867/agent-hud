@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useState } from "react";
 import { z } from "zod";
 
+import { readKept, writeKept } from "~/lib/kept";
+
 /** The viewer's look of the page, which the browser keeps: the theme, the accent, the density, the radius and the card text. */
 export const lookSchema = z.object({
   theme: z.enum(["light", "dark"]).describe("The light or the dark theme"),
@@ -44,24 +46,20 @@ const defaults = (): TLook => ({
 /** The look the browser keeps, with the default for each choice it does not have or cannot read. */
 export const readLook = (): TLook => {
   const look = defaults();
-  try {
-    const kept = z
-      .record(z.string(), z.unknown())
-      .safeParse(JSON.parse(localStorage.getItem(lookKey) ?? "{}"));
-    if (!kept.success) return look;
-    const fields = lookSchema.shape;
-    return {
-      theme: fields.theme.catch(look.theme).parse(kept.data["theme"]),
-      accent: fields.accent.catch(look.accent).parse(kept.data["accent"]),
-      density: fields.density.catch(look.density).parse(kept.data["density"]),
-      radius: fields.radius.catch(look.radius).parse(kept.data["radius"]),
-      text: fields.text.catch(look.text).parse(kept.data["text"]),
-      marks: fields.marks.catch(look.marks).parse(kept.data["marks"]),
-      diff: fields.diff.catch(look.diff).parse(kept.data["diff"]),
-    };
-  } catch {
-    return look;
-  }
+  const fields = lookSchema.shape;
+  const kept = readKept(
+    lookKey,
+    z.object({
+      theme: fields.theme.catch(look.theme),
+      accent: fields.accent.catch(look.accent),
+      density: fields.density.catch(look.density),
+      radius: fields.radius.catch(look.radius),
+      text: fields.text.catch(look.text),
+      marks: fields.marks.catch(look.marks),
+      diff: fields.diff.catch(look.diff),
+    }),
+  );
+  return kept ?? look;
 };
 
 /** Sets the look on the root element, where the stylesheet reads it. */
@@ -81,11 +79,7 @@ export const useLook = () => {
     setLook((current) => {
       const next = { ...current, ...patch };
       applyLook(next);
-      try {
-        localStorage.setItem(lookKey, JSON.stringify(next));
-      } catch {
-        // A browser that keeps nothing shows the look until the page reloads.
-      }
+      writeKept(lookKey, next);
       return next;
     });
   }, []);

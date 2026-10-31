@@ -2,7 +2,7 @@ import type { Root, RootContent } from "hast";
 import { describe, expect, it } from "vitest";
 
 import { treeOf } from "~/domain/text";
-import { wrapSections } from "~/lib/sections";
+import { listSectionKeys, wrapSections } from "~/lib/sections";
 
 /** The tree's sections as nested lists of their keys and the tags of what else they hold, without the line breaks. */
 const outlineTree = (node: Root | RootContent): unknown[] => {
@@ -68,5 +68,13 @@ describe("wrapSections", () => {
         ? heading.properties["dataSectionHeading"]
         : null,
     ).toBe("0:Done well");
+  });
+});
+
+describe("listSectionKeys", () => {
+  it("lists the keys of the sections, nested ones after the section they are in", () => {
+    expect(
+      listSectionKeys("Lead.\n\n# Plan\n\n## Notes\n\n## Notes\n\n# Next"),
+    ).toEqual(["0:Plan", "0:Notes", "1:Notes", "0:Next"]);
   });
 });

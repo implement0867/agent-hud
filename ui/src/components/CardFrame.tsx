@@ -305,7 +305,11 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     [id, mount],
   );
   const before = model.changed[id] ?? null;
-  const { folds, toggleCard, toggleSection } = useFolds(id, model.board);
+  const { folds, toggleCard, toggleSection } = useFolds(
+    id,
+    card.md,
+    model.board,
+  );
   const sectionFolds = useMemo(
     () => ({ sections: folds.sections, toggle: toggleSection }),
     [folds.sections, toggleSection],
@@ -444,7 +448,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     >
       <div
         ref={body}
-        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-card py-[var(--pad-y)] pr-11 pb-[var(--pad)] pl-[var(--pad)] [scrollbar-color:var(--ink-ghost)_transparent] [scrollbar-width:thin]"
+        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-card py-[var(--pad-y)] pr-11 pl-[var(--pad)] [scrollbar-color:var(--ink-ghost)_transparent] [scrollbar-width:thin] ${folded ? "" : "pb-[var(--pad)]"}`}
         onScroll={measureEnds}
         onPointerEnter={measureEnds}
       >
@@ -510,11 +514,12 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
           className="pointer-events-none absolute inset-x-0 bottom-0 h-7 rounded-b-card bg-linear-to-t from-surface to-transparent"
         />
       ) : null}
-      {editor === null && !folded && at !== null && (
+      {editor === null && at !== null && (
         <span
           className={`pointer-events-none absolute inset-0 rounded-card shadow-[0_0_0_1.5px_var(--accent-ring)] ${live !== null || selected ? "block" : "hidden group-hover/card:block"}`}
         >
-          <span className="pointer-events-auto">
+          {/* A folded card is one line tall whatever its size, so a resize would show nothing until it opens. */}
+          <span className={folded ? "hidden" : "pointer-events-auto"}>
             {handles.map((handle) => (
               <ResizeHandle
                 key={handle.name}

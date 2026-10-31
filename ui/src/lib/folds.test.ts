@@ -4,6 +4,7 @@ import type { TBoard, TCard } from "~/domain/board";
 import {
   findHeldFolds,
   isAllOpen,
+  pruneSectionFolds,
   toggleCardFold,
   toggleSectionFold,
 } from "~/lib/folds";
@@ -92,5 +93,16 @@ describe("toggleCardFold and toggleSectionFold", () => {
     expect(back).toEqual({ versions: 3, card: false, sections: [] });
     expect(isAllOpen(back)).toBe(true);
     expect(isAllOpen(once)).toBe(false);
+  });
+});
+
+describe("pruneSectionFolds", () => {
+  it("forgets the folds of sections the card no longer has", () => {
+    expect(
+      pruneSectionFolds(
+        { versions: 1, card: false, sections: ["0:Steps", "0:Gone"] },
+        ["0:Plan", "0:Steps"],
+      ).sections,
+    ).toEqual(["0:Steps"]);
   });
 });

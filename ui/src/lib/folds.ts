@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 import { Author } from "~/domain/actions";
-import type { TBoard, TCard } from "~/domain/board";
-import { assertNever } from "~/lib/assertNever";
+import { findVersionWriter } from "~/domain/board";
+import type { TBoard } from "~/domain/board";
 
 /**
  * What the user folded on a card, which the browser keeps and the server never sees: the card as a whole, which then
@@ -24,19 +24,6 @@ export const foldsSchema = z.object({
 
 export type TFolds = z.infer<typeof foldsSchema>;
 
-/** Who wrote the card's version: its first author, or the other author when the version is an edit by the other. */
-const findWriter = (card: TCard) => {
-  if (!card.edited) return card.author;
-  switch (card.author) {
-    case Author.enum.agent:
-      return Author.enum.user;
-    case Author.enum.user:
-      return Author.enum.agent;
-    default:
-      return assertNever(card.author);
-  }
-};
-
 /** The folds that still hold on the card: the kept ones, unless the agent wrote a version since; else all open. */
 export const findHeldFolds = (
   kept: TFolds | null,
@@ -51,7 +38,9 @@ export const findHeldFolds = (
   const since = [...earlier.map((version) => version.card), card].slice(
     kept.versions + 1,
   );
-  return since.some((version) => findWriter(version) === Author.enum.agent)
+  return since.some(
+    (version) => findVersionWriter(version) === Author.enum.agent,
+  )
     ? open
     : kept;
 };
@@ -59,6 +48,15 @@ export const findHeldFolds = (
 /** Whether the folds fold nothing, which the browser need not keep. */
 export const isAllOpen = (folds: TFolds) =>
   !folds.card && folds.sections.length === 0;
+
+/** The folds without the sections the card no longer has, whose headings the user or the agent changed. */
+export const pruneSectionFolds = (
+  folds: TFolds,
+  keys: readonly string[],
+): TFolds => ({
+  ...folds,
+  sections: folds.sections.filter((key) => keys.includes(key)),
+});
 
 /** The folds with the card folded, or opened when it was folded, as of the card's versions now. */
 export const toggleCardFold = (folds: TFolds, versions: number): TFolds => ({

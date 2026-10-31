@@ -1,14 +1,11 @@
 import type { Element, Root } from "hast";
 
-import { textOf } from "~/domain/text";
+import { textOf, treeOf } from "~/domain/text";
 
-const headingLevels: Record<string, number> = {
-  h1: 1,
-  h2: 2,
-  h3: 3,
-  h4: 4,
-  h5: 5,
-  h6: 6,
+/** The level of a heading's tag, h1 to h6, or null for a tag that is no heading. */
+const findHeadingLevel = (tagName: string): number | null => {
+  const found = /^h([1-6])$/.exec(tagName);
+  return found === null ? null : Number(found[1]);
 };
 
 /**
@@ -28,8 +25,8 @@ export const wrapSections = () => (tree: Root) => {
       continue;
     }
     const level =
-      child.type === "element" ? headingLevels[child.tagName] : undefined;
-    if (child.type === "element" && level !== undefined) {
+      child.type === "element" ? findHeadingLevel(child.tagName) : null;
+    if (child.type === "element" && level !== null) {
       while ((open.at(-1)?.level ?? 0) >= level) open.pop();
       const text = textOf(child).trim();
       const occurrence = counts.get(text) ?? 0;
@@ -47,4 +44,21 @@ export const wrapSections = () => (tree: Root) => {
     } else (open.at(-1)?.section.children ?? top).push(child);
   }
   tree.children = top;
+};
+
+/** The keys of the markdown's sections, as the plugin of the sections gives them, in the card's order. */
+export const listSectionKeys = (md: string): string[] => {
+  const tree = treeOf(md);
+  wrapSections()(tree);
+  const keys: string[] = [];
+  const visit = (node: Root | Element) => {
+    for (const child of node.children) {
+      if (child.type !== "element" || child.tagName !== "section") continue;
+      const key = child.properties["dataSection"];
+      if (typeof key === "string") keys.push(key);
+      visit(child);
+    }
+  };
+  visit(tree);
+  return keys;
 };

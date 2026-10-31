@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { Author } from "~/domain/actions";
+import { assertNever } from "~/lib/assertNever";
 
 const cardSchema = z.strictObject({
   md: z.string().min(1).describe("Markdown shown on the card"),
@@ -115,6 +116,19 @@ export type TAnchor = { card: string; quote: string; occurrence: number };
 /** An id for a card, an arrow or a draft that the user makes. */
 export const newId = (prefix: string) =>
   `${prefix}-${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`;
+
+/** Who wrote the card's version: its first author, or the other author when the version is the other's edit. */
+export const findVersionWriter = (card: TCard) => {
+  if (!card.edited) return card.author;
+  switch (card.author) {
+    case Author.enum.agent:
+      return Author.enum.user;
+    case Author.enum.user:
+      return Author.enum.agent;
+    default:
+      return assertNever(card.author);
+  }
+};
 
 /** The number of earlier versions of the card. */
 export const versionsOf = (board: TBoard, card: string) =>

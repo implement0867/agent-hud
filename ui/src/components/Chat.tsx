@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
+import { z } from "zod";
 
 import { Bubble } from "~/components/Bubble";
 import { IconButton } from "~/components/IconButton";
@@ -14,6 +15,7 @@ import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Author, messageSchema } from "~/domain/actions";
 import { groupPending } from "~/domain/pending";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
+import { readKept, writeKept } from "~/lib/kept";
 import { mod } from "~/lib/keys";
 
 const widthKey = "agent-hud:chat-width";
@@ -269,9 +271,9 @@ type TChatProps = {
  */
 export const Chat = ({ send, above, measure }: TChatProps) => {
   const { model } = useBoard();
-  /** The width the user last dragged the chat to, in this browser, as a CSS length; none before a drag. */
-  const [width, setWidth] = useState(
-    () => localStorage.getItem(widthKey) ?? undefined,
+  /** The width the user last dragged the chat to, in this browser, in pixels; none before a drag. */
+  const [width, setWidth] = useState(() =>
+    readKept(widthKey, z.number().positive()),
   );
   const [open, setOpen] = useState(true);
   const fromAgent = model.board.messages.filter(
@@ -280,7 +282,10 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
   const [seen, setSeen] = useState(fromAgent);
   const unread = open ? 0 : fromAgent - seen;
   const unsent = model.pending.length;
-  const style = { "--toolbar": `${String(above)}px`, width };
+  const style = {
+    "--toolbar": `${String(above)}px`,
+    width: width ?? undefined,
+  };
   /** A drag on the left edge sets the width; the stylesheet keeps it between the least and the most. */
   const resize = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
@@ -289,7 +294,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
       x: event.clientX,
       width: event.currentTarget.parentElement?.offsetWidth ?? 0,
     };
-    const dragged = (to: number) => `${String(from.width + from.x - to)}px`;
+    const dragged = (to: number) => from.width + from.x - to;
     const listening = new AbortController();
     const { signal } = listening;
     window.addEventListener(
@@ -304,7 +309,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
       (up) => {
         listening.abort();
         setWidth(dragged(up.clientX));
-        localStorage.setItem(widthKey, dragged(up.clientX));
+        writeKept(widthKey, dragged(up.clientX));
       },
       { signal },
     );
