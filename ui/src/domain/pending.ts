@@ -76,7 +76,7 @@ const describe = (heard: THeard, board: TBoard): Omit<TLine, "id"> => {
   });
   switch (body.kind) {
     case ActionKind.enum.put:
-      return at(body.id, "new note", firstLine(body.md));
+      return at(body.id, "new card", firstLine(body.md));
     case "edit":
       return at(body.id, "edited");
     case ActionKind.enum.remove:

@@ -19,13 +19,13 @@ def turns(draw: st.DrawFn) -> Turn:
 
 
 def make_sample_turn() -> Turn:
-    """A turn like the live test's: comments, an edit, a note, an arrow and a message."""
+    """A turn like the live test's: comments, an edit, a new card, an arrow and a message."""
     actions: list[TTurnActionBody] = [
         make_comment("risks", "why?", "The UI build is stale"),
         make_comment("risks", "and this?", "stale", 1),
         make_comment("risks", "fine"),
         Edit(kind="edit", id="checklist", diff="@@ -3 +3 @@\n-| [ ] | Bump |\n+| [x] | Bump |"),
-        make_put("note-1", "# A note\n\nwith text"),
+        make_put("card-1", "# A card\n\nwith text"),
         make_link("a1", "risks", "checklist", "before", "The UI build"),
         make_post("done"),
     ]
@@ -33,15 +33,15 @@ def make_sample_turn() -> Turn:
 
 
 def test_each_line_is_one_action_with_its_fields() -> None:
-    """Assemble: a turn of comments, an edit, a note, an arrow and a message.
+    """Assemble: a turn of comments, an edit, a new card, an arrow and a message.
     Act: take its lines.
-    Assert: one JSON line per action with its fields, and no version on the note or occurrence on a quote at one place."""
+    Assert: one JSON line per action with its fields, and no version on the new card or occurrence on a quote at one place."""
     assert format_action_lines(make_sample_turn()) == [
         '{"kind":"comment","card":"risks","quote":"The UI build is stale","text":"why?"}',
         '{"kind":"comment","card":"risks","quote":"stale","occurrence":1,"text":"and this?"}',
         '{"kind":"comment","card":"risks","quote":"","text":"fine"}',
         '{"kind":"edit","id":"checklist","diff":"@@ -3 +3 @@\\n-| [ ] | Bump |\\n+| [x] | Bump |"}',
-        '{"kind":"put","id":"note-1","md":"# A note\\n\\nwith text"}',
+        '{"kind":"put","id":"card-1","md":"# A card\\n\\nwith text"}',
         '{"kind":"link","id":"a1","card":"risks","quote":"The UI build","dst":"checklist","text":"before"}',
         '{"kind":"post","text":"done"}',
     ]

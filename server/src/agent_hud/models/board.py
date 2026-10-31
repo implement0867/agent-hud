@@ -38,7 +38,7 @@ class Card(Model):
     author: Author = Field(description="Who put the card first")
     edited: bool = Field(
         default=False,
-        description="Whether the latest version is by the other author: the user edited the agent's card, or the agent the user's note",
+        description="Whether the latest version is by the other author: the user edited the agent's card, or the agent the user's card",
     )
 
     @field_validator("md")

@@ -113,11 +113,11 @@ describe("groupPending", () => {
     });
   });
 
-  it("titles a new note by its first line and keeps one line per action, so the count and the list agree", () => {
+  it("titles a new card by its first line and keeps one line per action, so the count and the list agree", () => {
     const pending = [
       heard({
         kind: ActionKind.enum.put,
-        id: "note-1",
+        id: "card-1",
         md: "check the docs\n\nand the tests",
       }),
       heard({ kind: ActionKind.enum.remove, id: "plan" }),
@@ -125,8 +125,8 @@ describe("groupPending", () => {
     const groups = groupPending(pending, board);
     expect(groups.flatMap(({ lines }) => lines)).toHaveLength(pending.length);
     expect(groups[0]).toMatchObject({
-      title: "note-1",
-      lines: [{ what: "new note", where: "check the docs" }],
+      title: "card-1",
+      lines: [{ what: "new card", where: "check the docs" }],
     });
     expect(groups[1]).toMatchObject({
       title: "The plan",
@@ -144,12 +144,12 @@ describe("unsentOf", () => {
         quote: "",
         text: "hi",
       }),
-      heard({ kind: ActionKind.enum.put, id: "note-1", md: "hi" }),
+      heard({ kind: ActionKind.enum.put, id: "card-1", md: "hi" }),
       heard({ kind: "edit", id: "checklist", diff: "" }),
       heard({ kind: ActionKind.enum.post, text: "go" }),
     ];
     const { cards, ids } = unsentOf(pending);
-    expect([...cards]).toEqual(["note-1", "checklist"]);
+    expect([...cards]).toEqual(["card-1", "checklist"]);
     expect(ids).toEqual(new Set(pending.map(({ id }) => id)));
   });
 });

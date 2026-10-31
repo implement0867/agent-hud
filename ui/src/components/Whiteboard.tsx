@@ -76,7 +76,7 @@ const panelGuess: TSize = { width: 220, height: 160 };
 /** The size of a chip that points at a new card: its h-8 and max-w-45. */
 const chipSize: TSize = { width: 180, height: 32 };
 
-/** The size of a note being written, before it is measured: its w-96 and a few lines. */
+/** The size of a card being written, before it is measured: its w-96 and a few lines. */
 const draftSize: TSize = { width: 384, height: 144 };
 
 /** Whether a key goes to a field the user types in, rather than to the board. */
@@ -142,13 +142,13 @@ const NewCardChip = ({ id, at, show }: TNewCardChipProps) => {
   );
 };
 
-type TDraftNoteProps = { at: TPoint; close: () => void };
+type TDraftCardProps = { at: TPoint; close: () => void };
 
-/** A note that the user is writing; it goes on the board where it is when the user saves it. */
-const DraftNote = ({ at, close }: TDraftNoteProps) => {
+/** A card that the user is writing; it goes on the board where it is when the user saves it. */
+const DraftCard = ({ at, close }: TDraftCardProps) => {
   const store = useStore();
   const save = async (md: string) => {
-    const id = newId("note");
+    const id = newId("card");
     if (!(await store.act({ kind: ActionKind.enum.put, id, md }))) return;
     await store.act({ kind: ActionKind.enum.move, id, ...at });
     close();
@@ -160,7 +160,7 @@ const DraftNote = ({ at, close }: TDraftNoteProps) => {
     >
       <MarkdownEditor
         md=""
-        label="New note"
+        label="New card"
         blurSaves
         save={(md) => {
           void save(md);
@@ -297,7 +297,7 @@ export const Whiteboard = () => {
     restore,
   } = useUndo(store.act);
   const [editing, setEditing] = useState<TEditing | null>(null);
-  const [notes, setNotes] = useState<Record<string, TPoint>>({});
+  const [drafts, setDrafts] = useState<Record<string, TPoint>>({});
   const [comments, setComments] = useState<Record<string, TCommentDraft>>({});
   const [history, setHistory] = useState<{ card: string | null } | null>(null);
   const [sheet, setSheet] = useState(false);
@@ -626,8 +626,8 @@ export const Whiteboard = () => {
       void store.act({ kind: ActionKind.enum.send });
   };
 
-  /** A new note at the point, or at the centre of the free area, kept whole inside that area with a margin. */
-  const note = (at?: TPoint) => {
+  /** A new card at the point, or at the centre of the free area, kept whole inside that area with a margin. */
+  const startCard = (at?: TPoint) => {
     const { x, y, width, height } = area;
     const margin = 16;
     const centre = toBoard(view, {
@@ -644,7 +644,7 @@ export const Whiteboard = () => {
       x: Math.max(low.x, Math.min(wanted.x, high.x)),
       y: Math.max(low.y, Math.min(wanted.y, high.y)),
     };
-    setNotes((current) => ({ ...current, [newId("draft")]: place }));
+    setDrafts((current) => ({ ...current, [newId("draft")]: place }));
   };
 
   const toggleHistory = () => {
@@ -687,7 +687,7 @@ export const Whiteboard = () => {
     else if (key === "c" && picked !== null) {
       event.preventDefault();
       commentOnPicked();
-    } else if (key === "n") note();
+    } else if (key === "n") startCard();
     else if (key === "h") toggleHistory();
     else if (key === "1") fit();
     else if (key === "0") setView(home);
@@ -791,7 +791,7 @@ export const Whiteboard = () => {
           clear={() => {
             choose(null);
           }}
-          create={note}
+          create={startCard}
           dimmed={offline}
           overlay={
             <>
@@ -872,7 +872,7 @@ export const Whiteboard = () => {
                   setView(home);
                 }}
                 fit={fit}
-                note={note}
+                startCard={startCard}
                 history={history !== null}
                 toggleHistory={toggleHistory}
                 shortcuts={sheet}
@@ -903,12 +903,12 @@ export const Whiteboard = () => {
             ))}
           </div>
           <ArrowLayer world={world} linking={linking} />
-          {Object.entries(notes).map(([id, at]) => (
-            <DraftNote
+          {Object.entries(drafts).map(([id, at]) => (
+            <DraftCard
               key={id}
               at={at}
               close={() => {
-                setNotes(({ [id]: _saved, ...rest }) => rest);
+                setDrafts(({ [id]: _saved, ...rest }) => rest);
               }}
             />
           ))}

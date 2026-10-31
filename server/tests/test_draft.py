@@ -70,17 +70,17 @@ def test_a_turn_ends_on_a_send_or_a_message(texts: list[str], text: str) -> None
 @given(st.lists(item_texts(), min_size=4, max_size=4, unique=True))
 def test_a_put_on_a_card_of_the_board_is_heard_as_a_diff(texts: list[str]) -> None:
     """Assemble: a board with the agent's list of three items.
-    Act: the user puts the list with a new second item, and puts a new note.
-    Assert: the draft has the edit as a diff of the changed line with one line around it, and the new note in full."""
+    Act: the user puts the list with a new second item, and puts a new card.
+    Assert: the draft has the edit as a diff of the changed line with one line around it, and the new card in full."""
     first, second, third, new = texts
     board = Board().apply_action(
         Action(id="a", author=Author.agent, body=make_put("plan", make_list_md("1. ", [first, second, third])))
     )
     _, draft, _ = take_all_actions(
-        board, make_user_actions(make_put("plan", make_list_md("1. ", [first, new, third])), make_put("note", new))
+        board, make_user_actions(make_put("plan", make_list_md("1. ", [first, new, third])), make_put("mine", new))
     )
     diff = "\n".join(["@@ -1,3 +1,3 @@", f" 1. {first}", f"-1. {second}", f"+1. {new}", f" 1. {third}"])
     assert draft.actions == (
         TurnAction(id="u0", author=Author.user, body=Edit(kind="edit", id="plan", diff=diff)),
-        TurnAction(id="u1", author=Author.user, body=make_put("note", new)),
+        TurnAction(id="u1", author=Author.user, body=make_put("mine", new)),
     )

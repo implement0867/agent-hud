@@ -50,7 +50,7 @@ export const bodySchema = z.discriminatedUnion("kind", [
       .nonnegative()
       .nullish()
       .describe(
-        "The number of earlier versions the card has; the put is refused when the card has another number. Null or missing replaces whatever is there, as for a new note",
+        "The number of earlier versions the card has; the put is refused when the card has another number. Null or missing replaces whatever is there, as for a new card",
       ),
   }),
   z.strictObject({

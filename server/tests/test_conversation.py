@@ -164,24 +164,24 @@ async def test_the_user_and_the_agent_discuss_code_with_arrows(agent: Agent, use
     assert (seen.arrows, list(collect_feedback(seen))) == ({}, ["Which languages?"])
 
 
-async def test_the_agent_hears_the_notes_and_edits_of_the_user(agent: Agent, user: User) -> None:
-    """Assemble: a board with an agent's plan card and an arrow from it to the user's note.
-    Act: the user writes a note, places it, edits the agent's card and then removes the note.
-    Assert: the agent hears each action but the make_move, with the edit as a diff, and reads the user as the author of the note and the edited card as the agent's, edited, with its arrow gone."""
-    note = [make_put("note", "Also check the docs"), make_move("note", 40, 300), make_post("see my note")]
-    assert list_kinds([await user.request_action(body) for body in note]) == [EventKind.accepted] * len(note)
-    assert await agent.receive_actions() == [note[0], note[2]]
+async def test_the_agent_hears_the_new_cards_and_edits_of_the_user(agent: Agent, user: User) -> None:
+    """Assemble: a board with an agent's plan card and an arrow from it to the user's card.
+    Act: the user writes a card, places it, edits the agent's card and then removes the user's card.
+    Assert: the agent hears each action but the make_move, with the edit as a diff, and reads the user as the author of the user's card and the edited card as the agent's, edited, with its arrow gone."""
+    written = [make_put("mine", "Also check the docs"), make_move("mine", 40, 300), make_post("see my card")]
+    assert list_kinds([await user.request_action(body) for body in written]) == [EventKind.accepted] * len(written)
+    assert await agent.receive_actions() == [written[0], written[2]]
     board = await read_board(agent.tools, history=True)
-    assert (board.cards["note"].author, board.positions) == (Author.user, {"note": Point(x=40, y=300)})
+    assert (board.cards["mine"].author, board.positions) == (Author.user, {"mine": Point(x=40, y=300)})
 
     await agent.write_board(
-        make_put("plan", "1. read the docs\n2. write the code"), make_link("from", "plan", "note", quote="docs")
+        make_put("plan", "1. read the docs\n2. write the code"), make_link("from", "plan", "mine", quote="docs")
     )
-    edits = [make_put("plan", "1. read the docs\n2. write the tests\n3. write the code"), make_remove("note")]
+    edits = [make_put("plan", "1. read the docs\n2. write the tests\n3. write the code"), make_remove("mine")]
     assert list_kinds([await user.request_action(body) for body in edits]) == [EventKind.accepted] * len(edits)
     await user.send_turn()
     diff = "@@ -1,2 +1,3 @@\n 1. read the docs\n-2. write the code\n+2. write the tests\n+3. write the code"
-    assert await agent.receive_actions() == [Edit(kind="edit", id="plan", diff=diff), make_remove("note")]
+    assert await agent.receive_actions() == [Edit(kind="edit", id="plan", diff=diff), make_remove("mine")]
     board = await read_board(agent.tools, history=True)
     assert await user.await_board(board) == board
     assert ({k: (v.author, v.edited) for k, v in board.cards.items()}, board.arrows) == (

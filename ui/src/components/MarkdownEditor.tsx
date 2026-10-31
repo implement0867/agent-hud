@@ -25,7 +25,7 @@ type TMarkdownEditorProps = {
   quotes?: string[];
   /** Whether the card got a new version since the editor opened. */
   changed?: boolean;
-  /** Whether a click outside saves the changes, as for a note, rather than asks. */
+  /** Whether a click outside saves the changes, as for a new card, rather than asks. */
   blurSaves?: boolean;
   /** Saves the text; over is true to replace a newer version of the card. */
   save: (md: string, over: boolean) => void;
@@ -35,7 +35,7 @@ type TMarkdownEditorProps = {
 /**
  * The card as its markdown, in a borderless monospace field, with only the hint that ⌘↵ saves. Esc and a click outside
  * close the editor while the text is as it was; with changes, a click outside asks to save or discard, or saves when
- * the editor saves on blur, as a note's does, and Esc asks for a second Esc. When the words of a thread or an arrow
+ * the editor saves on blur, as a new card's does, and Esc asks for a second Esc. When the words of a thread or an arrow
  * are gone from the new text, the save asks once and says how many go to the history. When the card got a new version
  * since the editor opened, the editor says so and offers to save over it. Each question shows only when it applies.
  */
