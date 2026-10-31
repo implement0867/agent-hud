@@ -76,20 +76,43 @@ const BubbleMark = ({ id, thread, unread, unsent, at }: TBubbleMarkProps) => {
 
 type TPlaced = { id: string; thread: TThread; x: number; y: number };
 
+/** The rects that show where the words are: theirs, or the heading's of the outermost folded section they are in. */
+const findShownRects = (range: Range): DOMRect[] => {
+  let heading: Element | null = null;
+  for (
+    let section = range.startContainer.parentElement?.closest("[data-folded]");
+    section != null;
+    section = section.parentElement?.closest("[data-folded]")
+  )
+    heading = section.querySelector(":scope > [data-section-heading]");
+  if (heading === null) return [...range.getClientRects()];
+  const shown = document.createRange();
+  shown.selectNodeContents(heading);
+  return [...shown.getClientRects()];
+};
+
 type TThreadMarksProps = {
   card: string;
   /** The element that scrolls the card's text, which the bubbles sit in. */
   body: RefObject<HTMLElement | null>;
   /** What the marks measure again on: the card's text and size. */
   version: string;
+  /** Whether the card shows its first line alone, with the bubble of each thread at the top. */
+  folded: boolean;
 };
 
 /**
  * The marks of the card's threads and arrows: a highlight on the words of each, and the bubble of each thread level
  * with its first line, in the card's right margin, side by side when two share a line, or just after its words when
- * the look puts the marks in line. A thread on the card as a whole has its bubble at the top.
+ * the look puts the marks in line. A thread on the card as a whole, and each thread of a folded card, has its bubble
+ * at the top; a thread on words in a folded section has its bubble level with the section's heading.
  */
-export const ThreadMarks = ({ card, body, version }: TThreadMarksProps) => {
+export const ThreadMarks = ({
+  card,
+  body,
+  version,
+  folded,
+}: TThreadMarksProps) => {
   const { model } = useBoard();
   const { seen, look } = useWhiteboard();
   const [placed, setPlaced] = useState<TPlaced[]>([]);
@@ -99,6 +122,7 @@ export const ThreadMarks = ({ card, body, version }: TThreadMarksProps) => {
   );
   const key = JSON.stringify([
     version,
+    folded,
     look.marks,
     threads.map(([id, t]) => [id, t.quote, t.occurrence]),
     arrows.map((a) => [a.quote, a.occurrence]),
@@ -117,12 +141,12 @@ export const ThreadMarks = ({ card, body, version }: TThreadMarksProps) => {
     const lines = new Map<number, number>();
     const next = threads.flatMap(([id, thread]) => {
       const range =
-        thread.quote === ""
+        folded || thread.quote === ""
           ? null
           : rangeOf(root, thread.quote, thread.occurrence);
-      if (thread.quote !== "" && range === null) return [];
+      if (!folded && thread.quote !== "" && range === null) return [];
       if (range !== null) ranges.push(range);
-      const rects = range === null ? [] : [...range.getClientRects()];
+      const rects = range === null ? [] : findShownRects(range);
       const first = rects[0];
       const last = rects.at(-1);
       const top =
@@ -151,7 +175,7 @@ export const ThreadMarks = ({ card, body, version }: TThreadMarksProps) => {
       card,
       arrows.flatMap((arrow) => {
         const range =
-          arrow.quote === ""
+          folded || arrow.quote === ""
             ? null
             : rangeOf(root, arrow.quote, arrow.occurrence);
         return range === null ? [] : [range];

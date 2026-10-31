@@ -1,14 +1,16 @@
-import { useCallback, useRef, useState } from "react";
-import type { PointerEvent } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
+import type { PointerEvent, ReactNode } from "react";
 
 import { CardBody } from "~/components/CardBody";
+import { FoldButton } from "~/components/FoldButton";
 import { ThreadMarks } from "~/components/Marks";
 import { MarkdownEditor } from "~/components/MarkdownEditor";
 import type { TCardView } from "~/data/boardModel";
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind } from "~/domain/actions";
 import type { TPoint } from "~/domain/board";
-import { toggledBox } from "~/domain/text";
+import { firstLine, plainText, toggledBox } from "~/domain/text";
+import { useFolds } from "~/hooks/useFolds";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
 import {
   clampCardWidth,
@@ -259,6 +261,15 @@ const ChangeLinks = ({ id, changed }: TChangeLinksProps) => {
   );
 };
 
+/** The first line of the card's text that is not blank, which a folded card shows alone. */
+const CardFirstLine = ({ md }: { md: string }): ReactNode => (
+  <div data-text-root="" className="markdown truncate select-text">
+    {firstLine(plainText(md))}
+  </div>
+);
+
+const FirstLine = memo(CardFirstLine);
+
 type TCardFrameProps = {
   view: TCardView;
   scale: number;
@@ -272,6 +283,8 @@ type TCardFrameProps = {
  * or both. A click selects the card, a selection of its words opens the toolbar of the selection, and a double click
  * edits the markdown. A card shorter than its text scrolls, with fades at its ends. Cards may cross after their first
  * place; a touch puts the card on top of the others. A card without a place is hidden until the page gives it one.
+ * The triangle at the card's first line folds it to that line on the sunken ground, with its threads' bubbles; each
+ * heading's triangle folds its section. The folds are the viewer's own, and the agent's next version opens the card.
  */
 export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   const { id, card, at, versions, layer } = view;
@@ -292,6 +305,11 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     [id, mount],
   );
   const before = model.changed[id] ?? null;
+  const { folds, toggleCard, toggleSection } = useFolds(id, model.board);
+  const sectionFolds = useMemo(
+    () => ({ sections: folds.sections, toggle: toggleSection }),
+    [folds.sections, toggleSection],
+  );
   /** The rect that a resize shows before the server has it, and the handle that makes it. */
   const [resizing, setResizing] = useState<{
     rect: TRect;
@@ -351,6 +369,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     },
   });
   const editor = editing?.card === id ? editing : null;
+  const folded = editor === null && folds.card;
   const save = async (md: string, over: boolean) => {
     invariant(editor !== null, "the editor saves while it is open");
     const version = over ? {} : { version: editor.versions };
@@ -400,14 +419,14 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
         left: place?.x ?? 0,
         top: place?.y ?? 0,
         width: width ?? "max-content",
-        // The editor shows the whole markdown, whatever height the card has.
-        height: editor === null ? (height ?? undefined) : undefined,
+        // The editor shows the whole markdown, and a folded card its first line, whatever height the card has.
+        height: editor === null && !folded ? (height ?? undefined) : undefined,
         minWidth: leastCardWidth,
         maxWidth: width === null ? columnWidth : undefined,
         zIndex: layer,
         visibility: at === null ? "hidden" : "visible",
       }}
-      className={`group/card pointer-events-auto absolute flex animate-rise flex-col rounded-card bg-surface transition-shadow ${ring}`}
+      className={`group/card pointer-events-auto absolute flex animate-rise flex-col rounded-card transition-shadow ${folded ? "bg-surface-sunken" : "bg-surface"} ${ring}`}
       onPointerDownCapture={() => {
         store.touch(id);
       }}
@@ -429,7 +448,12 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
         onScroll={measureEnds}
         onPointerEnter={measureEnds}
       >
-        {editor === null ? (
+        {folded ? (
+          <>
+            <FirstLine md={card.md} />
+            <ThreadMarks card={id} body={body} version={card.md} folded />
+          </>
+        ) : editor === null ? (
           <>
             {versions > 0 && <ChangeLinks id={id} changed={before !== null} />}
             <div
@@ -441,12 +465,14 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
                 before={before}
                 diffStyle={look.diff}
                 toggle={toggle}
+                folds={sectionFolds}
               />
             </div>
             <ThreadMarks
               card={id}
               body={body}
               version={`${card.md}|${String(before)}|${String(width)}|${look.diff}`}
+              folded={false}
             />
           </>
         ) : (
@@ -464,19 +490,27 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
           />
         )}
       </div>
-      {height !== null && ends.top ? (
+      {editor === null && (
+        <FoldButton
+          folded={folded}
+          label={`card ${id}`}
+          toggle={toggleCard}
+          className="absolute top-[var(--pad-y)] left-0 z-10 h-[calc(var(--text-body)*var(--lh))] w-[var(--pad)]"
+        />
+      )}
+      {height !== null && !folded && ends.top ? (
         <span
           aria-hidden
           className="pointer-events-none absolute inset-x-0 top-0 h-7 rounded-t-card bg-linear-to-b from-surface to-transparent"
         />
       ) : null}
-      {height !== null && ends.bottom ? (
+      {height !== null && !folded && ends.bottom ? (
         <span
           aria-hidden
           className="pointer-events-none absolute inset-x-0 bottom-0 h-7 rounded-b-card bg-linear-to-t from-surface to-transparent"
         />
       ) : null}
-      {editor === null && at !== null && (
+      {editor === null && !folded && at !== null && (
         <span
           className={`pointer-events-none absolute inset-0 rounded-card shadow-[0_0_0_1.5px_var(--accent-ring)] ${live !== null || selected ? "block" : "hidden group-hover/card:block"}`}
         >

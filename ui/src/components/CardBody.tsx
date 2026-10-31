@@ -6,16 +6,26 @@ import type { ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Pluggable, PluggableList } from "unified";
 
+import { FoldButton } from "~/components/FoldButton";
 import { isBoxCell } from "~/domain/text";
 import { showChanges } from "~/lib/changes";
 import type { TDiffStyle } from "~/lib/changes";
 import { DiffKind, markCodeLines } from "~/lib/codeLines";
 import { highlight } from "~/lib/highlight";
+import { wrapSections } from "~/lib/sections";
 
 /** Flips the box of a task item or a table cell, whose markdown runs from start to end; none for an earlier version. */
 type TToggle = ((start: number, end: number) => void) | null;
 
 const ToggleContext = createContext<TToggle>(null);
+
+/** The keys of the folded sections and the toggle of a section by its key; none where the card does not fold. */
+type TSectionFolds = {
+  sections: readonly string[];
+  toggle: (section: string) => void;
+} | null;
+
+const FoldContext = createContext<TSectionFolds>(null);
 
 const stop = (event: SyntheticEvent) => {
   event.stopPropagation();
@@ -207,6 +217,55 @@ const Pre = ({ node, children }: ComponentProps<"pre"> & ExtraProps) => {
   );
 };
 
+/** Whether the user folded the section of the key, which the plugin of the sections puts on the node. */
+const useFolded = (key: unknown) => {
+  const folds = useContext(FoldContext);
+  return (
+    folds !== null && typeof key === "string" && folds.sections.includes(key)
+  );
+};
+
+/** A section of the card, which shows its heading alone while it is folded. */
+const Section = ({
+  node,
+  children,
+  ...props
+}: ComponentProps<"section"> & ExtraProps) => {
+  const folded = useFolded(node?.properties["dataSection"]);
+  return (
+    <section {...props} data-folded={folded ? "" : undefined}>
+      {children}
+    </section>
+  );
+};
+
+type THeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+
+type THeadingProps = ComponentProps<THeadingTag> &
+  ExtraProps & { tag: THeadingTag };
+
+/** A heading, with the triangle that folds its section where the card folds. */
+const Heading = ({ tag: Tag, node, children, ...props }: THeadingProps) => {
+  const folds = useContext(FoldContext);
+  const key = node?.properties["dataSectionHeading"];
+  const folded = useFolded(key);
+  return (
+    <Tag {...props}>
+      {folds !== null && typeof key === "string" && (
+        <FoldButton
+          folded={folded}
+          label={`the section ${textIn(node)}`}
+          toggle={() => {
+            folds.toggle(key);
+          }}
+          className="mr-1.5 -ml-0.5 inline-grid size-4 align-middle"
+        />
+      )}
+      {children}
+    </Tag>
+  );
+};
+
 /** Links open in a new tab. */
 const Anchor = ({ href, children }: ComponentProps<"a"> & ExtraProps) => (
   <a href={href} target="_blank" rel="noreferrer" onClick={stop}>
@@ -215,6 +274,25 @@ const Anchor = ({ href, children }: ComponentProps<"a"> & ExtraProps) => (
 );
 
 const components = {
+  section: Section,
+  h1: (props: ComponentProps<"h1"> & ExtraProps) => (
+    <Heading tag="h1" {...props} />
+  ),
+  h2: (props: ComponentProps<"h2"> & ExtraProps) => (
+    <Heading tag="h2" {...props} />
+  ),
+  h3: (props: ComponentProps<"h3"> & ExtraProps) => (
+    <Heading tag="h3" {...props} />
+  ),
+  h4: (props: ComponentProps<"h4"> & ExtraProps) => (
+    <Heading tag="h4" {...props} />
+  ),
+  h5: (props: ComponentProps<"h5"> & ExtraProps) => (
+    <Heading tag="h5" {...props} />
+  ),
+  h6: (props: ComponentProps<"h6"> & ExtraProps) => (
+    <Heading tag="h6" {...props} />
+  ),
   a: Anchor,
   span: Span,
   pre: Pre,
@@ -231,6 +309,8 @@ type TCardBodyProps = {
   before?: string | null;
   diffStyle?: TDiffStyle;
   toggle?: TToggle;
+  /** The folds of the card's sections, or none for a card that does not fold, such as an earlier version. */
+  folds?: TSectionFolds;
 };
 
 /** Whether the markdown has a fenced code block, which the colouring loads the highlighter for. */
@@ -242,6 +322,7 @@ const plugins = (
   colour: boolean,
 ): PluggableList => [
   markBoxes,
+  wrapSections,
   ...(before === null
     ? []
     : [[showChanges, { before, style }] satisfies Pluggable]),
@@ -254,41 +335,45 @@ const CardMarkdown = ({
   before = null,
   diffStyle = "word",
   toggle = null,
+  folds = null,
 }: TCardBodyProps): ReactNode => (
   <div data-text-root="" className="markdown select-text">
-    <ToggleContext value={toggle}>
-      {hasFence(md) ? (
-        <MarkdownHooks
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={plugins(before, diffStyle, true)}
-          components={components}
-          fallback={
-            <Markdown
-              remarkPlugins={remarkPlugins}
-              rehypePlugins={plugins(before, diffStyle, false)}
-              components={components}
-            >
-              {md}
-            </Markdown>
-          }
-        >
-          {md}
-        </MarkdownHooks>
-      ) : (
-        <Markdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={plugins(before, diffStyle, false)}
-          components={components}
-        >
-          {md}
-        </Markdown>
-      )}
-    </ToggleContext>
+    <FoldContext value={folds}>
+      <ToggleContext value={toggle}>
+        {hasFence(md) ? (
+          <MarkdownHooks
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={plugins(before, diffStyle, true)}
+            components={components}
+            fallback={
+              <Markdown
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={plugins(before, diffStyle, false)}
+                components={components}
+              >
+                {md}
+              </Markdown>
+            }
+          >
+            {md}
+          </MarkdownHooks>
+        ) : (
+          <Markdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={plugins(before, diffStyle, false)}
+            components={components}
+          >
+            {md}
+          </Markdown>
+        )}
+      </ToggleContext>
+    </FoldContext>
   </div>
 );
 
 /**
- * The card's markdown on the design's scale: code blocks on the sunken ground, a table's boxes as checkboxes, and,
- * with the markdown before, the changes since it. A card with a code block shows plain until the highlighter loads.
+ * The card's markdown on the design's scale: code blocks on the sunken ground, a table's boxes as checkboxes, a fold
+ * triangle on each heading where the card folds, and, with the markdown before, the changes since it. A card with a
+ * code block shows plain until the highlighter loads.
  */
 export const CardBody = memo(CardMarkdown);

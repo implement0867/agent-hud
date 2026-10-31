@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import type { MouseEvent } from "react";
+import { z } from "zod";
 
 import { AgentPill } from "~/components/AgentPill";
 import { ArrowLayer } from "~/components/ArrowLayer";
@@ -63,6 +64,7 @@ import {
 import type { TDirection, TRect, TSize, TView } from "~/lib/geometry";
 import { markRanges } from "~/lib/highlights";
 import { invariant } from "~/lib/invariant";
+import { readKept, writeKept } from "~/lib/kept";
 import { LookContext, useLook } from "~/lib/look";
 
 const home: TView = { x: 64, y: 64, scale: 1 };
@@ -101,20 +103,9 @@ const titleOf = (cards: Record<string, { md: string }>, id: string) => {
 /** The key that keeps, in the browser, how many comments of each thread the user has read on this board. */
 const seenKey = () => `agent-hud:seen:${boardInUrl() ?? ""}`;
 
-const readSeen = (): Record<string, number> => {
-  try {
-    const kept: unknown = JSON.parse(localStorage.getItem(seenKey()) ?? "{}");
-    return typeof kept === "object" && kept !== null
-      ? Object.fromEntries(
-          Object.entries(kept).filter(
-            (entry): entry is [string, number] => typeof entry[1] === "number",
-          ),
-        )
-      : {};
-  } catch {
-    return {};
-  }
-};
+/** The comments of each thread the user has read on this board; none for a thread the browser keeps no count of. */
+const readSeen = (): Record<string, number> =>
+  readKept(seenKey(), z.record(z.string(), z.number())) ?? {};
 
 type TNewCardChipProps = {
   id: string;
@@ -353,11 +344,7 @@ export const Whiteboard = () => {
       setSeen((current) => {
         if (current[thread] === count) return current;
         const next = { ...current, [thread]: count };
-        try {
-          localStorage.setItem(seenKey(), JSON.stringify(next));
-        } catch {
-          // A browser that keeps nothing counts the comments again on the next load.
-        }
+        writeKept(seenKey(), next);
         return next;
       });
     },

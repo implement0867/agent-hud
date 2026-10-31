@@ -271,11 +271,17 @@
   line-height: var(--lh);
   color: var(--ink-soft);
   overflow-wrap: anywhere;
-  & > :first-child {
+  /* A section holds its heading first, and the sections of deeper headings last. */
+  & > :first-child,
+  & > section:first-child > :first-child {
     margin-top: 0;
   }
-  & > :last-child {
+  & > :last-child,
+  & section:last-child > :last-child {
     margin-bottom: 0;
+  }
+  & section[data-folded] > :not([data-section-heading]) {
+    display: none;
   }
   & h1 {
     margin: 0 0 0.5rem;
