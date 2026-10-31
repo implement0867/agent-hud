@@ -1,6 +1,5 @@
 import { ChevronDown, Eraser } from "lucide-react";
-import { useId, useRef, useState } from "react";
-import type { RefObject } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind } from "~/domain/actions";
@@ -11,35 +10,40 @@ import { agentDots } from "~/theme";
 const count = (n: number, one: string) =>
   `${String(n)} ${n === 1 ? one : `${one}s`}`;
 
-const belowAnchor =
-  "panel inset-auto m-0 mt-2 border-0 [position-anchor:--board-menu] [top:anchor(bottom)] [left:anchor(left)]";
-
 const rowTone = "flex items-center gap-2 rounded-lg px-2 py-1 text-xs";
 
-type TClearDialogProps = {
-  id: string;
-  board: string;
-  dialog: RefObject<HTMLDivElement | null>;
-};
+type TClearDialogProps = { board: string; close: () => void };
 
 /**
  * The confirm before the board is cleared, in the page: it names the board and what goes, the cards to the history
  * with their feedback, and the arrows and the chat for good. Esc or Keep closes it with the board as it is.
  */
-const ClearDialog = ({ id, board, dialog }: TClearDialogProps) => {
+const ClearDialog = ({ board, close }: TClearDialogProps) => {
   const { model } = useBoard();
   const store = useStore();
   const cards = model.cards.length;
   const arrows = Object.keys(model.board.arrows).length;
   const messages = model.board.messages.length;
+  useEffect(() => {
+    const listening = new AbortController();
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        close();
+      },
+      { capture: true, signal: listening.signal },
+    );
+    return () => {
+      listening.abort();
+    };
+  }, [close]);
   return (
     <div
-      id={id}
-      ref={dialog}
-      popover="auto"
       role="dialog"
       aria-label="Clear this board?"
-      className={`${belowAnchor} w-80 flex-col gap-3 p-4 text-sm text-ink-soft open:flex`}
+      className="panel absolute top-full left-0 mt-2 flex w-80 flex-col gap-3 p-4 text-sm text-ink-soft"
     >
       <p className="font-semibold text-ink">
         Clear <span className="font-mono">{board}</span>?
@@ -52,19 +56,17 @@ const ClearDialog = ({ id, board, dialog }: TClearDialogProps) => {
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          popoverTarget={id}
-          popoverTargetAction="hide"
           className="rounded-xl px-3 py-1.5 font-medium hover:bg-surface-sunken"
+          onClick={close}
         >
           Keep
         </button>
         <button
           type="button"
-          popoverTarget={id}
-          popoverTargetAction="hide"
           className="rounded-xl bg-danger px-3 py-1.5 font-medium text-white hover:bg-danger-strong"
           onClick={() => {
             void store.act({ kind: ActionKind.enum.clear });
+            close();
           }}
         >
           Clear the board
@@ -82,12 +84,11 @@ const ClearDialog = ({ id, board, dialog }: TClearDialogProps) => {
 export const BoardMenu = () => {
   const { model } = useBoard();
   const [boards, setBoards] = useState<TBoardList | "failed" | null>(null);
+  const [clearing, setClearing] = useState(false);
   const menuId = useId();
-  const clearId = useId();
   const menu = useRef<HTMLUListElement>(null);
-  const dialog = useRef<HTMLDivElement>(null);
   const current = boardInUrl() ?? "";
-  const listBoards = async () => {
+  const open = async () => {
     try {
       setBoards(await fetchBoards());
     } catch {
@@ -95,7 +96,7 @@ export const BoardMenu = () => {
     }
   };
   return (
-    <span className="flex items-center">
+    <span className="relative flex items-center">
       <button
         type="button"
         aria-label="Boards"
@@ -112,9 +113,9 @@ export const BoardMenu = () => {
         popover="auto"
         role="menu"
         aria-label="Other boards"
-        className={`${belowAnchor} w-64 flex-col gap-0.5 p-1 open:flex`}
+        className={`panel inset-auto m-0 mt-2 border-0 [position-anchor:--board-menu] [top:anchor(bottom)] [left:anchor(left)] w-64 flex-col gap-0.5 p-1 open:flex`}
         onToggle={(event) => {
-          if (event.newState === "open") void listBoards();
+          if (event.newState === "open") void open();
         }}
       >
         {boards === "failed" ? (
@@ -166,7 +167,7 @@ export const BoardMenu = () => {
             className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-ink-soft enabled:hover:bg-danger-faint enabled:hover:text-danger-strong disabled:text-ink-ghost"
             onClick={() => {
               menu.current?.hidePopover();
-              dialog.current?.showPopover();
+              setClearing(true);
             }}
           >
             <Eraser className="size-3.5" />
@@ -174,7 +175,14 @@ export const BoardMenu = () => {
           </button>
         </li>
       </ul>
-      <ClearDialog id={clearId} board={current} dialog={dialog} />
+      {clearing ? (
+        <ClearDialog
+          board={current}
+          close={() => {
+            setClearing(false);
+          }}
+        />
+      ) : null}
     </span>
   );
 };
