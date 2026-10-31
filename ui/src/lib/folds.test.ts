@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { TBoard, TCard } from "~/domain/board";
 import {
   findHeldFolds,
-  isAllOpen,
   pruneSectionFolds,
   toggleCardFold,
   toggleSectionFold,
@@ -40,7 +39,7 @@ const makeBoard = (versions: TCard[]): TBoard => {
 const folded: TFolds = { versions: 0, card: true, sections: ["0:Steps"] };
 
 describe("findHeldFolds", () => {
-  it("opens all of a card the browser keeps no folds for", () => {
+  it("opens all of a card the user never folded", () => {
     expect(findHeldFolds(null, makeBoard([agentCard]), "plan")).toEqual({
       versions: 0,
       card: false,
@@ -91,8 +90,6 @@ describe("toggleCardFold and toggleSectionFold", () => {
     expect(once).toEqual({ versions: 3, card: true, sections: ["0:Steps"] });
     const back = toggleSectionFold(toggleCardFold(once, 3), 3, "0:Steps");
     expect(back).toEqual({ versions: 3, card: false, sections: [] });
-    expect(isAllOpen(back)).toBe(true);
-    expect(isAllOpen(once)).toBe(false);
   });
 });
 

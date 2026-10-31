@@ -1,53 +1,41 @@
-import { z } from "zod";
-
 import { Author } from "~/domain/actions";
 import { findVersionWriter } from "~/domain/board";
 import type { TBoard } from "~/domain/board";
 
 /**
- * What the user folded on a card, which the browser keeps and the server never sees: the card as a whole, which then
- * shows its first line, and its sections by key. The folds hold until the agent writes a version of the card.
+ * What the user folded on a card, which the page holds until it reloads and the server never sees: the card as a
+ * whole, which then shows its first line, and its sections by key. The folds hold until the agent writes a version of
+ * the card.
  */
-export const foldsSchema = z.object({
-  versions: z
-    .number()
-    .int()
-    .nonnegative()
-    .describe(
-      "The card's number of earlier versions when the user last folded or opened a part of it",
-    ),
-  card: z.boolean().describe("Whether the card shows its first line alone"),
-  sections: z
-    .array(z.string())
-    .describe("The keys of the sections that show their heading alone"),
-});
+export type TFolds = {
+  /** The card's number of earlier versions when the user last folded or opened a part of it. */
+  versions: number;
+  /** Whether the card shows its first line alone. */
+  card: boolean;
+  /** The keys of the sections that show their heading alone. */
+  sections: string[];
+};
 
-export type TFolds = z.infer<typeof foldsSchema>;
-
-/** The folds that still hold on the card: the kept ones, unless the agent wrote a version since; else all open. */
+/** The folds that still hold on the card: the user's last ones, unless the agent wrote a version since; else all open. */
 export const findHeldFolds = (
-  kept: TFolds | null,
+  last: TFolds | null,
   board: TBoard,
   id: string,
 ): TFolds => {
   const earlier = board.history[id] ?? [];
   const open = { versions: earlier.length, card: false, sections: [] };
   const card = board.cards[id];
-  if (kept === null || card === undefined || kept.versions > earlier.length)
+  if (last === null || card === undefined || last.versions > earlier.length)
     return open;
   const since = [...earlier.map((version) => version.card), card].slice(
-    kept.versions + 1,
+    last.versions + 1,
   );
   return since.some(
     (version) => findVersionWriter(version) === Author.enum.agent,
   )
     ? open
-    : kept;
+    : last;
 };
-
-/** Whether the folds fold nothing, which the browser need not keep. */
-export const isAllOpen = (folds: TFolds) =>
-  !folds.card && folds.sections.length === 0;
 
 /** The folds without the sections the card no longer has, whose headings the user or the agent changed. */
 export const pruneSectionFolds = (

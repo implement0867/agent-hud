@@ -285,7 +285,8 @@ type TCardFrameProps = {
  * edits the markdown. A card shorter than its text scrolls, with fades at its ends. Cards may cross after their first
  * place; a touch puts the card on top of the others. A card without a place is hidden until the page gives it one.
  * The triangle at the card's first line folds it to that line on the sunken ground, with its threads' bubbles; each
- * heading's triangle folds its section. The folds are the viewer's own, and the agent's next version opens the card.
+ * heading's triangle folds its section. The folds are the viewer's own until the page reloads, and the agent's next
+ * version opens the card.
  */
 export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   const { id, card, at, versions, layer } = view;

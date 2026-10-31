@@ -1,34 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { boardInUrl } from "~/data/boards";
 import { versionsOf } from "~/domain/board";
 import type { TBoard } from "~/domain/board";
 import {
   findHeldFolds,
-  foldsSchema,
-  isAllOpen,
   pruneSectionFolds,
   toggleCardFold,
   toggleSectionFold,
 } from "~/lib/folds";
 import type { TFolds } from "~/lib/folds";
-import { readKept, writeKept } from "~/lib/kept";
 import { listSectionKeys } from "~/lib/sections";
 
 /**
- * The folds of the card on this board, which the browser keeps, with toggles of the card and of a section; the agent's
- * next version of the card opens it. A toggle forgets the folds of sections the card no longer has.
+ * The folds of the card, with toggles of the card and of a section. The page holds them while it is open, as the card's
+ * frame stays mounted over the board's snapshots, and forgets them on a reload; the server never sees them. The agent's
+ * next version of the card opens it, and a toggle forgets the folds of sections the card no longer has.
  */
 export const useFolds = (id: string, md: string, board: TBoard) => {
-  const key = `agent-hud:folds:${boardInUrl() ?? ""}:${id}`;
-  const [kept, setKept] = useState(() => readKept(key, foldsSchema));
+  const [last, setLast] = useState<TFolds | null>(null);
   const folds = useMemo(
-    () => findHeldFolds(kept, board, id),
-    [kept, board, id],
+    () => findHeldFolds(last, board, id),
+    [last, board, id],
   );
-  useEffect(() => {
-    writeKept(key, kept === null || isAllOpen(kept) ? null : kept);
-  }, [key, kept]);
   /** The held folds of the card now, without those of sections it no longer has. */
   const findPrunedFolds = useCallback(
     (current: TFolds | null) =>
@@ -36,13 +29,13 @@ export const useFolds = (id: string, md: string, board: TBoard) => {
     [board, id, md],
   );
   const toggleCard = useCallback(() => {
-    setKept((current) =>
+    setLast((current) =>
       toggleCardFold(findPrunedFolds(current), versionsOf(board, id)),
     );
   }, [findPrunedFolds, board, id]);
   const toggleSection = useCallback(
     (section: string) => {
-      setKept((current) =>
+      setLast((current) =>
         toggleSectionFold(
           findPrunedFolds(current),
           versionsOf(board, id),
