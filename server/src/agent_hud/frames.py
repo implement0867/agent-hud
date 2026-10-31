@@ -20,7 +20,7 @@ class FrameHead(Model):
 
 def format_action_lines(turn: Turn) -> list[str]:
     """The lines of the turn after its head: one action each, as JSON with the action's fields."""
-    # A field that is none, such as the version of a note or the occurrence of a quote at one place, stays out.
+    # A field that is none, such as the version of a new card or the occurrence of a quote at one place, stays out.
     return [
         json.dumps(action.model_dump(mode="json", exclude_none=True), separators=(",", ":"), ensure_ascii=False)
         for action in turn.actions
