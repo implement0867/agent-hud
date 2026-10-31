@@ -1,5 +1,5 @@
 import { ChevronDown, Eraser } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useBoard, useStore } from "~/data/context";
 import { ActionKind } from "~/domain/actions";
@@ -84,6 +84,36 @@ export const BoardMenu = () => {
   const [boards, setBoards] = useState<TBoardList | "failed" | null>(null);
   const [clearing, setClearing] = useState(false);
   const current = boardInUrl() ?? "";
+  const menu = useRef<HTMLSpanElement>(null);
+  const listed = boards !== null;
+  useEffect(() => {
+    if (!listed) return;
+    const listening = new AbortController();
+    const { signal } = listening;
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        setBoards(null);
+      },
+      { capture: true, signal },
+    );
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (
+          !(event.target instanceof Node) ||
+          !menu.current?.contains(event.target)
+        )
+          setBoards(null);
+      },
+      { capture: true, signal },
+    );
+    return () => {
+      listening.abort();
+    };
+  }, [listed]);
   const open = async () => {
     try {
       setBoards(await fetchBoards());
@@ -92,7 +122,7 @@ export const BoardMenu = () => {
     }
   };
   return (
-    <span className="relative flex items-center">
+    <span ref={menu} className="relative flex items-center">
       <button
         type="button"
         aria-label="Boards"
@@ -124,6 +154,11 @@ export const BoardMenu = () => {
                   role="menuitem"
                   href={linkTo(board.name)}
                   aria-current={board.name === current ? "page" : undefined}
+                  onClick={(event) => {
+                    if (board.name !== current) return;
+                    event.preventDefault();
+                    setBoards(null);
+                  }}
                   className={`flex items-center gap-2 rounded-lg px-2 py-1 text-xs hover:bg-surface-sunken ${board.name === current ? "bg-accent-faint text-accent-strong" : "text-ink-soft"}`}
                 >
                   <span
