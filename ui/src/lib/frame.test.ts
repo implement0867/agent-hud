@@ -25,7 +25,6 @@ describe("findFrameStyle", () => {
       width: 300,
       height: 200,
       zIndex: 2,
-      visibility: "visible",
     });
   });
 
@@ -38,11 +37,5 @@ describe("findFrameStyle", () => {
     expect(
       findFrameStyle(FrameMode.enum.open, { ...box, width: null }),
     ).toMatchObject({ width: "max-content", maxWidth: columnWidth });
-  });
-
-  it("hides a card without a place", () => {
-    expect(
-      findFrameStyle(FrameMode.enum.open, { ...box, place: null }).visibility,
-    ).toBe("hidden");
   });
 });

@@ -20,7 +20,7 @@ export const findFrameMode = (
 };
 
 type TFrameBox = {
-  place: TPoint | null;
+  place: TPoint;
   width: number | null;
   height: number | null;
   layer: number;
@@ -39,20 +39,24 @@ const findFrameHeight = (mode: TFrameMode, height: number | null) => {
   }
 };
 
-/**
- * The frame's place and size on the board. A card without a width is as wide as its text, up to a column, and a card
- * without a place is hidden until the page gives it one.
- */
+/** The frame's place and size on the board. A card without a width is as wide as its text, up to a column. */
 export const findFrameStyle = (
   mode: TFrameMode,
   { place, width, height, layer }: TFrameBox,
 ): CSSProperties => ({
-  left: place?.x ?? 0,
-  top: place?.y ?? 0,
+  left: place.x,
+  top: place.y,
   width: width ?? "max-content",
   height: findFrameHeight(mode, height),
   minWidth: leastCardWidth,
   maxWidth: width === null ? columnWidth : "none",
   zIndex: layer,
-  visibility: place === null ? "hidden" : "visible",
 });
+
+/** The classes of the frame's body, which pads the card's content and scrolls it; a folded card has no padding below its first line. */
+export const findBodyClass = (mode: TFrameMode) =>
+  `relative min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-card py-[var(--pad-y)] pr-11 pl-[var(--pad)] [scrollbar-color:var(--ink-ghost)_transparent] [scrollbar-width:thin] ${mode === FrameMode.enum.folded ? "" : "pb-[var(--pad)]"}`;
+
+/** The classes around an open card's markdown; a card with earlier versions keeps its first line clear of the links to its changes. */
+export const findMarkdownClass = (versions: number) =>
+  `animate-pop ${versions > 0 ? "[&_.markdown>:first-child]:pr-36" : ""}`;

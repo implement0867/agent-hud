@@ -5,9 +5,14 @@ import {
   diffBoards,
   emptyLocal,
   modelOf,
+  placeArrivals,
 } from "~/data/boardModel";
+import type { TCardBox, TSurface } from "~/data/boardModel";
 import type { TBoard, TCard } from "~/domain/board";
 import type { TSnapshot } from "~/domain/events";
+import { viewMargin } from "~/lib/geometry";
+import type { TSize } from "~/lib/geometry";
+import { gap } from "~/lib/packing";
 
 const card: TCard = { md: "1. parse", author: "agent", edited: false };
 
@@ -170,6 +175,96 @@ describe("afterChange", () => {
   });
 });
 
+const edge = viewMargin;
+const area = { x: 0, y: 0, width: 1440, height: 900 };
+const short: TSize = { width: 256, height: 100 };
+
+/** A surface that shows the area, with the given cards laid out. */
+const surfaceOf = (laidOut: Record<string, TSize>): TSurface => ({
+  viewport: () => area,
+  sizes: () => new Map(Object.entries(laidOut)),
+});
+
+/** A measure that gives a card a line of height per line of markdown, and the width of a short card. */
+const measureByLines = (box: TCardBox): TSize => ({
+  width: short.width,
+  height: 20 * box.md.split("\n").length,
+});
+
+describe("placeArrivals", () => {
+  it("gives nothing when every card has a place, from the server, a drop, a drag or the page", () => {
+    const of = board({
+      cards: { a: card, b: card, c: card, d: card },
+      positions: { a: { x: 1, y: 1 } },
+    });
+    const local = {
+      ...emptyLocal,
+      dropped: { b: { x: 2, y: 2 } },
+      dragging: { id: "c", at: { x: 3, y: 3 } },
+      placed: { d: { x: 4, y: 4 } },
+    };
+    expect(placeArrivals(of, local, measureByLines, surfaceOf({}))).toEqual({});
+  });
+
+  it("packs a card without a place into the view, clear of the cards laid out", () => {
+    const of = board({
+      cards: { a: card, b: card },
+      positions: { a: { x: edge, y: edge } },
+    });
+    const placed = placeArrivals(
+      of,
+      emptyLocal,
+      measureByLines,
+      surfaceOf({ a: { width: 400, height: 100 } }),
+    );
+    expect(placed).toEqual({ b: { x: edge + 400 + gap, y: edge } });
+  });
+
+  it("measures a card that the page has not laid out, both the one it places and the ones it places around", () => {
+    const tall = { ...card, md: "1. a\n2. b\n3. c\n4. d\n5. e" };
+    const of = board({
+      cards: { a: tall, b: card, c: tall },
+      positions: { a: { x: edge, y: edge } },
+    });
+    const placed = placeArrivals(of, emptyLocal, measureByLines, surfaceOf({}));
+    expect(placed).toEqual({
+      b: { x: edge + short.width + gap, y: edge },
+      c: { x: edge + 2 * (short.width + gap), y: edge },
+    });
+    const below = board({ ...of, positions: {} });
+    const narrow: TSurface = {
+      viewport: () => ({ ...area, width: 2 * edge + short.width }),
+      sizes: () => new Map(),
+    };
+    expect(placeArrivals(below, emptyLocal, measureByLines, narrow)).toEqual({
+      a: { x: edge, y: edge },
+      b: { x: edge, y: edge + 100 + gap },
+      c: { x: edge, y: edge + 100 + gap + 20 + gap },
+    });
+  });
+
+  it("measures a card at the width and the height set on it, with its versions", () => {
+    const seen: TCardBox[] = [];
+    const of = board({
+      cards: { a: card },
+      sizes: { a: { width: 500, height: null } },
+      history: { a: [{ card, threads: {} }] },
+    });
+    placeArrivals(
+      of,
+      emptyLocal,
+      (box) => {
+        seen.push(box);
+        return short;
+      },
+      surfaceOf({}),
+    );
+    expect(seen).toEqual([
+      { md: card.md, width: 500, height: null, versions: 1 },
+    ]);
+  });
+});
+
 describe("modelOf", () => {
   it("shows a card at its drag, else its drop, else the server's place, else the page's", () => {
     const of = board({
@@ -190,9 +285,21 @@ describe("modelOf", () => {
     ]);
   });
 
+  it("refuses a card without a place, which the store gives each card before it publishes", () => {
+    expect(() =>
+      modelOf(snapshot(board({ cards: { a: card } })), emptyLocal),
+    ).toThrow("card a has a place");
+  });
+
   it("layers the touched cards over the others, the last touched on top", () => {
+    const at = { x: 0, y: 0 };
     const model = modelOf(
-      snapshot(board({ cards: { a: card, b: card, c: card } })),
+      snapshot(
+        board({
+          cards: { a: card, b: card, c: card },
+          positions: { a: at, b: at, c: at },
+        }),
+      ),
       {
         ...emptyLocal,
         touched: ["a", "gone"],
