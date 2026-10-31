@@ -1,18 +1,19 @@
-import { useContext } from "react";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ComponentType, ReactNode } from "react";
 import type { ExtraProps } from "react-markdown";
+import type { Element } from "hast";
 
-import { BoxToggleContext } from "~/components/markdown/contexts";
+import { useBoxToggle } from "~/components/markdown/contexts";
 import { textOf } from "~/domain/text";
 import { readBoxRange } from "~/lib/boxes";
-import type { TBoxRange } from "~/lib/boxes";
 import { invariant } from "~/lib/invariant";
+import { hasProperty } from "~/lib/properties";
 
-type TBoxProps = { checked: boolean; range: TBoxRange | null };
+type TBoxProps = { checked: boolean; node: Element };
 
-/** A box of the markdown as a checkbox; a click flips it in the markdown, which the agent gets as an edit. */
-const Box = ({ checked, range }: TBoxProps) => {
-  const toggle = useContext(BoxToggleContext);
+/** An open card's box as a checkbox; a click flips it in the markdown, which the agent gets as an edit. */
+const FlipBox = ({ checked, node }: TBoxProps) => {
+  const toggle = useBoxToggle();
+  const range = readBoxRange(node);
   return (
     <input
       type="checkbox"
@@ -33,24 +34,36 @@ const Box = ({ checked, range }: TBoxProps) => {
   );
 };
 
-/** The box of a task item. */
-export const TaskBox = ({
-  node,
-  checked,
-}: ComponentProps<"input"> & ExtraProps) => {
-  invariant(node !== undefined, "react-markdown passes each element's node");
-  return <Box checked={checked === true} range={readBoxRange(node)} />;
-};
+/** An earlier version's box, which shows its state and does not flip. */
+const InertBox = ({ checked }: TBoxProps) => (
+  <input
+    type="checkbox"
+    aria-label="Done"
+    checked={checked}
+    disabled
+    onPointerDown={(event) => {
+      event.stopPropagation();
+    }}
+    onClick={(event) => {
+      event.stopPropagation();
+    }}
+  />
+);
 
-/** A cell of a box alone shows a checkbox, and an empty cell a dash. */
-export const Cell = ({ node, children }: ComponentProps<"td"> & ExtraProps) => {
+type TBoxCellProps = ComponentProps<"td"> &
+  ExtraProps & {
+    Box: ComponentType<TBoxProps>;
+  };
+
+/** A cell of a box alone shows the box as a checkbox, and an empty cell a dash. */
+const BoxCell = ({ node, children, Box }: TBoxCellProps): ReactNode => {
   invariant(node !== undefined, "react-markdown passes each element's node");
-  if (node.properties["dataBox"] !== undefined)
+  if (hasProperty(node, "dataBox"))
     return (
       <td className="w-6">
         <Box
           checked={/x/i.test(node.children.map(textOf).join(""))}
-          range={readBoxRange(node)}
+          node={node}
         />
       </td>
     );
@@ -67,13 +80,41 @@ export const Cell = ({ node, children }: ComponentProps<"td"> & ExtraProps) => {
   );
 };
 
+/** The box of an open card's task item. */
+export const TaskBox = ({
+  node,
+  checked,
+}: ComponentProps<"input"> & ExtraProps) => {
+  invariant(node !== undefined, "react-markdown passes each element's node");
+  return <FlipBox checked={checked === true} node={node} />;
+};
+
+/** The box of an earlier version's task item. */
+export const VersionTaskBox = ({
+  node,
+  checked,
+}: ComponentProps<"input"> & ExtraProps) => {
+  invariant(node !== undefined, "react-markdown passes each element's node");
+  return <InertBox checked={checked === true} node={node} />;
+};
+
+/** A cell of an open card's table. */
+export const Cell = (props: ComponentProps<"td"> & ExtraProps) => (
+  <BoxCell {...props} Box={FlipBox} />
+);
+
+/** A cell of an earlier version's table. */
+export const VersionCell = (props: ComponentProps<"td"> & ExtraProps) => (
+  <BoxCell {...props} Box={InertBox} />
+);
+
 /** A header cell over a column of boxes has no title. */
 export const HeaderCell = ({
   node,
   children,
 }: ComponentProps<"th"> & ExtraProps) => {
   invariant(node !== undefined, "react-markdown passes each element's node");
-  return node.properties["dataBox"] !== undefined ? (
+  return hasProperty(node, "dataBox") ? (
     <th className="w-6" />
   ) : (
     <th>{children}</th>

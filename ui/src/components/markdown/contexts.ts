@@ -1,17 +1,25 @@
-import { createContext } from "react";
+import { createContext, useContext } from "react";
 
 import type { TCardFolds } from "~/lib/folds";
+import { invariant } from "~/lib/invariant";
 
 /** Flips the box whose markdown runs from start to end. */
 export type TToggleBox = (start: number, end: number) => void;
 
-/** The open card's flip of its boxes; an earlier version's boxes have no range, so nothing flips them. */
-export const BoxToggleContext = createContext<TToggleBox>(() => undefined);
+export const BoxToggleContext = createContext<TToggleBox | null>(null);
 
-/** The open card's folds; an earlier version has no sections, so no heading or section reads them. */
-export const FoldContext = createContext<TCardFolds>({
-  label: "",
-  toggleCard: () => undefined,
-  sections: [],
-  toggleSection: () => undefined,
-});
+/** The open card's flip of its boxes. */
+export const useBoxToggle = (): TToggleBox => {
+  const toggle = useContext(BoxToggleContext);
+  invariant(toggle !== null, "an open card's boxes render inside CardBody");
+  return toggle;
+};
+
+export const FoldContext = createContext<TCardFolds | null>(null);
+
+/** The open card's folds, for its headings and sections. */
+export const useCardFolds = (): TCardFolds => {
+  const folds = useContext(FoldContext);
+  invariant(folds !== null, "an open card's sections render inside CardBody");
+  return folds;
+};

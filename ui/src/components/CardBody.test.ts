@@ -44,19 +44,33 @@ describe("CardBody", () => {
     expect(html).toContain('aria-label="Fold the section Steps"');
   });
 
+  it("renders a footnote's section and a nested heading, which have no fold", () => {
+    const html = renderCard("Text.[^1]\n\n> ### Aside\n\n[^1]: A note.", []);
+    expect(html).toContain("data-footnotes");
+    expect(html).not.toContain('aria-label="Fold the section Aside"');
+  });
+
   it("lets a click flip a box", () => {
     expect(renderCard("- [ ] Do it", [])).not.toContain("disabled");
   });
 });
 
 describe("VersionBody", () => {
-  it("shows no triangles on an earlier version", () => {
+  it("shows no triangles on an earlier version, whose sections stay open", () => {
     const html = renderToStaticMarkup(
       createElement(VersionBody, {
         md: "Lead.\n\n## Steps\n\nDo it.",
       }),
     );
+    expect(html).toContain('<section data-section="0:Steps">');
     expect(html).not.toContain("<button");
+  });
+
+  it("shows an earlier version's task boxes, which do not flip", () => {
+    const html = renderToStaticMarkup(
+      createElement(VersionBody, { md: "- [x] Done" }),
+    );
+    expect(html).toContain('disabled="" checked=""');
   });
 
   it("shows an earlier version's boxes, which do not flip", () => {

@@ -10,6 +10,15 @@ export const FrameMode = z.enum(["open", "folded", "editing"]);
 
 export type TFrameMode = z.infer<typeof FrameMode>;
 
+/** The frame's mode: the editor while it is open on the card, over the card's fold. */
+export const findFrameMode = (
+  editing: boolean,
+  folded: boolean,
+): TFrameMode => {
+  if (editing) return FrameMode.enum.editing;
+  return folded ? FrameMode.enum.folded : FrameMode.enum.open;
+};
+
 type TFrameBox = {
   place: TPoint | null;
   width: number | null;

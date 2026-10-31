@@ -1,7 +1,7 @@
 import type { Element, Root } from "hast";
 
 import { textOf, treeOf } from "~/domain/text";
-import { readTextProperty } from "~/lib/properties";
+import { hasProperty, readTextProperty } from "~/lib/properties";
 
 /** The level of a heading's tag, h1 to h6, or null for a tag that is no heading. */
 const findHeadingLevel = (tagName: string): number | null => {
@@ -72,8 +72,8 @@ export const listSectionKeys = (md: string): string[] => {
   const visit = (node: Root | Element) => {
     for (const child of node.children) {
       if (child.type !== "element" || child.tagName !== "section") continue;
-      const key = readTextProperty(child, "dataSection");
-      if (key !== undefined) keys.push(key);
+      if (hasProperty(child, "dataSection"))
+        keys.push(readTextProperty(child, "dataSection"));
       visit(child);
     }
   };

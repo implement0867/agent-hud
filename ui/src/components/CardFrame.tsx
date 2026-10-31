@@ -14,7 +14,7 @@ import { useFolds } from "~/hooks/useFolds";
 import { usePointerDrag } from "~/hooks/usePointerDrag";
 import { useScrollEnds } from "~/hooks/useScrollEnds";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
-import { FrameMode, findFrameStyle } from "~/lib/frame";
+import { FrameMode, findFrameMode, findFrameStyle } from "~/lib/frame";
 import type { TRect } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
 
@@ -114,12 +114,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     },
   });
   const editor = editing?.card === id ? editing : null;
-  const mode =
-    editor !== null
-      ? FrameMode.enum.editing
-      : folded
-        ? FrameMode.enum.folded
-        : FrameMode.enum.open;
+  const mode = findFrameMode(editor !== null, folded);
   const save = async (md: string, over: boolean) => {
     invariant(editor !== null, "the editor saves while it is open");
     const version = over ? {} : { version: editor.versions };
