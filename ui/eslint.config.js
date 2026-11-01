@@ -43,7 +43,7 @@ export default tseslint.config(
           // The variables that hold class strings, so that their classes are checked as a className's are.
           {
             kind: "variable",
-            name: "^(?:\\w*Tones?|\\w*Shape|variants|place|ring|belowAnchor|agentDots|sizes|tones|weights)$",
+            name: "^(?:\\w*Tones?|\\w*Shape|variants|place|ring|belowAnchor|agentDots|sizes|tones|weights|directions|gaps|aligns|justifies)$",
             match: [
               { type: "strings" },
               { type: "objectValues" },

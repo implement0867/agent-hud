@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { TextButton } from "~/components/TextButton";
+import { Row } from "~/components/primitives/Flex";
 import { keeps } from "~/domain/text";
 import { mod } from "~/lib/keys";
 
@@ -164,11 +165,11 @@ export const MarkdownEditor = ({
         {asking === "discard" ? (
           <span>esc again discards your changes</span>
         ) : (
-          <span className="flex items-center gap-0.5">
+          <Row as="span" align="center" gap={0.5}>
             <kbd className="kbd">{mod}</kbd>
             <kbd className="kbd">↵</kbd>
             <span className="ml-1">save</span>
-          </span>
+          </Row>
         )}
       </footer>
     </div>

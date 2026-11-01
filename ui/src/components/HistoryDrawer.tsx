@@ -9,6 +9,7 @@ import { earlierVersions } from "~/domain/board";
 import type { TThread } from "~/domain/board";
 import { short } from "~/domain/text";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
+import { Row } from "~/components/primitives/Flex";
 import { Text } from "~/components/primitives/Text";
 
 type TThreadsProps = { threads: Record<string, TThread> };
@@ -103,7 +104,7 @@ export const HistoryDrawer = ({
                   {id} · v{number}
                 </span>
                 {removed ? (
-                  <span className="flex gap-2">
+                  <Row as="span" gap={2}>
                     removed
                     <TextButton
                       variant="link"
@@ -114,7 +115,7 @@ export const HistoryDrawer = ({
                     >
                       Restore
                     </TextButton>
-                  </span>
+                  </Row>
                 ) : (
                   <span>replaced</span>
                 )}

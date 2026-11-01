@@ -7,6 +7,7 @@ import { ActionKind } from "~/domain/actions";
 import { boardInUrl, fetchBoards, linkTo } from "~/data/boards";
 import type { TBoardList } from "~/domain/events";
 import { agentDots } from "~/theme";
+import { Row } from "~/components/primitives/Flex";
 import { Text } from "~/components/primitives/Text";
 
 const count = (n: number, one: string) =>
@@ -50,7 +51,7 @@ const ClearDialog = ({ id, board, dialog }: TClearDialogProps) => {
         {cards === 1 ? "its" : "their"} feedback. {count(arrows, "arrow")} and{" "}
         {count(messages, "message")} go for good.
       </p>
-      <div className="flex justify-end gap-2">
+      <Row justify="end" gap={2}>
         <button
           type="button"
           popoverTarget={id}
@@ -70,7 +71,7 @@ const ClearDialog = ({ id, board, dialog }: TClearDialogProps) => {
         >
           Clear the board
         </button>
-      </div>
+      </Row>
     </div>
   );
 };
@@ -96,7 +97,7 @@ export const BoardMenu = () => {
     }
   };
   return (
-    <span className="flex items-center">
+    <Row as="span" align="center">
       <button
         type="button"
         aria-label="Boards"
@@ -178,6 +179,6 @@ export const BoardMenu = () => {
         </li>
       </ul>
       <ClearDialog id={clearId} board={current} dialog={dialog} />
-    </span>
+    </Row>
   );
 };

@@ -15,6 +15,7 @@ import { ActionKind, Author, messageSchema } from "~/domain/actions";
 import { groupPending } from "~/domain/pending";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
 import { mod } from "~/lib/keys";
+import { Row } from "~/components/primitives/Flex";
 import { Text } from "~/components/primitives/Text";
 
 const widthKey = "agent-hud:chat-width";
@@ -211,7 +212,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
             }
           }}
         />
-        <span className="flex items-stretch">
+        <Row as="span">
           <button
             type="button"
             aria-label="Send to the agent"
@@ -249,7 +250,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
               />
             </button>
           )}
-        </span>
+        </Row>
       </div>
     </div>
   );
