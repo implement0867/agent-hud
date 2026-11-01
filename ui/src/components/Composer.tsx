@@ -29,7 +29,7 @@ export const Composer = ({ label, id, send, draft }: TComposerProps) => {
       placeholder={label}
       id={id}
       title="Enter posts the comment; Send, in the chat, sends it"
-      className="field-sizing-content max-h-32 min-h-6 w-full resize-none rounded-[0.75rem] bg-surface-sunken px-2 py-1 text-[0.75rem] leading-4 text-ink outline-none placeholder:text-ink-ghost focus:ring-2 focus:ring-accent-ring"
+      className="field-sizing-content max-h-32 min-h-6 w-full resize-none rounded-xl bg-surface-sunken px-2 py-1 text-xs/4 text-ink outline-none placeholder:text-ink-ghost focus:ring-2 focus:ring-accent-ring"
       value={draft.text}
       readOnly={sending}
       onChange={(event) => {

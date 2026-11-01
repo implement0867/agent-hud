@@ -164,7 +164,7 @@ export const Canvas = ({
     >
       <div
         ref={world}
-        className={`pointer-events-none absolute top-0 left-0 origin-top-left transition-[opacity,filter] ${space ? "[&_*]:pointer-events-none!" : ""} ${dimmed ? "opacity-60 grayscale" : ""}`}
+        className={`pointer-events-none absolute top-0 left-0 origin-top-left transition-[opacity,filter] ${space ? "**:pointer-events-none!" : ""} ${dimmed ? "opacity-60 grayscale" : ""}`}
         style={{
           transform: `translate(${String(view.x)}px, ${String(view.y)}px) scale(${String(view.scale)})`,
         }}

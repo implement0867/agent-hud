@@ -155,7 +155,7 @@ const DraftCard = ({ at, close }: TDraftCardProps) => {
   };
   return (
     <div
-      className="card pointer-events-auto absolute w-96 animate-pop px-[var(--pad)] py-[var(--pad-y)] shadow-[var(--shadow-card),0_0_0_2px_var(--accent-ring)]"
+      className="card pointer-events-auto absolute w-96 animate-pop px-(--pad) py-(--pad-y) shadow-[var(--shadow-card),0_0_0_2px_var(--accent-ring)]"
       style={{ left: at.x, top: at.y }}
     >
       <MarkdownEditor

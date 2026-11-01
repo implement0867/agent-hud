@@ -157,7 +157,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     >
       <div
         ref={body}
-        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-card py-[var(--pad-y)] pr-11 pl-[var(--pad)] [scrollbar-color:var(--ink-ghost)_transparent] [scrollbar-width:thin] ${mode === FrameMode.enum.folded ? "" : "pb-[var(--pad)]"}`}
+        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-card py-(--pad-y) pr-11 pl-(--pad) [scrollbar-color:var(--ink-ghost)_transparent] scrollbar-thin ${mode === FrameMode.enum.folded ? "" : "pb-(--pad)"}`}
         onScroll={measureEnds}
         onPointerEnter={measureEnds}
       >

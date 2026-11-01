@@ -72,7 +72,7 @@ export const ThreadPopover = ({
       ref={measure}
       aria-label={`Thread on “${anchor.quote === "" ? anchor.card : anchor.quote}”`}
       style={{ maxHeight }}
-      className="pointer-events-auto flex w-[13.75rem] animate-pop flex-col gap-1.5 rounded-[10px] bg-surface px-2.5 py-2 text-[0.75rem] leading-4 text-ink-soft shadow-[var(--shadow-pop),0_0_0_1px_var(--edge)] select-text"
+      className="pointer-events-auto flex w-55 animate-pop flex-col gap-1.5 rounded-[10px] bg-surface px-2.5 py-2 text-xs/4 text-ink-soft shadow-[var(--shadow-pop),0_0_0_1px_var(--edge)] select-text"
       onPointerDown={(event) => {
         event.stopPropagation();
       }}

@@ -57,7 +57,7 @@ export const ShortcutSheet = ({ close }: TShortcutSheetProps) => (
   <section
     role="dialog"
     aria-label="Shortcuts"
-    className="panel pointer-events-auto absolute top-16 left-1/2 max-h-[80%] w-[26rem] max-w-[calc(100%-2rem)] -translate-x-1/2 animate-pop overflow-y-auto p-4"
+    className="panel pointer-events-auto absolute top-16 left-1/2 max-h-[80%] w-104 max-w-[calc(100%-2rem)] -translate-x-1/2 animate-pop overflow-y-auto p-4"
   >
     <header className="mb-3 flex items-center justify-between">
       <h2 className="text-sm font-semibold text-ink">Shortcuts</h2>

@@ -66,7 +66,7 @@ const PendingList = ({ close }: TPendingListProps) => {
   useEffect(measure, [model.pending]);
   const count = model.pending.length;
   return (
-    <div className="panel absolute right-0 bottom-full left-0 mb-2 overflow-hidden text-xs text-ink-soft">
+    <div className="panel absolute inset-x-0 bottom-full mb-2 overflow-hidden text-xs text-ink-soft">
       <p className="border-b border-divider px-3 py-2 font-medium text-ink-muted">
         Send carries {count} {count === 1 ? "change" : "changes"}
       </p>
@@ -112,7 +112,7 @@ const PendingList = ({ close }: TPendingListProps) => {
       {more ? (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-linear-to-t from-surface to-transparent"
         />
       ) : null}
     </div>
@@ -360,7 +360,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
             type="button"
             aria-label="Collapse the chat"
             title="Collapse the chat to a button"
-            className="rounded px-1 hover:bg-surface-sunken"
+            className="rounded-sm px-1 hover:bg-surface-sunken"
             onClick={collapse}
           >
             Chat
@@ -373,7 +373,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
           </IconButton>
         </span>
       </header>
-      <ul className="flex min-h-24 flex-col-reverse gap-2 overflow-y-auto px-3 py-3">
+      <ul className="flex min-h-24 flex-col-reverse gap-2 overflow-y-auto p-3">
         {model.board.messages.toReversed().map((said) => (
           <Bubble key={said.id} said={said} />
         ))}
