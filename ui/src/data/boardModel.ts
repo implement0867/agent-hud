@@ -216,11 +216,24 @@ const boxOf = (board: TBoard, id: string): TCardBox => {
   };
 };
 
+const sameSize = (
+  a: TBoard["sizes"][string] | undefined,
+  b: TBoard["sizes"][string] | undefined,
+) => a?.width === b?.width && a?.height === b?.height;
+
+/** Whether the card shows as the page laid it out: the same markdown and the same size set as on the board before. */
+const isLaidOut = (before: TBoard | null, board: TBoard, id: string) =>
+  before !== null &&
+  before.cards[id]?.md === board.cards[id]?.md &&
+  sameSize(before.sizes[id], board.sizes[id]);
+
 /**
  * A place for each card of the board that has none, in the board's order: each is packed into the view among the
- * cards that have a place, at the sizes the page has laid them out at, or that the measure gives them.
+ * cards that have a place, at the sizes the page has laid them out at, where the card is still as laid out, or that
+ * the measure gives them.
  */
 export const placeArrivals = (
+  before: TBoard | null,
   board: TBoard,
   local: TLocal,
   measure: TMeasure,
@@ -232,7 +245,12 @@ export const placeArrivals = (
   );
   if (arrivals.length === 0) return {};
   const laidOut = surface.sizes();
-  const sizeOf = (id: string) => laidOut.get(id) ?? measure(boxOf(board, id));
+  const sizeOf = (id: string) => {
+    const size = laidOut.get(id);
+    return size !== undefined && isLaidOut(before, board, id)
+      ? size
+      : measure(boxOf(board, id));
+  };
   const taken = ids.flatMap((id) => {
     const at = findPlace(board, local, id);
     return at === undefined ? [] : [{ ...at, ...sizeOf(id) }];

@@ -8,9 +8,9 @@ import {
   placeArrivals,
 } from "~/data/boardModel";
 import type { TCardBox, TSurface } from "~/data/boardModel";
-import type { TBoard, TCard } from "~/domain/board";
+import type { TBoard, TCard, TPoint } from "~/domain/board";
 import type { TSnapshot } from "~/domain/events";
-import { viewMargin } from "~/lib/geometry";
+import { overlap, viewMargin } from "~/lib/geometry";
 import type { TSize } from "~/lib/geometry";
 import { gap } from "~/lib/packing";
 
@@ -203,7 +203,9 @@ describe("placeArrivals", () => {
       dragging: { id: "c", at: { x: 3, y: 3 } },
       placed: { d: { x: 4, y: 4 } },
     };
-    expect(placeArrivals(of, local, measureByLines, surfaceOf({}))).toEqual({});
+    expect(
+      placeArrivals(null, of, local, measureByLines, surfaceOf({})),
+    ).toEqual({});
   });
 
   it("packs a card without a place into the view, clear of the cards laid out", () => {
@@ -212,6 +214,7 @@ describe("placeArrivals", () => {
       positions: { a: { x: edge, y: edge } },
     });
     const placed = placeArrivals(
+      of,
       of,
       emptyLocal,
       measureByLines,
@@ -226,7 +229,13 @@ describe("placeArrivals", () => {
       cards: { a: tall, b: card, c: tall },
       positions: { a: { x: edge, y: edge } },
     });
-    const placed = placeArrivals(of, emptyLocal, measureByLines, surfaceOf({}));
+    const placed = placeArrivals(
+      null,
+      of,
+      emptyLocal,
+      measureByLines,
+      surfaceOf({}),
+    );
     expect(placed).toEqual({
       b: { x: edge + short.width + gap, y: edge },
       c: { x: edge + 2 * (short.width + gap), y: edge },
@@ -236,7 +245,9 @@ describe("placeArrivals", () => {
       viewport: () => ({ ...area, width: 2 * edge + short.width }),
       sizes: () => new Map(),
     };
-    expect(placeArrivals(below, emptyLocal, measureByLines, narrow)).toEqual({
+    expect(
+      placeArrivals(null, below, emptyLocal, measureByLines, narrow),
+    ).toEqual({
       a: { x: edge, y: edge },
       b: { x: edge, y: edge + 100 + gap },
       c: { x: edge, y: edge + 100 + gap + 20 + gap },
@@ -251,6 +262,7 @@ describe("placeArrivals", () => {
       history: { a: [{ card, threads: {} }] },
     });
     placeArrivals(
+      null,
       of,
       emptyLocal,
       (box) => {
@@ -334,3 +346,115 @@ describe("afterChange of changes", () => {
     expect(next.changed).toEqual({ a: "1. one" });
   });
 });
+
+describe("placeArrivals under attack", () => {
+  it("packs around the card the user drags at its drag point, not at the server's place for it", () => {
+    const of = board({
+      cards: { a: card, b: card },
+      positions: { a: { x: edge, y: edge } },
+    });
+    const dragTo = { x: edge + short.width + gap, y: edge };
+    const placed = placeArrivals(
+      of,
+      of,
+      { ...emptyLocal, dragging: { id: "a", at: dragTo } },
+      measureByLines,
+      surfaceOf({ a: short }),
+    );
+    expect(placed).toEqual({ b: { x: edge, y: edge } });
+  });
+
+  it("packs around a card where the user dropped it before the server has it there", () => {
+    const of = board({
+      cards: { a: card, b: card },
+      positions: { a: { x: 2000, y: 2000 } },
+    });
+    const placed = placeArrivals(
+      of,
+      of,
+      { ...emptyLocal, dropped: { a: { x: edge, y: edge } } },
+      measureByLines,
+      surfaceOf({ a: short }),
+    );
+    expect(placed).toEqual({ b: { x: edge + short.width + gap, y: edge } });
+  });
+
+  it("measures a card that lost its place by its markdown now, not by the size the page laid its old version out at", () => {
+    const tall = {
+      ...card,
+      md: Array.from({ length: 25 }, () => "line").join("\n"),
+    };
+    const beside = {
+      x: edge + short.width + gap,
+      y: edge + short.height + gap,
+    };
+    const of = board({
+      cards: { a: card, b: tall, c: card },
+      positions: { a: { x: edge, y: edge }, c: beside },
+    });
+    const placed = placeArrivals(
+      board({ ...of, cards: { a: card, b: card, c: card } }),
+      of,
+      emptyLocal,
+      measureByLines,
+      surfaceOf({ a: short, b: short, c: short }),
+    );
+    const rectOfB = {
+      ...placeOf(placed, "b"),
+      ...measureByLines(boxOfMd(tall.md)),
+    };
+    expect(overlap(rectOfB, { ...beside, ...short })).toBe(false);
+  });
+
+  it("packs into a view zoomed out and panned to negative float coordinates", () => {
+    const of = board({ cards: { a: card } });
+    const far: TSurface = {
+      viewport: () => ({ x: -1234.5, y: -987.25, width: 2880, height: 1800 }),
+      sizes: () => new Map(),
+    };
+    expect(placeArrivals(null, of, emptyLocal, measureByLines, far)).toEqual({
+      a: { x: -1234.5 + edge, y: -987.25 + edge },
+    });
+  });
+
+  it("places every card of a board that has none in the board's order, each clear of the ones before", () => {
+    const ids = Array.from({ length: 12 }, (_, n) => `c${String(n)}`);
+    const of = board({
+      cards: Object.fromEntries(
+        ids.map((id, n) => [
+          id,
+          { ...card, md: Array.from({ length: n + 1 }, () => "x").join("\n") },
+        ]),
+      ),
+    });
+    const placed = placeArrivals(
+      null,
+      of,
+      emptyLocal,
+      measureByLines,
+      surfaceOf({}),
+    );
+    const rects = ids.map((id) => ({
+      ...placeOf(placed, id),
+      ...measureByLines(boxOfMd(of.cards[id]?.md ?? "")),
+    }));
+    const crossing = rects.flatMap((a, i) =>
+      rects.slice(i + 1).filter((b) => overlap(a, b)),
+    );
+    expect(Object.keys(placed)).toEqual(ids);
+    expect(crossing).toEqual([]);
+  });
+});
+
+const boxOfMd = (md: string): TCardBox => ({
+  md,
+  width: null,
+  height: null,
+  versions: 0,
+});
+
+const placeOf = (placed: Record<string, TPoint>, id: string): TPoint => {
+  const at = placed[id];
+  if (at === undefined) throw new Error(`no place for ${id}`);
+  return at;
+};

@@ -117,7 +117,13 @@ export const createBoardStore = (
         diffBoards(snapshot.board, next.board),
         next.board,
       );
-    const arrivals = placeArrivals(next.board, local, measure, shown);
+    const arrivals = placeArrivals(
+      snapshot?.board ?? null,
+      next.board,
+      local,
+      measure,
+      shown,
+    );
     local = { ...local, placed: { ...local.placed, ...arrivals } };
     snapshot = next;
     live = true;
@@ -147,6 +153,20 @@ export const createBoardStore = (
     return taken;
   };
 
+  const forgetDrop = (id: string) => {
+    update(({ dropped: { [id]: _refused, ...rest }, ...current }) => ({
+      ...current,
+      dropped: rest,
+    }));
+  };
+
+  /** Moves the card where it shows dropped, and forgets the drop when the server refuses. */
+  const move = (id: string, at: TPoint) => {
+    void act({ kind: ActionKind.enum.move, id, ...at }).then((taken) => {
+      if (!taken) forgetDrop(id);
+    });
+  };
+
   /** Brings the card onto the board with the body, showing it at the point meanwhile, then moves it there. */
   const bring = async (id: string, at: TPoint, body: TBody) => {
     update((current) => ({
@@ -154,12 +174,8 @@ export const createBoardStore = (
       dropped: { ...current.dropped, [id]: at },
     }));
     const taken = await act(body);
-    if (taken) void act({ kind: ActionKind.enum.move, id, ...at });
-    else
-      update(({ dropped: { [id]: _refused, ...rest }, ...current }) => ({
-        ...current,
-        dropped: rest,
-      }));
+    if (taken) move(id, at);
+    else forgetDrop(id);
     return taken;
   };
 
@@ -220,13 +236,7 @@ export const createBoardStore = (
         dragging: null,
         dropped: { ...current.dropped, [id]: at },
       }));
-      void act({ kind: ActionKind.enum.move, id, ...at }).then((taken) => {
-        if (taken) return;
-        update(({ dropped: { [id]: _refused, ...rest }, ...current }) => ({
-          ...current,
-          dropped: rest,
-        }));
-      });
+      move(id, at);
     },
     create: (id, md, at) =>
       bring(id, at, { kind: ActionKind.enum.put, id, md }),
