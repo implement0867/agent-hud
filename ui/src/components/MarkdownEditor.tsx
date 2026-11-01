@@ -11,7 +11,7 @@ type TAlertProps = { children: ReactNode; actions: ReactNode };
 const Alert = ({ children, actions }: TAlertProps) => (
   <div
     role="alert"
-    className="mt-2 rounded-lg bg-warning-faint px-2.5 py-1.5 text-[0.6875rem] text-warning-strong"
+    className="mt-2 rounded-lg bg-warning-faint px-2.5 py-1.5 text-sm text-warning-strong"
   >
     {children}
     <span className="mt-1 flex gap-3">{actions}</span>
@@ -73,7 +73,7 @@ export const MarkdownEditor = ({
         aria-describedby="editor-keys"
         autoFocus
         spellCheck={false}
-        className="field-sizing-content block min-h-24 w-full resize-none bg-transparent font-mono text-[0.8125rem] leading-relaxed whitespace-pre-wrap text-ink outline-none placeholder:text-ink-ghost"
+        className="field-sizing-content block min-h-24 w-full resize-none bg-transparent font-mono text-lg/relaxed  whitespace-pre-wrap text-ink outline-none placeholder:text-ink-ghost"
         value={text}
         onChange={(event) => {
           setText(event.target.value);
@@ -159,7 +159,7 @@ export const MarkdownEditor = ({
       ) : null}
       <footer
         id="editor-keys"
-        className="mt-2 flex items-center justify-end gap-2.5 text-[0.6875rem]/4 text-ink-faint"
+        className="mt-2 flex items-center justify-end gap-2.5 text-sm/4 text-ink-faint"
       >
         {asking === "discard" ? (
           <span>esc again discards your changes</span>

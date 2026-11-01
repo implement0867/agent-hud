@@ -7,6 +7,7 @@ import { ActionKind } from "~/domain/actions";
 import { boardInUrl, fetchBoards, linkTo } from "~/data/boards";
 import type { TBoardList } from "~/domain/events";
 import { agentDots } from "~/theme";
+import { Text } from "~/components/primitives/Text";
 
 const count = (n: number, one: string) =>
   `${String(n)} ${n === 1 ? one : `${one}s`}`;
@@ -14,7 +15,7 @@ const count = (n: number, one: string) =>
 const belowAnchor =
   "panel inset-auto m-0 mt-2 border-0 [position-anchor:--board-menu] top-[anchor(bottom)] left-[anchor(left)]";
 
-const rowTone = "flex items-center gap-2 rounded-lg px-2 py-1 text-xs";
+const rowTone = "flex items-center gap-2 rounded-lg px-2 py-1 text-md";
 
 type TClearDialogProps = {
   id: string;
@@ -39,11 +40,11 @@ const ClearDialog = ({ id, board, dialog }: TClearDialogProps) => {
       popover="auto"
       role="dialog"
       aria-label="Clear this board?"
-      className={`${belowAnchor} w-80 flex-col gap-3 p-4 text-sm text-ink-soft open:flex`}
+      className={`${belowAnchor} w-80 flex-col gap-3 p-4 text-xl text-ink-soft open:flex`}
     >
-      <p className="font-semibold text-ink">
-        Clear <span className="font-mono">{board}</span>?
-      </p>
+      <Text as="p" tone="ink" weight={600}>
+        Clear <Text mono>{board}</Text>?
+      </Text>
       <p>
         {count(cards, "card")} {cards === 1 ? "goes" : "go"} to the history with{" "}
         {cards === 1 ? "its" : "their"} feedback. {count(arrows, "arrow")} and{" "}
@@ -101,7 +102,7 @@ export const BoardMenu = () => {
         aria-label="Boards"
         popoverTarget={menuId}
         title="The board this page shows; click for the other boards"
-        className="flex items-center gap-0.5 rounded-full px-1.5 font-mono text-xs text-ink-soft [anchor-name:--board-menu] hover:bg-surface-sunken"
+        className="flex items-center gap-0.5 rounded-full px-1.5 font-mono text-md text-ink-soft [anchor-name:--board-menu] hover:bg-surface-sunken"
       >
         {current}
         <ChevronDown className="size-3" />
@@ -118,7 +119,7 @@ export const BoardMenu = () => {
         }}
       >
         {boards === "failed" ? (
-          <li className="px-2 py-1 text-xs text-ink-muted">
+          <li className="px-2 py-1 text-md text-ink-muted">
             The boards could not be listed.
           </li>
         ) : (
@@ -128,7 +129,9 @@ export const BoardMenu = () => {
                 <span
                   className={`size-2 rounded-full ${agentDots[board.agent]}`}
                 />
-                <span className="truncate font-mono">{board.name}</span>
+                <Text mono truncate>
+                  {board.name}
+                </Text>
                 <span className="ml-auto text-ink-faint">
                   {board.card_count} {board.card_count === 1 ? "card" : "cards"}
                 </span>
@@ -163,7 +166,7 @@ export const BoardMenu = () => {
             type="button"
             role="menuitem"
             disabled={model.cards.length === 0}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-ink-soft enabled:hover:bg-danger-faint enabled:hover:text-danger-strong disabled:text-ink-ghost"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-md text-ink-soft enabled:hover:bg-danger-faint enabled:hover:text-danger-strong disabled:text-ink-ghost"
             onClick={() => {
               menu.current?.hidePopover();
               dialog.current?.showPopover();

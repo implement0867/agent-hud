@@ -124,7 +124,7 @@ export const Toolbar = ({
       onClick={reset}
     >
       <RotateCcw className={`size-3.5 ${atHome ? "invisible" : ""}`} />
-      <span className="text-xs tabular-nums">{Math.round(scale * 100)}%</span>
+      <span className="text-md tabular-nums">{Math.round(scale * 100)}%</span>
     </IconButton>
     <IconButton
       variant="tool"

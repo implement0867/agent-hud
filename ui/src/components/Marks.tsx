@@ -54,7 +54,7 @@ const BubbleMark = ({ id, thread, unread, unsent, at }: TBubbleMarkProps) => {
             y="10.2"
             textAnchor="middle"
             dominantBaseline="central"
-            className="fill-on-accent font-sans text-[11px] font-semibold"
+            className="fill-on-accent font-sans text-sm font-semibold"
           >
             {unread}
           </text>

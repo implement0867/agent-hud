@@ -64,6 +64,7 @@ import type { TDirection, TRect, TSize, TView } from "~/lib/geometry";
 import { markRanges } from "~/lib/highlights";
 import { invariant } from "~/lib/invariant";
 import { LookContext, useLook } from "~/lib/look";
+import { Text } from "~/components/primitives/Text";
 
 const home: TView = { x: 64, y: 64, scale: 1 };
 
@@ -130,14 +131,14 @@ const NewCardChip = ({ id, at, show }: TNewCardChipProps) => {
     <button
       type="button"
       aria-label={`New card ${id}`}
-      className="pointer-events-auto absolute flex h-8 max-w-45 animate-pop items-center gap-1.5 rounded-full bg-accent pr-3 pl-2 text-sm text-on-accent shadow-pop hover:bg-accent-strong"
+      className="pointer-events-auto absolute flex h-8 max-w-45 animate-pop items-center gap-1.5 rounded-full bg-accent pr-3 pl-2 text-xl text-on-accent shadow-pop hover:bg-accent-strong"
       style={{ left: at.x, top: at.y }}
       onClick={() => {
         show(id);
       }}
     >
       <Arrow className="size-4 shrink-0" />
-      <span className="truncate">new: {titleOf(model.board.cards, id)}</span>
+      <Text truncate>new: {titleOf(model.board.cards, id)}</Text>
     </button>
   );
 };

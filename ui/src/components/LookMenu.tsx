@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { IconButton } from "~/components/IconButton";
 import { lookSchema } from "~/lib/look";
 import type { TLook } from "~/lib/look";
+import { Text } from "~/components/primitives/Text";
 
 /** The swatch of each accent, in its light value. */
 const swatches: Record<TLook["accent"], string> = {
@@ -89,7 +90,7 @@ export const LookMenu = ({ look, change, close }: TLookMenuProps) => (
   <section
     role="dialog"
     aria-label="Look"
-    className="panel pointer-events-auto absolute bottom-full left-1/2 mb-2 w-72 -translate-x-1/2 animate-pop p-3 text-xs"
+    className="panel pointer-events-auto absolute bottom-full left-1/2 mb-2 w-72 -translate-x-1/2 animate-pop p-3 text-md"
     onKeyDown={(event) => {
       if (event.key === "Escape") {
         event.stopPropagation();
@@ -98,7 +99,9 @@ export const LookMenu = ({ look, change, close }: TLookMenuProps) => (
     }}
   >
     <header className="mb-2 flex items-center justify-between">
-      <h2 className="text-sm font-semibold text-ink">Look</h2>
+      <Text as="h2" size="xl" tone="ink" weight={600}>
+        Look
+      </Text>
       <IconButton variant="close" label="Close the look" onClick={close}>
         <X className="size-4" />
       </IconButton>
@@ -111,7 +114,7 @@ export const LookMenu = ({ look, change, close }: TLookMenuProps) => (
           aria-label={title}
           className="contents"
         >
-          <span className="text-ink-muted">{title}</span>
+          <Text tone="muted">{title}</Text>
           <span className="flex flex-wrap gap-1">
             {options.map(([option, name]) => (
               <button

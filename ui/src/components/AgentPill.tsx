@@ -3,6 +3,7 @@ import { useBoard } from "~/data/context";
 import { AgentState } from "~/domain/events";
 import type { TAgentState } from "~/domain/events";
 import { agentDots } from "~/theme";
+import { Text } from "~/components/primitives/Text";
 
 const states: Record<TAgentState, string> = {
   away: "No agent connected",
@@ -27,14 +28,16 @@ export const AgentPill = () => {
     <div
       role="status"
       aria-label="Agent"
-      className="pointer-events-auto absolute top-4 left-4 flex max-w-xl items-center gap-2 rounded-full bg-surface/90 px-3 py-1.5 text-sm shadow-sm ring-1 ring-edge-faint"
+      className="pointer-events-auto absolute top-4 left-4 flex max-w-xl items-center gap-2 rounded-full bg-surface/90 px-3 py-1.5 text-xl shadow-sm ring-1 ring-edge-faint"
     >
       <span
         className={`size-2 shrink-0 rounded-full ${agentDots[agent]} ${agent === AgentState.enum.working ? "animate-pulse" : ""}`}
       />
       <span className="font-semibold tracking-tight text-ink">agent-hud</span>
       <BoardMenu />
-      <span className="truncate text-ink-muted">{label}</span>
+      <Text tone="muted" truncate>
+        {label}
+      </Text>
     </div>
   );
 };

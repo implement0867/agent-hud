@@ -15,6 +15,7 @@ import { ActionKind, Author, messageSchema } from "~/domain/actions";
 import { groupPending } from "~/domain/pending";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
 import { mod } from "~/lib/keys";
+import { Text } from "~/components/primitives/Text";
 
 const widthKey = "agent-hud:chat-width";
 
@@ -34,7 +35,7 @@ const Tally = () => {
       type="button"
       aria-label="Threads on the board"
       title={`On the board: ${String(threads.length)} threads. Show the next`}
-      className="flex h-6 items-center gap-1 rounded-full bg-accent-soft px-1.5 text-xs font-medium text-accent-strong"
+      className="flex h-6 items-center gap-1 rounded-full bg-accent-soft px-1.5 text-md font-medium text-accent-strong"
       onClick={() => {
         const found = threads[turn % threads.length];
         if (found !== undefined) show(found[1].card, found[0]);
@@ -66,7 +67,7 @@ const PendingList = ({ close }: TPendingListProps) => {
   useEffect(measure, [model.pending]);
   const count = model.pending.length;
   return (
-    <div className="panel absolute inset-x-0 bottom-full mb-2 overflow-hidden text-xs text-ink-soft">
+    <div className="panel absolute inset-x-0 bottom-full mb-2 overflow-hidden text-md text-ink-soft">
       <p className="border-b border-divider px-3 py-2 font-medium text-ink-muted">
         Send carries {count} {count === 1 ? "change" : "changes"}
       </p>
@@ -78,7 +79,7 @@ const PendingList = ({ close }: TPendingListProps) => {
       >
         {groupPending(model.pending, model.board).map((group) => (
           <section key={group.key} aria-label={group.title} className="mb-2">
-            <h3 className="truncate px-2 py-1 text-[11px] font-semibold tracking-wide text-ink-muted uppercase">
+            <h3 className="truncate px-2 py-1 text-sm font-semibold tracking-wide text-ink-muted uppercase">
               {group.title}
             </h3>
             <ul>
@@ -193,7 +194,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
           aria-label="Message the agent"
           placeholder="Message the agent"
           id="message-box"
-          className="field-sizing-content max-h-40 min-h-8 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
+          className="field-sizing-content max-h-40 min-h-8 flex-1 resize-none bg-transparent px-2 py-1.5 text-xl outline-none"
           value={text}
           readOnly={sending}
           onChange={(event) => {
@@ -216,7 +217,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
             aria-label="Send to the agent"
             title={`Send your message and your changes to the agent (${mod}↵)`}
             disabled={!ready}
-            className={`${sendTone} gap-1.5 pl-3 text-sm font-medium ${unsent > 0 ? "rounded-l-full pr-2" : "rounded-full pr-3"}`}
+            className={`${sendTone} gap-1.5 pl-3 text-xl font-medium ${unsent > 0 ? "rounded-l-full pr-2" : "rounded-full pr-3"}`}
             onClick={() => {
               void submit();
             }}
@@ -226,7 +227,7 @@ const SendBox = ({ send }: TSendBoxProps) => {
             {unsent > 0 && (
               <span
                 aria-label={`${String(unsent)} unsent`}
-                className="rounded-full bg-on-accent/25 px-1.5 text-xs tabular-nums"
+                className="rounded-full bg-on-accent/25 px-1.5 text-md tabular-nums"
               >
                 {unsent}
               </span>
@@ -328,13 +329,13 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
         {unsent > 0 && (
           <span
             aria-label={`${String(unsent)} unsent`}
-            className="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-on-accent"
+            className="rounded-full bg-accent px-2 py-0.5 text-md font-medium text-on-accent"
           >
             {unsent} to send
           </span>
         )}
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-accent text-[11px] font-semibold text-on-accent">
+          <span className="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-accent text-sm font-semibold text-on-accent">
             {unread}
           </span>
         )}
@@ -355,7 +356,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
         onPointerDown={resize}
       />
       <header className="flex items-center gap-2 border-b border-divider px-4 py-3">
-        <h2 className="text-sm font-semibold text-ink">
+        <Text as="h2" size="xl" tone="ink" weight={600}>
           <button
             type="button"
             aria-label="Collapse the chat"
@@ -365,7 +366,7 @@ export const Chat = ({ send, above, measure }: TChatProps) => {
           >
             Chat
           </button>
-        </h2>
+        </Text>
         <Tally />
         <span className="ml-auto">
           <IconButton variant="close" label="Close the chat" onClick={collapse}>

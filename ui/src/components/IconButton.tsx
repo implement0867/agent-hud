@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 export type TIconButtonVariant = "ghost" | "close" | "tool" | "danger";
 
 const toolShape =
-  "flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-sm text-ink-soft transition-colors";
+  "flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-xl text-ink-soft transition-colors";
 
 const variants: Record<TIconButtonVariant, string> = {
   ghost:

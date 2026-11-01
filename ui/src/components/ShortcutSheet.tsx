@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 
 import { IconButton } from "~/components/IconButton";
 import { mod } from "~/lib/keys";
+import { Text } from "~/components/primitives/Text";
 
 const groups: { title: string; rows: [string, string][] }[] = [
   {
@@ -60,23 +61,27 @@ export const ShortcutSheet = ({ close }: TShortcutSheetProps) => (
     className="panel pointer-events-auto absolute top-16 left-1/2 max-h-[80%] w-104 max-w-[calc(100%-2rem)] -translate-x-1/2 animate-pop overflow-y-auto p-4"
   >
     <header className="mb-3 flex items-center justify-between">
-      <h2 className="text-sm font-semibold text-ink">Shortcuts</h2>
+      <Text as="h2" size="xl" tone="ink" weight={600}>
+        Shortcuts
+      </Text>
       <IconButton variant="close" label="Close the shortcuts" onClick={close}>
         <X className="size-4" />
       </IconButton>
     </header>
     {groups.map(({ title, rows }) => (
       <section key={title} className="mb-3">
-        <h3 className="mb-1 text-[11px] font-semibold tracking-wide text-ink-faint uppercase">
+        <h3 className="mb-1 text-sm font-semibold tracking-wide text-ink-faint uppercase">
           {title}
         </h3>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xl">
           {rows.map(([keys, does]) => (
             <div key={keys} className="contents">
               <dt>
                 <kbd className="kbd">{keys}</kbd>
               </dt>
-              <dd className="text-ink-soft">{does}</dd>
+              <Text as="dd" tone="soft">
+                {does}
+              </Text>
             </div>
           ))}
         </dl>
