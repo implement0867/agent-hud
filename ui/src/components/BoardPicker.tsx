@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { fetchBoards, linkTo } from "~/data/boards";
 import type { TBoardList } from "~/domain/events";
 import { agentDots } from "~/theme";
-import { Column } from "~/components/primitives/Flex";
 import { Text } from "~/components/primitives/Text";
 
 /**
@@ -32,7 +31,7 @@ export const BoardPicker = () => {
           No board yet. The agent makes one with its create_board tool.
         </p>
       ) : (
-        <Column as="ul" gap={0.5}>
+        <ul className="flex flex-col gap-0.5">
           {boards.map((board) => (
             <li key={board.name}>
               <a
@@ -51,7 +50,7 @@ export const BoardPicker = () => {
               </a>
             </li>
           ))}
-        </Column>
+        </ul>
       )}
     </section>
   );
