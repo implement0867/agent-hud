@@ -116,7 +116,7 @@ export const LookMenu = ({ look, change, close }: TLookMenuProps) => (
           className="contents"
         >
           <Text tone="muted">{title}</Text>
-          <Row as="span" wrap gap={1}>
+          <Row as="span" wrap="wrap" gap={1}>
             {options.map(([option, name]) => (
               <button
                 key={option}
