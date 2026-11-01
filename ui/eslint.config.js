@@ -114,6 +114,11 @@ export default tseslint.config(
 
       // Tailwind
       "better-tailwindcss/no-unknown-classes": "error",
+      "better-tailwindcss/enforce-canonical-classes": "error",
+      "better-tailwindcss/enforce-shorthand-classes": "error",
+      "better-tailwindcss/no-deprecated-classes": "error",
+      "better-tailwindcss/no-conflicting-classes": "error",
+      "better-tailwindcss/no-duplicate-classes": "error",
     },
   },
 

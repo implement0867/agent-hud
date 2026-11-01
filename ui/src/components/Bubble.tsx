@@ -53,7 +53,7 @@ export const Bubble = ({ said }: TBubbleProps) => {
             type="button"
             aria-label={`Show the thread on ${thread.quote === "" ? thread.card : `“${short(thread.quote)}”`}`}
             title={thread.quote === "" ? thread.card : thread.quote}
-            className="mr-1.5 inline-block max-w-48 truncate rounded bg-ink/10 px-1 align-bottom text-[0.6875rem]"
+            className="mr-1.5 inline-block max-w-48 truncate rounded-sm bg-ink/10 px-1 align-bottom text-[0.6875rem]"
             onClick={() => {
               show(thread.card, said.thread);
             }}

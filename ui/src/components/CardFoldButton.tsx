@@ -20,7 +20,7 @@ export const CardFoldButton = ({ mode, md, folds }: TCardFoldButtonProps) => {
       folded={folded}
       label={folds.label}
       toggle={folds.toggleCard}
-      className="absolute top-[var(--pad-y)] left-0 z-10 h-[calc(var(--text-body)*var(--lh))] w-[var(--pad)]"
+      className="absolute top-(--pad-y) left-0 z-10 h-[calc(var(--text-body)*var(--lh))] w-(--pad)"
     />
   );
   switch (mode) {

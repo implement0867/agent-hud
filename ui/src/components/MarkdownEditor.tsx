@@ -73,7 +73,7 @@ export const MarkdownEditor = ({
         aria-describedby="editor-keys"
         autoFocus
         spellCheck={false}
-        className="field-sizing-content block min-h-24 w-full resize-none bg-transparent font-mono text-[0.8125rem] leading-[1.625] whitespace-pre-wrap text-ink outline-none placeholder:text-ink-ghost"
+        className="field-sizing-content block min-h-24 w-full resize-none bg-transparent font-mono text-[0.8125rem] leading-relaxed whitespace-pre-wrap text-ink outline-none placeholder:text-ink-ghost"
         value={text}
         onChange={(event) => {
           setText(event.target.value);
@@ -159,7 +159,7 @@ export const MarkdownEditor = ({
       ) : null}
       <footer
         id="editor-keys"
-        className="mt-2 flex items-center justify-end gap-2.5 text-[0.6875rem] leading-4 text-ink-faint"
+        className="mt-2 flex items-center justify-end gap-2.5 text-[0.6875rem]/4 text-ink-faint"
       >
         {asking === "discard" ? (
           <span>esc again discards your changes</span>

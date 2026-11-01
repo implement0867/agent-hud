@@ -37,7 +37,7 @@ const SectionFoldButton = ({ section, title }: TSectionFoldButtonProps) => {
       toggle={() => {
         folds.toggleSection(section);
       }}
-      className="mr-1.5 -ml-0.5 inline-grid h-[1lh] w-4 align-top"
+      className="mr-1.5 -ml-0.5 inline-grid h-lh w-4 align-top"
     />
   );
 };
@@ -66,7 +66,7 @@ export const Heading = ({
           folded={false}
           label={folds.label}
           toggle={folds.toggleCard}
-          className="-ml-[var(--pad)] inline-grid h-[1lh] w-[var(--pad)] align-top"
+          className="-ml-(--pad) inline-grid h-lh w-(--pad) align-top"
         />
       )}
       {hasProperty(node, "dataSectionHeading") && (

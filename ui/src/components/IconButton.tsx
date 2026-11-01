@@ -9,7 +9,7 @@ const variants: Record<TIconButtonVariant, string> = {
   ghost:
     "grid size-6 place-items-center rounded-md text-ink-faint hover:bg-edge-faint hover:text-ink-soft",
   close:
-    "rounded p-1 text-ink-faint hover:bg-surface-sunken hover:text-ink-soft",
+    "rounded-sm p-1 text-ink-faint hover:bg-surface-sunken hover:text-ink-soft",
   tool: `${toolShape} enabled:hover:bg-surface-sunken enabled:hover:text-ink aria-pressed:bg-accent-soft aria-pressed:text-accent-strong disabled:text-ink-faint`,
   danger: `${toolShape} enabled:hover:bg-danger-faint enabled:hover:text-danger-strong disabled:text-ink-ghost`,
 };

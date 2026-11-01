@@ -21,7 +21,7 @@ export const FoldButton = ({
     data-chrome=""
     aria-expanded={!folded}
     aria-label={`${folded ? "Open" : "Fold"} ${label}`}
-    className={`grid cursor-pointer place-items-center rounded text-ink-faint select-none hover:text-ink-soft ${className}`}
+    className={`grid cursor-pointer place-items-center rounded-sm text-ink-faint select-none hover:text-ink-soft ${className}`}
     onPointerDown={(event) => {
       event.stopPropagation();
     }}

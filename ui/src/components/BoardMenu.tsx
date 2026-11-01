@@ -12,7 +12,7 @@ const count = (n: number, one: string) =>
   `${String(n)} ${n === 1 ? one : `${one}s`}`;
 
 const belowAnchor =
-  "panel inset-auto m-0 mt-2 border-0 [position-anchor:--board-menu] [top:anchor(bottom)] [left:anchor(left)]";
+  "panel inset-auto m-0 mt-2 border-0 [position-anchor:--board-menu] top-[anchor(bottom)] left-[anchor(left)]";
 
 const rowTone = "flex items-center gap-2 rounded-lg px-2 py-1 text-xs";
 

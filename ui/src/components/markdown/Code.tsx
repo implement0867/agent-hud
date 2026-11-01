@@ -38,7 +38,7 @@ export const Span = ({
       <span
         data-code-line=""
         data-diff={diff}
-        className={`block min-h-[1lh] px-3 whitespace-pre ${findDiffTone(diff)}`}
+        className={`block min-h-lh px-3 whitespace-pre ${findDiffTone(diff)}`}
       >
         {children}
       </span>
@@ -83,7 +83,7 @@ export const Pre = ({ node, children }: ComponentProps<"pre"> & ExtraProps) => {
           {readTextProperty(node, "dataFile")}
         </figcaption>
       )}
-      <pre className="my-0 overflow-x-auto rounded-code bg-surface-sunken py-2 font-mono text-[0.875em] leading-[1.625] text-ink-soft">
+      <pre className="my-0 overflow-x-auto rounded-code bg-surface-sunken py-2 font-mono text-[0.875em] leading-relaxed text-ink-soft">
         {children}
       </pre>
     </figure>
