@@ -201,7 +201,7 @@ export const ArrowLayer = ({ world, linking }: TArrowLayerProps) => {
             <g key={id}>
               <path
                 d={path}
-                className="pointer-events-[stroke] cursor-pointer fill-none stroke-transparent"
+                className="cursor-pointer fill-none stroke-transparent [pointer-events:stroke]"
                 strokeWidth={16}
                 onPointerDown={(event) => {
                   event.stopPropagation();

@@ -1,4 +1,6 @@
 import js from "@eslint/js";
+import betterTailwind from "eslint-plugin-better-tailwindcss";
+import { getDefaultSelectors } from "eslint-plugin-better-tailwindcss/defaults";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -29,9 +31,30 @@ export default tseslint.config(
     },
     plugins: {
       "react-refresh": reactRefresh,
+      "better-tailwindcss": betterTailwind,
     },
     settings: {
       react: { version: "detect" },
+      "better-tailwindcss": {
+        entryPoint: "src/index.css",
+        detectComponentClasses: true,
+        selectors: [
+          ...getDefaultSelectors(),
+          // The variables that hold class strings, so that their classes are checked as a className's are.
+          {
+            kind: "variable",
+            name: "^(?:\\w*Tones?|\\w*Shape|variants|place|ring|belowAnchor|agentDots)$",
+            match: [
+              { type: "strings" },
+              { type: "objectValues" },
+              {
+                type: "anonymousFunctionReturn",
+                match: [{ type: "strings" }],
+              },
+            ],
+          },
+        ],
+      },
     },
     linterOptions: {
       // Exceptions go in this file, where review sees them.
@@ -88,6 +111,9 @@ export default tseslint.config(
       ],
 
       "react-hooks/exhaustive-deps": "error",
+
+      // Tailwind
+      "better-tailwindcss/no-unknown-classes": "error",
     },
   },
 
