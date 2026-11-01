@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { IconButton } from "~/components/IconButton";
 import { lookSchema } from "~/lib/look";
 import type { TLook } from "~/lib/look";
+import { Row } from "~/components/primitives/Flex";
 import { Text } from "~/components/primitives/Text";
 
 /** The swatch of each accent, in its light value. */
@@ -115,7 +116,7 @@ export const LookMenu = ({ look, change, close }: TLookMenuProps) => (
           className="contents"
         >
           <Text tone="muted">{title}</Text>
-          <span className="flex flex-wrap gap-1">
+          <Row as="span" wrap="wrap" gap={1}>
             {options.map(([option, name]) => (
               <button
                 key={option}
@@ -143,7 +144,7 @@ export const LookMenu = ({ look, change, close }: TLookMenuProps) => (
                 )}
               </button>
             ))}
-          </span>
+          </Row>
         </div>
       ))}
     </div>

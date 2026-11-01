@@ -24,6 +24,6 @@ export default defineConfig({
     },
   },
   // The unit tests of the library, which need no browser; make check runs them.
-  test: { include: ["src/**/*.test.ts"] },
+  test: { include: ["src/**/*.test.{ts,tsx}"] },
   server: { proxy: { "/ws": { target: "ws://127.0.0.1:7676", ws: true } } },
 });
