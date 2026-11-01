@@ -990,7 +990,7 @@ async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Ag
     await agent.tools.call_tool("write_board", {"name": "demo", "actions": dump_bodies(make_put("plan", "1. a"))})
     await agent.write_board(make_put("here", "1. b"))
     await expect(find_card(page, "here")).to_be_visible()
-    await page.get_by_label("Boards").click()
+    await page.get_by_label("Boards", exact=True).click()
     menu = page.get_by_role("menu", name="Other boards")
     await expect(menu.get_by_role("menuitem", name=re.compile(f"^{BOARD}"))).to_have_attribute("aria-current", "page")
     item = menu.get_by_role("menuitem", name=re.compile("^demo 1 card$"))
@@ -999,7 +999,7 @@ async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Ag
     await expect(find_card(page, "plan")).to_be_visible()
     await expect(find_card(page, "here")).to_have_count(0)
     assert "board=demo" in page.url
-    await expect(page.get_by_label("Boards")).to_have_text("demo")
+    await expect(page.get_by_label("Boards", exact=True)).to_have_text("demo")
 
 
 async def test_the_page_without_a_board_lists_the_boards(page: Page, address: tuple[str, int]) -> None:
@@ -1010,7 +1010,7 @@ async def test_the_page_without_a_board_lists_the_boards(page: Page, address: tu
     boards = page.get_by_role("region", name="Boards")
     await boards.get_by_role("link", name=re.compile(f"^{BOARD}")).click()
     assert f"board={BOARD}" in page.url
-    await expect(page.get_by_label("Boards")).to_have_text(BOARD)
+    await expect(page.get_by_label("Boards", exact=True)).to_have_text(BOARD)
 
 
 async def await_positions(agent: Agent, check: Callable[[dict[str, Point]], bool]) -> dict[str, Point]:
