@@ -9,6 +9,7 @@ import { earlierVersions } from "~/domain/board";
 import type { TThread } from "~/domain/board";
 import { short } from "~/domain/text";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
+import { Text } from "~/components/primitives/Text";
 
 type TThreadsProps = { threads: Record<string, TThread> };
 
@@ -17,7 +18,7 @@ const Threads = ({ threads }: TThreadsProps) => {
   const entries = Object.entries(threads);
   if (entries.length === 0) return null;
   return (
-    <ul className="mt-2 flex flex-col gap-1.5 border-t border-divider pt-2 text-xs">
+    <ul className="mt-2 flex flex-col gap-1.5 border-t border-divider pt-2 text-md">
       {entries.map(([id, thread]) => (
         <li key={id}>
           <span className="border-l-2 border-selection pl-1.5 text-ink-muted">
@@ -25,9 +26,9 @@ const Threads = ({ threads }: TThreadsProps) => {
           </span>
           {thread.comments.map((said) => (
             <p key={said.id} className="mt-0.5 text-ink-soft">
-              <span className="text-ink-faint">
+              <Text tone="faint">
                 {said.author === "user" ? "you" : "agent"}:
-              </span>{" "}
+              </Text>{" "}
               {said.text}
             </p>
           ))}
@@ -63,11 +64,15 @@ export const HistoryDrawer = ({
       className="panel pointer-events-auto absolute top-16 bottom-20 left-4 flex w-96 animate-pop flex-col"
     >
       <header className="flex items-center gap-2 border-b border-divider px-4 py-3">
-        <h2 className="text-sm font-semibold text-ink">History</h2>
+        <Text as="h2" size="xl" tone="ink" weight={600}>
+          History
+        </Text>
         {card !== null && (
           <>
-            <span className="font-mono text-xs text-ink-faint">{card}</span>
-            <span className="text-xs">
+            <Text size="md" tone="faint" mono>
+              {card}
+            </Text>
+            <Text size="md">
               <TextButton
                 variant="link"
                 onClick={() => {
@@ -76,7 +81,7 @@ export const HistoryDrawer = ({
               >
                 all cards
               </TextButton>
-            </span>
+            </Text>
           </>
         )}
         <span className="ml-auto">
@@ -93,7 +98,7 @@ export const HistoryDrawer = ({
               aria-label={`${id} version ${String(number)}`}
               className="rounded-card px-3 pt-2 pb-3 ring-1 ring-outline"
             >
-              <header className="mb-1 flex justify-between font-mono text-[11px] text-ink-faint">
+              <header className="mb-1 flex justify-between font-mono text-sm text-ink-faint">
                 <span>
                   {id} · v{number}
                 </span>

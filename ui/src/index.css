@@ -221,6 +221,14 @@
 }
 
 @theme {
+  --text-*: initial;
+  --text-xs: 0.625rem;
+  --text-sm: 0.6875rem;
+  --text-md: 0.75rem;
+  --text-md--line-height: calc(1 / 0.75);
+  --text-lg: 0.8125rem;
+  --text-xl: 0.875rem;
+  --text-xl--line-height: calc(1.25 / 0.875);
   --animate-rise: rise 240ms ease-out;
   --animate-pop: pop 140ms ease-out;
   @keyframes rise {
@@ -249,17 +257,17 @@
 
 /* A message across the top or the bottom of the board. */
 @utility toast {
-  @apply pointer-events-auto absolute left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full bg-ink px-4 py-1.5 text-sm text-surface shadow-pop;
+  @apply pointer-events-auto absolute left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full bg-ink px-4 py-1.5 text-xl text-surface shadow-pop;
 }
 
 /* A small label in a line. */
 @utility pill {
-  @apply rounded-full px-1.5 py-px font-mono text-[0.625rem];
+  @apply rounded-full px-1.5 py-px font-mono text-xs;
 }
 
 /* A key of the keyboard, as the editor's hint and the shortcut sheet name it. */
 @utility kbd {
-  @apply rounded bg-surface-sunken px-1 font-sans text-[0.625rem] leading-[14px] text-ink-muted ring-1 ring-outline ring-inset;
+  @apply rounded bg-surface-sunken px-1 font-sans text-xs leading-[14px] text-ink-muted ring-1 ring-outline ring-inset;
 }
 
 /*

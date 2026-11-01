@@ -22,7 +22,7 @@ const ChangeLinks = ({ id, changed }: TChangeLinksProps) => {
   return (
     <span
       data-chrome=""
-      className="absolute top-[calc(var(--pad-y)+4px)] right-11 z-10 flex gap-1.5 text-[0.6875rem]/4 text-ink-muted"
+      className="absolute top-[calc(var(--pad-y)+4px)] right-11 z-10 flex gap-1.5 text-sm/4 text-ink-muted"
       onPointerDown={(event) => {
         event.stopPropagation();
       }}

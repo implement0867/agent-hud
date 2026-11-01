@@ -46,14 +46,14 @@ export const Bubble = ({ said }: TBubbleProps) => {
         <Icon className="size-3" />
       </span>
       <span
-        className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-[0.8125rem] whitespace-pre-wrap ${bubbleTone(mine, unsent)}`}
+        className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-lg whitespace-pre-wrap ${bubbleTone(mine, unsent)}`}
       >
         {thread !== undefined && said.thread !== null && (
           <button
             type="button"
             aria-label={`Show the thread on ${thread.quote === "" ? thread.card : `“${short(thread.quote)}”`}`}
             title={thread.quote === "" ? thread.card : thread.quote}
-            className="mr-1.5 inline-block max-w-48 truncate rounded-sm bg-ink/10 px-1 align-bottom text-[0.6875rem]"
+            className="mr-1.5 inline-block max-w-48 truncate rounded-sm bg-ink/10 px-1 align-bottom text-sm"
             onClick={() => {
               show(thread.card, said.thread);
             }}
@@ -63,9 +63,7 @@ export const Bubble = ({ said }: TBubbleProps) => {
         )}
         {said.text}
         {unsent ? (
-          <span className="ml-1.5 text-[10px] text-accent-strong/70">
-            unsent
-          </span>
+          <span className="ml-1.5 text-xs text-accent-strong/70">unsent</span>
         ) : null}
       </span>
     </li>

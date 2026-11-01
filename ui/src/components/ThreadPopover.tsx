@@ -4,6 +4,7 @@ import { useBoard, useStore } from "~/data/context";
 import { ActionKind, Author } from "~/domain/actions";
 import type { TAnchor, TSaid } from "~/domain/board";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
+import { Text } from "~/components/primitives/Text";
 
 type TCommentProps = { said: TSaid };
 
@@ -28,7 +29,7 @@ const CommentLine = ({ said }: TCommentProps) => {
     >
       {said.text}
       {unsent ? (
-        <span className="ml-1.5 rounded-sm px-1 text-[0.625rem] text-warning-strong outline-1 outline-warning outline-dashed">
+        <span className="ml-1.5 rounded-sm px-1 text-xs text-warning-strong outline-1 outline-warning outline-dashed">
           unsent
         </span>
       ) : null}
@@ -72,7 +73,7 @@ export const ThreadPopover = ({
       ref={measure}
       aria-label={`Thread on “${anchor.quote === "" ? anchor.card : anchor.quote}”`}
       style={{ maxHeight }}
-      className="pointer-events-auto flex w-55 animate-pop flex-col gap-1.5 rounded-[10px] bg-surface px-2.5 py-2 text-xs/4 text-ink-soft shadow-[var(--shadow-pop),0_0_0_1px_var(--edge)] select-text"
+      className="pointer-events-auto flex w-55 animate-pop flex-col gap-1.5 rounded-[10px] bg-surface px-2.5 py-2 text-md/4 text-ink-soft shadow-[var(--shadow-pop),0_0_0_1px_var(--edge)] select-text"
       onPointerDown={(event) => {
         event.stopPropagation();
       }}
@@ -99,9 +100,9 @@ export const ThreadPopover = ({
         </ul>
       )}
       {draft.changed && draft.text !== "" ? (
-        <p className="text-[0.6875rem] text-warning-strong">
+        <Text as="p" size="sm" tone="warning">
           The card changed since you started this comment.
-        </p>
+        </Text>
       ) : null}
       <Composer
         label={thread === null ? "Comment" : "Reply"}

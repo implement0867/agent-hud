@@ -60,7 +60,7 @@ const ArrowLabel = ({
       <button
         type="button"
         aria-label={`Arrow ${id}: ${arrow.text}`}
-        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-[calc(100%+4px)] cursor-pointer rounded-full bg-surface px-2 py-0.5 text-[0.6875rem] whitespace-nowrap text-ink-soft shadow-sm ring-1 ring-outline hover:ring-accent-ring"
+        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-[calc(100%+4px)] cursor-pointer rounded-full bg-surface px-2 py-0.5 text-sm whitespace-nowrap text-ink-soft shadow-sm ring-1 ring-outline hover:ring-accent-ring"
         style={{ left: middle.x, top: middle.y }}
         onPointerDown={(event) => {
           event.stopPropagation();
@@ -88,7 +88,7 @@ const ArrowLabel = ({
         aria-label={`Text of arrow ${id}`}
         placeholder="label"
         autoFocus
-        className="field-sizing-content min-w-12 bg-transparent text-xs outline-none"
+        className="field-sizing-content min-w-12 bg-transparent text-md outline-none"
         value={text}
         onChange={(event) => {
           setText(event.target.value);
