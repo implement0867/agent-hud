@@ -9,6 +9,7 @@ import { versionsOf } from "~/domain/board";
 import { toggledBox } from "~/domain/text";
 import { useWhiteboard } from "~/hooks/useWhiteboard";
 import type { TCardFolds } from "~/lib/folds";
+import { findMarkdownClass } from "~/lib/frame";
 import { invariant } from "~/lib/invariant";
 
 type TChangeLinksProps = { id: string; changed: boolean };
@@ -101,10 +102,7 @@ export const OpenCard = ({
   return (
     <>
       {versions > 0 && <ChangeLinks id={id} changed={before !== null} />}
-      <div
-        key={versions}
-        className={`animate-pop ${versions > 0 ? "[&_.markdown>:first-child]:pr-36" : ""}`}
-      >
+      <div key={versions} className={findMarkdownClass(versions)}>
         <CardBody
           md={md}
           before={before}

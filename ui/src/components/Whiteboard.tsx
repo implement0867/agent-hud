@@ -54,18 +54,18 @@ import {
   centreOn,
   edgeTowards,
   fitAll,
+  homeView,
   onScreen,
   overlap,
   placePanel,
   toBoard,
+  toBoardRect,
   zoomAt,
 } from "~/lib/geometry";
-import type { TDirection, TRect, TSize, TView } from "~/lib/geometry";
+import type { TDirection, TRect, TSize } from "~/lib/geometry";
 import { markRanges } from "~/lib/highlights";
 import { invariant } from "~/lib/invariant";
 import { LookContext, useLook } from "~/lib/look";
-
-const home: TView = { x: 64, y: 64, scale: 1 };
 
 /** The factor of one step of zoom, from the keys and the toolbar. */
 const zoomStep = 1.25;
@@ -148,10 +148,7 @@ type TDraftCardProps = { at: TPoint; close: () => void };
 const DraftCard = ({ at, close }: TDraftCardProps) => {
   const store = useStore();
   const save = async (md: string) => {
-    const id = newId("card");
-    if (!(await store.act({ kind: ActionKind.enum.put, id, md }))) return;
-    await store.act({ kind: ActionKind.enum.move, id, ...at });
-    close();
+    if (await store.create(newId("card"), md, at)) close();
   };
   return (
     <div
@@ -286,7 +283,7 @@ export const Whiteboard = () => {
   const store = useStore();
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState(home);
+  const [view, setView] = useState(homeView);
   const [look, changeLook] = useLook();
   const { layout, trackChrome, trackCard, cardSizes } = useLayout();
   const { selection, select, started, deselectArrow } = useSelection();
@@ -295,7 +292,7 @@ export const Whiteboard = () => {
     remove: removeCard,
     unlink: unlinkArrow,
     restore,
-  } = useUndo(store.act);
+  } = useUndo(store);
   const [editing, setEditing] = useState<TEditing | null>(null);
   const [drafts, setDrafts] = useState<Record<string, TPoint>>({});
   const [comments, setComments] = useState<Record<string, TCommentDraft>>({});
@@ -335,14 +332,14 @@ export const Whiteboard = () => {
     (element: HTMLElement) => trackChrome("toolbar", element),
     [trackChrome],
   );
-  /** A card's element, once it is laid out: its size is tracked, and a card without a place gets one. */
-  const mountCard = useCallback(
-    (id: string, element: HTMLElement) => {
-      const untrack = trackCard(id, element);
-      store.place(id, cardSizes());
-      return untrack;
-    },
-    [trackCard, store, cardSizes],
+  /** The store places the cards that arrive into the part of the board the view shows, at the sizes laid out here. */
+  const viewportOnBoard = useCallback(
+    () => toBoardRect(view, area),
+    [view, area],
+  );
+  useEffect(
+    () => store.attach({ viewport: viewportOnBoard, sizes: cardSizes }),
+    [store, viewportOnBoard, cardSizes],
   );
 
   /** The thread is read: its bubble's count of new comments clears, in this browser. */
@@ -552,12 +549,10 @@ export const Whiteboard = () => {
     markRanges("quote", "draft", range === null ? [] : [range]);
   }, [draftAnchor, model.board.cards]);
 
-  /** The card's rect as the viewport shows it, or null until it is placed and measured. */
+  /** The card's rect as the viewport shows it, or null until it is measured. */
   const onView = ({ id, at }: TCardView) => {
     const size = layout.cards[id];
-    return at === null || size === undefined
-      ? null
-      : onScreen(view, { ...at, ...size });
+    return size === undefined ? null : onScreen(view, { ...at, ...size });
   };
 
   /** The thread that is open, with its words: a thread of the board, or the words of a new one. */
@@ -614,9 +609,7 @@ export const Whiteboard = () => {
     const sizes = cardSizes();
     const rects = model.cards.flatMap((card) => {
       const size = sizes.get(card.id);
-      return card.at === null || size === undefined
-        ? []
-        : [{ ...card.at, ...size }];
+      return size === undefined ? [] : [{ ...card.at, ...size }];
     });
     if (rects.length > 0) setView(fitAll(rects, area));
   };
@@ -654,7 +647,7 @@ export const Whiteboard = () => {
   /** Moves the selected card by the distance, as a drop does. */
   const nudge = (id: string, by: TPoint) => {
     const card = model.cards.find((found) => found.id === id);
-    if (card?.at == null) return;
+    if (card === undefined) return;
     store.drop(id, { x: card.at.x + by.x, y: card.at.y + by.y });
   };
 
@@ -691,7 +684,7 @@ export const Whiteboard = () => {
     } else if (key === "n") startCard();
     else if (key === "h") toggleHistory();
     else if (key === "1") fit();
-    else if (key === "0") setView(home);
+    else if (key === "0") setView(homeView);
     else if (key === "+" || key === "=") zoom(1);
     else if (key === "-") zoom(-1);
     else if (key === "m") document.getElementById("message-box")?.focus();
@@ -864,13 +857,13 @@ export const Whiteboard = () => {
               <Toolbar
                 scale={view.scale}
                 atHome={
-                  view.x === home.x &&
-                  view.y === home.y &&
-                  view.scale === home.scale
+                  view.x === homeView.x &&
+                  view.y === homeView.y &&
+                  view.scale === homeView.scale
                 }
                 zoom={zoom}
                 reset={() => {
-                  setView(home);
+                  setView(homeView);
                 }}
                 fit={fit}
                 startCard={startCard}
@@ -899,7 +892,7 @@ export const Whiteboard = () => {
                 key={card.id}
                 view={card}
                 scale={view.scale}
-                mount={mountCard}
+                track={trackCard}
               />
             ))}
           </div>

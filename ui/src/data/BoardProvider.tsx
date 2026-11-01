@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 
 import { ConnectionStatus, createBoardStore } from "~/data/boardStore";
 import { BoardContext, StoreContext, ThreadsContext } from "~/data/context";
+import { createMeasure, pageSurface } from "~/data/measureCard";
 
 type TBoardProviderProps = { children: ReactNode };
 
 /** Holds the connection to the board; the children render once the first snapshot is in, and see the board live or offline. */
 export const BoardProvider = ({ children }: TBoardProviderProps) => {
-  const [store] = useState(createBoardStore);
+  const [store] = useState(() =>
+    createBoardStore(createMeasure(), pageSurface),
+  );
   useEffect(() => store.open(), [store]);
   const connection = useSyncExternalStore(store.subscribe, store.getConnection);
   const live = useMemo(

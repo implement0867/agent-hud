@@ -4,14 +4,16 @@ import { versionsOf } from "~/domain/board";
 import type { TAgentState, THeard, TSnapshot } from "~/domain/events";
 import { unsentOf } from "~/domain/pending";
 import type { TUnsent } from "~/domain/pending";
+import type { TRect, TSize } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
+import { packCard } from "~/lib/packing";
 
 /** One card as its frame renders it. */
 export type TCardView = {
   id: string;
   card: TCard;
-  /** Where the card shows: the drag in progress, else a drop the server has not confirmed, else the server's place, else the place the page gave it; null until the page places it. */
-  at: TPoint | null;
+  /** Where the card shows: the drag in progress, else a drop the server has not confirmed, else the server's place, else the place the page gave it. */
+  at: TPoint;
   /** The width the user or the agent set; null makes the card as wide as its content needs, up to a column. */
   width: number | null;
   /** The height the user or the agent set; null makes the card as tall as its text, and a shorter card scrolls. */
@@ -51,6 +53,25 @@ export const emptyLocal: TLocal = {
   changed: {},
   lostArrows: [],
   expected: [],
+};
+
+/** A card's box as its frame lays it out: the markdown, the width and the height set on it, and its number of earlier versions. */
+export type TCardBox = {
+  md: string;
+  width: number | null;
+  height: number | null;
+  versions: number;
+};
+
+/** The size that a card's frame takes, laid out on its own. */
+export type TMeasure = (card: TCardBox) => TSize;
+
+/** What the page shows of the board, for the places it gives cards. */
+export type TSurface = {
+  /** The part of the board that the view shows, in board pixels. */
+  viewport: () => TRect;
+  /** The sizes of the cards as laid out, for those that are. */
+  sizes: () => ReadonlyMap<string, TSize>;
 };
 
 /** The snapshot in the shape that the page renders. */
@@ -178,7 +199,74 @@ export const afterChange = (
   };
 };
 
-/** The model of the snapshot with the page's own state. */
+/** Where the card shows: the drag in progress, else a drop the server has not confirmed, else the server's place, else the page's; undefined until the page places it. */
+const findPlace = (board: TBoard, local: TLocal, id: string) =>
+  local.dragging?.id === id
+    ? local.dragging.at
+    : (local.dropped[id] ?? board.positions[id] ?? local.placed[id]);
+
+const boxOf = (board: TBoard, id: string): TCardBox => {
+  const card = board.cards[id];
+  invariant(card !== undefined, `card ${id} is on the board`);
+  return {
+    md: card.md,
+    width: board.sizes[id]?.width ?? null,
+    height: board.sizes[id]?.height ?? null,
+    versions: versionsOf(board, id),
+  };
+};
+
+const sameSize = (
+  a: TBoard["sizes"][string] | undefined,
+  b: TBoard["sizes"][string] | undefined,
+) => a?.width === b?.width && a?.height === b?.height;
+
+/** Whether the card shows as the page laid it out: the same markdown and the same size set as on the board before. */
+const isLaidOut = (before: TBoard | null, board: TBoard, id: string) =>
+  before !== null &&
+  before.cards[id]?.md === board.cards[id]?.md &&
+  sameSize(before.sizes[id], board.sizes[id]);
+
+/**
+ * A place for each card of the board that has none, in the board's order: each is packed into the view among the
+ * cards that have a place, at the sizes the page has laid them out at, where the card is still as laid out, or that
+ * the measure gives them.
+ */
+export const placeArrivals = (
+  before: TBoard | null,
+  board: TBoard,
+  local: TLocal,
+  measure: TMeasure,
+  surface: TSurface,
+): Record<string, TPoint> => {
+  const ids = Object.keys(board.cards);
+  const arrivals = ids.filter(
+    (id) => findPlace(board, local, id) === undefined,
+  );
+  if (arrivals.length === 0) return {};
+  const laidOut = surface.sizes();
+  const sizeOf = (id: string) => {
+    const size = laidOut.get(id);
+    return size !== undefined && isLaidOut(before, board, id)
+      ? size
+      : measure(boxOf(board, id));
+  };
+  const taken = ids.flatMap((id) => {
+    const at = findPlace(board, local, id);
+    return at === undefined ? [] : [{ ...at, ...sizeOf(id) }];
+  });
+  const area = surface.viewport();
+  const placed: Record<string, TPoint> = {};
+  for (const id of arrivals) {
+    const size = sizeOf(id);
+    const at = packCard(size, taken, area);
+    taken.push({ ...at, ...size });
+    placed[id] = at;
+  }
+  return placed;
+};
+
+/** The model of the snapshot with the page's own state; the store places every card before it publishes. */
 export const modelOf = (snapshot: TSnapshot, local: TLocal): TBoardModel => {
   const { board } = snapshot;
   const ids = Object.keys(board.cards);
@@ -195,21 +283,19 @@ export const modelOf = (snapshot: TSnapshot, local: TLocal): TBoardModel => {
     fresh: local.fresh,
     changed: local.changed,
     lostArrows: local.lostArrows,
-    cards: Object.entries(board.cards).map(([id, card]) => ({
-      id,
-      card,
-      at:
-        local.dragging?.id === id
-          ? local.dragging.at
-          : (local.dropped[id] ??
-            board.positions[id] ??
-            local.placed[id] ??
-            null),
-      width: board.sizes[id]?.width ?? null,
-      height: board.sizes[id]?.height ?? null,
-      versions: versionsOf(board, id),
-      layer: order.indexOf(id) + 1,
-    })),
+    cards: Object.entries(board.cards).map(([id, card]) => {
+      const at = findPlace(board, local, id);
+      invariant(at !== undefined, `card ${id} has a place before it shows`);
+      return {
+        id,
+        card,
+        at,
+        width: board.sizes[id]?.width ?? null,
+        height: board.sizes[id]?.height ?? null,
+        versions: versionsOf(board, id),
+        layer: order.indexOf(id) + 1,
+      };
+    }),
   };
 };
 

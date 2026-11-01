@@ -14,15 +14,20 @@ import { useFolds } from "~/hooks/useFolds";
 import { usePointerDrag } from "~/hooks/usePointerDrag";
 import { useScrollEnds } from "~/hooks/useScrollEnds";
 import { SelectionKind, useWhiteboard } from "~/hooks/useWhiteboard";
-import { FrameMode, findFrameMode, findFrameStyle } from "~/lib/frame";
+import {
+  FrameMode,
+  findBodyClass,
+  findFrameMode,
+  findFrameStyle,
+} from "~/lib/frame";
 import type { TRect } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
 
 type TCardFrameProps = {
   view: TCardView;
   scale: number;
-  /** Takes the card's element when it mounts; returns what to do when it goes. */
-  mount: (id: string, element: HTMLElement) => () => void;
+  /** Tracks the card's element from when it mounts; returns what to do when it goes. */
+  track: (id: string, element: HTMLElement) => () => void;
 };
 
 /**
@@ -30,12 +35,12 @@ type TCardFrameProps = {
  * padding moves it; the frame that shows on hover has a handle at each edge and corner, which sets the width, the height
  * or both. A click selects the card, a selection of its words opens the toolbar of the selection, and a double click
  * edits the markdown. A card shorter than its text scrolls, with fades at its ends. Cards may cross after their first
- * place; a touch puts the card on top of the others. A card without a place is hidden until the page gives it one.
+ * place; a touch puts the card on top of the others.
  * The triangle at the card's first line folds it to that line on the sunken ground, with its threads' bubbles; each
  * heading's triangle folds its section. The folds are the viewer's own until the page reloads, and the agent's next
  * version opens the card.
  */
-export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
+export const CardFrame = ({ view, scale, track }: TCardFrameProps) => {
   const { id, card, at, versions, layer } = view;
   const store = useStore();
   const { model } = useBoard();
@@ -45,13 +50,13 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   const article = useCallback(
     (element: HTMLElement) => {
       frame.current = element;
-      const unmount = mount(id, element);
+      const untrack = track(id, element);
       return () => {
         frame.current = null;
-        unmount();
+        untrack();
       };
     },
-    [id, mount],
+    [id, track],
   );
   const { folded, cardFolds } = useFolds(id, card.md, model.board);
   const { ends, measureEnds } = useScrollEnds(body);
@@ -67,10 +72,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
   const height = live?.rect.height ?? view.height;
   const place = live === null ? at : { x: live.rect.x, y: live.rect.y };
   const rect = (): TRect => {
-    invariant(
-      frame.current !== null && at !== null,
-      "a placed card takes a resize",
-    );
+    invariant(frame.current !== null, "a laid-out card takes a resize");
     return {
       ...at,
       width: frame.current.offsetWidth,
@@ -78,7 +80,6 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     };
   };
   const commit = (next: TRect, handle: THandle) => {
-    invariant(at !== null, "a placed card takes a resize");
     setResizing({ rect: next, handle: null, over: sizeKey });
     if (next.x !== at.x || next.y !== at.y)
       store.drop(id, { x: next.x, y: next.y });
@@ -97,7 +98,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     // The padding of the card and its frame move it; its words take a selection instead.
     from: (event) => {
       const target = event.target;
-      if (at === null || !(target instanceof Element)) return null;
+      if (!(target instanceof Element)) return null;
       return target.closest("[data-text-root], button, input, textarea, a") ===
         null
         ? at
@@ -157,7 +158,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
     >
       <div
         ref={body}
-        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-card py-[var(--pad-y)] pr-11 pl-[var(--pad)] [scrollbar-color:var(--ink-ghost)_transparent] [scrollbar-width:thin] ${mode === FrameMode.enum.folded ? "" : "pb-[var(--pad)]"}`}
+        className={findBodyClass(mode)}
         onScroll={measureEnds}
         onPointerEnter={measureEnds}
       >
@@ -189,7 +190,7 @@ export const CardFrame = ({ view, scale, mount }: TCardFrameProps) => {
       </div>
       <CardFoldButton mode={mode} md={card.md} folds={cardFolds} />
       {scrolls ? <ScrollFades {...ends} /> : null}
-      {editor === null && at !== null && (
+      {editor === null && (
         <ResizeOutline
           id={id}
           scale={scale}

@@ -3,6 +3,7 @@ import random
 import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from tests.factories import (
     BOARD,
     StoredBoard,
     dump_bodies,
+    make_clear,
     make_comment,
     make_link,
     make_move,
@@ -462,42 +464,112 @@ async def measure_boxes(page: Page, *ids: str) -> dict[str, tuple[int, int, int,
     return rects
 
 
-async def test_the_page_places_new_cards_where_every_tab_and_the_agent_sees_them(
+async def find_free_right(page: Page) -> float:
+    """The right edge of the part of the viewport that the chat leaves free, as the page lays it out."""
+    chat = await page.get_by_role("complementary", name="Chat with the agent").bounding_box()
+    assert chat is not None
+    return chat["x"] - 16
+
+
+async def test_the_page_places_new_cards_in_reading_order_where_every_tab_and_the_agent_sees_them(
     page: Page, agent: Agent, browser: Browser, address: tuple[str, int]
 ) -> None:
-    """Assemble: the agent puts four cards with no make_place, where the first is the shortest.
-    Act: open the board in a second tab; the agent puts a taller version of the first card, which reaches the fourth.
-    Assert: read has a place for each card, on three columns, with the fourth below the first; the second tab shows
-    each card where the first tab does; the fourth card keeps its make_place, since a place is set once, and the taller first
-    card shows over it."""
+    """Assemble: the agent puts six short cards with no make_place.
+    Act: open the board in a second tab; the agent puts a taller version of the first card, which reaches the card below it.
+    Assert: read has a place for each card: along the top of the view from its margin, a gap apart, and on a row below
+    once a card would leave the free part of the view; the second tab shows each card where the first tab does; the card
+    below the first keeps its place, since a place is set once, and the taller first card shows over it."""
+    ids = ["a", "b", "c", "d", "e", "f"]
     async with open_page(address) as user:
-        await agent.write_board(
-            make_put("a", "short"),
-            make_put("b", "1. a\n2. b\n3. c"),
-            make_put("c", "1. a\n2. b\n3. c"),
-            make_put("d", "last"),
-        )
-        await user.await_snapshot(lambda snapshot: len(snapshot.board.positions) == 4)
+        await agent.write_board(*(make_put(card_id, "short") for card_id in ids))
+        await user.await_snapshot(lambda snapshot: len(snapshot.board.positions) == len(ids))
         board = await read_board(agent.tools)
-        assert {card_id: at.x for card_id, at in board.positions.items()} == {"a": 0, "b": 688, "c": 1376, "d": 0}
-        first = await measure_boxes(page, "a", "b", "c", "d")
-        assert board.positions["d"].y == first["a"][3] + 48
+        first = await measure_boxes(page, *ids)
+        right = await find_free_right(page)
+        width, height = first["a"][2:]
+        expected: dict[str, tuple[int, int]] = {}
+        x, y = 64, 64
+        for card_id in ids:
+            if x + width > right - 64:
+                x, y = 64, y + height + 48
+            expected[card_id] = (x, y)
+            x += width + 48
+        assert {card_id: box[:2] for card_id, box in first.items()} == expected, "the view is at home: screen is board"
+        assert {card_id: (at.x + 64, at.y + 64) for card_id, at in board.positions.items()} == expected
+        below = next(card_id for card_id, (_, top) in expected.items() if top > 64)
 
         host, port = address
         other = await browser.new_page(viewport={"width": 1440, "height": 900})
         await other.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
-        for card_id in "abcd":
+        for card_id in ids:
             await expect(find_card(other, card_id)).to_be_visible()
-        assert await measure_boxes(other, "a", "b", "c", "d") == first
+        assert await measure_boxes(other, *ids) == first
         await other.close()
 
         await agent.write_board(make_put("a", "\n".join(f"{n}. step {n}" for n in range(1, 13))))
         await expect(find_card(page, "a")).to_contain_text("step 12")
-        tall = await measure_boxes(page, "a", "d")
-        assert tall["a"][3] > first["a"][3] + 48, "the taller first card reaches the fourth"
-        assert (await read_board(agent.tools)).positions["d"] == board.positions["d"]
-        assert tall["d"] == first["d"]
-        assert await find_on_top(page, tall["d"][0] + 40, tall["d"][1] + 10) == "a"
+        tall = await measure_boxes(page, "a", below)
+        assert tall["a"][3] > first[below][1] - first["a"][1], "the taller first card reaches the card below it"
+        assert (await read_board(agent.tools)).positions[below] == board.positions[below]
+        assert tall[below] == first[below]
+        assert await find_on_top(page, tall[below][0] + 40, tall[below][1] + 10) == "a"
+
+
+async def test_a_card_that_a_clear_takes_and_a_put_brings_back_in_one_write_shows_at_a_new_place(
+    page: Page, agent: Agent, address: tuple[str, int]
+) -> None:
+    """Assemble: the agent puts two cards, which the page places side by side.
+    Act: the agent writes a clear, then a put of the second card with new markdown, in one batch.
+    Assert: the page shows the card with the new markdown where the first card was, since the clear left the board
+    empty, the board has that place, and the stage leaves no card behind."""
+    async with open_page(address) as user:
+        await agent.write_board(make_put("a", "first"), make_put("b", "second"))
+        await user.await_snapshot(lambda snapshot: len(snapshot.board.positions) == 2)
+        before = await measure_boxes(page, "a", "b")
+        assert before["b"][0] > before["a"][0]
+        await agent.write_board(make_clear(), make_put("b", "third"))
+        card = find_card(page, "b")
+        await expect(card).to_contain_text("third")
+        await expect(card).to_be_visible()
+        board = (
+            await user.await_snapshot(
+                lambda snapshot: snapshot.board.cards["b"].md == "third" and "b" in snapshot.board.positions
+            )
+        ).board
+        assert (await measure_boxes(page, "b"))["b"][:2] == before["a"][:2]
+        assert (board.positions["b"].x + 64, board.positions["b"].y + 64) == before["a"][:2]
+        assert await page.locator("article[data-card]").count() == 1
+
+
+async def test_a_tab_that_opens_on_cards_without_places_measures_them_to_place_them(
+    agent: Agent, browser: Browser, address: tuple[str, int]
+) -> None:
+    """Assemble: the agent puts a tall card and a short one on a board that no tab shows.
+    Act: open the board; then the agent puts a card with a long line, which is as wide as a column.
+    Assert: the tab places the tall card at the view's margin and the short one to its right, at the tall card's width;
+    the wide card, which does not fit beside them, goes below the short one at its height, beside the tall one, which is
+    the first free spot in reading order; no card is left on the stage."""
+    await agent.write_board(make_put("a", "\n".join(f"{n}. step {n}" for n in range(1, 13))), make_put("b", "short"))
+    host, port = address
+    tab = await browser.new_page(viewport={"width": 1440, "height": 900})
+    await tab.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
+    for card_id in "ab":
+        await expect(find_card(tab, card_id)).to_be_visible()
+    boxes = await measure_boxes(tab, "a", "b")
+    assert boxes["a"][:2] == (64, 64)
+    assert boxes["b"][:2] == (64 + boxes["a"][2] + 48, 64)
+    assert boxes["a"][3] > boxes["b"][3]
+
+    await agent.write_board(make_put("c", "a line of words " * 20))
+    await expect(find_card(tab, "c")).to_be_visible()
+    boxes = await measure_boxes(tab, "a", "b", "c")
+    assert boxes["c"][2] == 640
+    assert boxes["b"][0] + boxes["b"][2] + 48 + 640 > await find_free_right(tab) - 64, (
+        "the wide card does not fit beside"
+    )
+    assert boxes["c"][:2] == (boxes["b"][0], 64 + boxes["b"][3] + 48)
+    assert await tab.locator("article[data-card]").count() == 3
+    await tab.close()
 
 
 async def test_an_edit_does_not_replace_a_newer_version_unless_the_user_says_so(page: Page, agent: Agent) -> None:
@@ -990,7 +1062,7 @@ async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Ag
     await agent.tools.call_tool("write_board", {"name": "demo", "actions": dump_bodies(make_put("plan", "1. a"))})
     await agent.write_board(make_put("here", "1. b"))
     await expect(find_card(page, "here")).to_be_visible()
-    await page.get_by_label("Boards").click()
+    await page.get_by_role("button", name="Boards").click()
     menu = page.get_by_role("menu", name="Other boards")
     await expect(menu.get_by_role("menuitem", name=re.compile(f"^{BOARD}"))).to_have_attribute("aria-current", "page")
     item = menu.get_by_role("menuitem", name=re.compile("^demo 1 card$"))
@@ -999,7 +1071,7 @@ async def test_the_page_lists_the_boards_and_opens_another(page: Page, agent: Ag
     await expect(find_card(page, "plan")).to_be_visible()
     await expect(find_card(page, "here")).to_have_count(0)
     assert "board=demo" in page.url
-    await expect(page.get_by_label("Boards")).to_have_text("demo")
+    await expect(page.get_by_role("button", name="Boards")).to_have_text("demo")
 
 
 async def test_the_page_without_a_board_lists_the_boards(page: Page, address: tuple[str, int]) -> None:
@@ -1010,7 +1082,7 @@ async def test_the_page_without_a_board_lists_the_boards(page: Page, address: tu
     boards = page.get_by_role("region", name="Boards")
     await boards.get_by_role("link", name=re.compile(f"^{BOARD}")).click()
     assert f"board={BOARD}" in page.url
-    await expect(page.get_by_label("Boards")).to_have_text(BOARD)
+    await expect(page.get_by_role("button", name="Boards")).to_have_text(BOARD)
 
 
 async def await_positions(agent: Agent, check: Callable[[dict[str, Point]], bool]) -> dict[str, Point]:
@@ -1375,3 +1447,343 @@ async def test_the_history_docks_beside_the_board_and_an_arrow_the_agent_removes
 
     await page.get_by_role("button", name="Collapse the chat").click()
     await expect(page.get_by_label("Open the chat")).to_be_visible()
+
+
+async def check_in_free_area(page: Page, *ids: str) -> list[str]:
+    """The cards whose screen rect leaves the part of the viewport that the chat leaves free."""
+    right = await find_free_right(page)
+    boxes = await measure_boxes(page, *ids)
+    return [card_id for card_id, (x, y, w, h) in boxes.items() if x < 0 or y < 0 or x + w > right or y + h > 900]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#170: the first snapshot comes before the whiteboard lends the store its view, so the page's surface is the window",
+)
+async def test_cards_a_tab_opens_on_without_places_stay_clear_of_the_chat(
+    agent: Agent, browser: Browser, address: tuple[str, int]
+) -> None:
+    """Assemble: the agent puts four short cards on a board that no tab shows.
+    Act: open the board in a tab.
+    Assert: the tab places every card inside the part of the view that the chat leaves free, as a tab that shows the
+    board does for a card that arrives, so that no card hides under the chat."""
+    ids = ["a", "b", "c", "d"]
+    await agent.write_board(*(make_put(card_id, "short") for card_id in ids))
+    host, port = address
+    tab = await browser.new_page(viewport={"width": 1440, "height": 900})
+    await tab.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
+    for card_id in ids:
+        await expect(find_card(tab, card_id)).to_be_visible()
+    await await_positions(agent, lambda found: set(ids) <= set(found))
+    boxes = await measure_boxes(tab, *ids)
+    assert await check_in_free_area(tab, *ids) == [], boxes
+    await tab.close()
+
+
+async def test_a_card_arrives_inside_the_view_the_user_zoomed_out_and_panned(page: Page, agent: Agent) -> None:
+    """Assemble: a short card at the origin; the user zooms out three steps and pans the board so that the view shows
+    negative board coordinates.
+    Act: the agent puts a card.
+    Assert: the card shows inside the free part of the viewport at the zoomed size, clear of the first card, and the
+    board has a place for it that the view maps to where it shows."""
+    await agent.write_board(make_put("a", "short"), make_move("a", 0, 0))
+    await expect(find_card(page, "a")).to_be_visible()
+    await page.mouse.click(700, 700)
+    for _ in range(3):
+        await page.keyboard.press("-")
+    await page.mouse.move(700, 700)
+    await page.mouse.wheel(-600, -400)
+    await await_settled(page)
+    before = await measure_boxes(page, "a")
+    assert before["a"][2] < 256, "the view is zoomed out"
+    assert before["a"][0] > 64 + 300, "the view is panned so that the origin moved right"
+    await agent.write_board(make_put("b", "1. parse\n2. render"))
+    await expect(find_card(page, "b")).to_be_visible()
+    positions = await await_positions(agent, lambda found: "b" in found)
+    assert "b" in positions
+    boxes = await measure_boxes(page, "a", "b")
+    assert find_crossings(boxes) == [], boxes
+    assert await check_in_free_area(page, "b") == [], boxes
+    assert boxes["b"][2] < 256, "the new card shows at the zoomed size"
+    assert positions["b"].x < 0 or positions["b"].y < 0, f"the view's top left is at negative coordinates: {positions}"
+
+
+async def test_a_card_the_agent_restores_is_packed_into_the_view_and_placed(page: Page, agent: Agent) -> None:
+    """Assemble: two cards that the page placed side by side.
+    Act: the agent removes the second, then restores it in a later write.
+    Assert: the restored card shows inside the free view, clear of the first, and the board has a place for it."""
+    await agent.write_board(make_put("a", "short"), make_put("b", "1. parse\n2. render"))
+    await await_positions(agent, lambda found: {"a", "b"} <= set(found))
+    await agent.write_board(make_remove("b"))
+    await expect(find_card(page, "b")).to_have_count(0)
+    await agent.write_board(make_restore("b"))
+    await expect(find_card(page, "b")).to_be_visible()
+    positions = await await_positions(agent, lambda found: "b" in found)
+    assert "b" in positions
+    boxes = await measure_boxes(page, "a", "b")
+    assert find_crossings(boxes) == []
+    assert await check_in_free_area(page, "a", "b") == []
+
+
+async def test_a_card_arriving_during_a_drag_keeps_clear_of_the_dragged_card(page: Page, agent: Agent) -> None:
+    """Assemble: a short card at the origin that the user holds mid-drag at the middle of the view.
+    Act: the agent puts a card while the pointer is down.
+    Assert: the new card is clear of the dragged card where it is, and inside the free view; the drop then leaves the
+    two clear of each other, with the board holding both places."""
+    await agent.write_board(make_put("a", "short"), make_move("a", 0, 0))
+    await expect(find_card(page, "a")).to_be_visible()
+    box = await find_card(page, "a").bounding_box()
+    assert box is not None
+    grip = (box["x"] + box["width"] - 20, box["y"] + box["height"] / 2)
+    await page.mouse.move(*grip)
+    await page.mouse.down()
+    await page.mouse.move(grip[0] + 500, grip[1] + 300, steps=10)
+    await agent.write_board(make_put("b", "1. parse\n2. render"))
+    await expect(find_card(page, "b")).to_be_visible()
+    held = await measure_boxes(page, "a", "b")
+    assert held["a"][0] > 500, "the first card is where the drag holds it"
+    assert find_crossings(held) == [], held
+    assert await check_in_free_area(page, "b") == []
+    await page.mouse.up()
+    positions = await await_positions(agent, lambda found: found.get("a") != Point(x=0, y=0) and "b" in found)
+    assert positions["a"] != Point(x=0, y=0)
+    assert find_crossings(await measure_boxes(page, "a", "b")) == []
+
+
+async def test_a_card_that_a_remove_and_a_put_bring_back_taller_in_one_write_keeps_clear_of_the_card_below(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: two short cards side by side, and a third that the agent moves right below the second, a gap apart.
+    Act: the agent writes a remove of the second card and a put of it with twelve lines, in one batch.
+    Assert: the page gives the taller card a place where it is clear of the third card, since the place comes from
+    the card's size now and not from the size of the short card it replaced."""
+    await agent.write_board(make_put("a", "short"), make_put("b", "short"))
+    await await_positions(agent, lambda found: {"a", "b"} <= set(found))
+    before = await measure_boxes(page, "a", "b")
+    bx, by, _, bh = before["b"]
+    await agent.write_board(make_put("d", "short"), make_move("d", bx - 64, by - 64 + bh + 48))
+    await expect(find_card(page, "d")).to_be_visible()
+    await agent.write_board(make_remove("b"), make_put("b", "\n".join(f"{n}. step {n}" for n in range(1, 13))))
+    await expect(find_card(page, "b")).to_contain_text("step 12")
+    await await_positions(agent, lambda found: "b" in found)
+    after = await measure_boxes(page, "a", "b", "d")
+    assert after["b"][3] > bh + 48, "the card came back taller than the gap it had below"
+    assert find_crossings(after) == [], after
+
+
+async def test_a_card_arrives_while_the_user_edits_another_without_disturbing_the_editor(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: a plan at the origin that the user edits, with a line typed and not saved.
+    Act: the agent puts a card.
+    Assert: the editor stays open with the typed line; the new card is clear of the editor's frame and inside the view."""
+    await agent.write_board(make_put("a", "1. parse\n2. render"), make_move("a", 0, 0))
+    await find_card(page, "a").dblclick()
+    box = page.get_by_label("Markdown of a")
+    await expect(box).to_be_visible()
+    await box.press("End")
+    await box.press("Control+End")
+    await box.type("\n3. ship")
+    await agent.write_board(make_put("b", "short"))
+    await expect(find_card(page, "b")).to_be_visible()
+    await expect(box).to_be_visible()
+    await expect(box).to_have_value("1. parse\n2. render\n3. ship")
+    boxes = await measure_boxes(page, "a", "b")
+    assert find_crossings(boxes) == [], boxes
+    assert await check_in_free_area(page, "b") == []
+
+
+async def test_a_card_taller_than_the_view_goes_below_the_cards_at_the_left(page: Page, agent: Agent) -> None:
+    """Assemble: a short card that the page placed at the view's margin.
+    Act: the agent puts a card of eighty lines, taller than the viewport.
+    Assert: the tall card shows at the left of the view below the short one, a gap apart, with its top in view; the
+    board has that place."""
+    await agent.write_board(make_put("a", "short"))
+    await await_positions(agent, lambda found: "a" in found)
+    first = await measure_boxes(page, "a")
+    await agent.write_board(make_put("tall", "\n".join(f"{n}. step {n}" for n in range(1, 81))))
+    await expect(find_card(page, "tall")).to_contain_text("step 80")
+    positions = await await_positions(agent, lambda found: "tall" in found)
+    boxes = await measure_boxes(page, "a", "tall")
+    assert boxes["tall"][3] > 900, "the card is taller than the viewport"
+    assert boxes["tall"][:2] == (64, 64 + first["a"][3] + 48), boxes
+    assert positions["tall"] == Point(x=0, y=first["a"][3] + 48)
+
+
+async def test_a_card_put_and_resized_in_one_write_is_placed_at_its_set_size(page: Page, agent: Agent) -> None:
+    """Assemble: a short card at the view's margin.
+    Act: the agent puts a card and sets its width to 900 in one write; then puts a card of twelve lines and sets its
+    height to 120 in one write.
+    Assert: the wide card, which does not fit beside the short one, goes below it at the left; the capped card shows
+    120 tall, and the three are clear of each other and inside the free view."""
+    await agent.write_board(make_put("a", "short"))
+    await await_positions(agent, lambda found: "a" in found)
+    first = await measure_boxes(page, "a")
+    await agent.write_board(make_put("wide", "short"), make_resize("wide", width=900))
+    await expect(find_card(page, "wide")).to_be_visible()
+    await await_positions(agent, lambda found: "wide" in found)
+    boxes = await measure_boxes(page, "a", "wide")
+    assert boxes["wide"][2] == 900
+    assert 64 + first["a"][2] + 48 + 900 > await find_free_right(page) - 64, "the wide card does not fit beside"
+    assert boxes["wide"][:2] == (64, 64 + first["a"][3] + 48), boxes
+    await agent.write_board(
+        make_put("capped", "\n".join(f"{n}. step {n}" for n in range(1, 13))), make_resize("capped", height=120)
+    )
+    await expect(find_card(page, "capped")).to_be_visible()
+    await await_positions(agent, lambda found: "capped" in found)
+    boxes = await measure_boxes(page, "a", "wide", "capped")
+    assert boxes["capped"][3] == 120
+    assert find_crossings(boxes) == [], boxes
+    assert await check_in_free_area(page, "a", "wide", "capped") == [], boxes
+
+
+STRESS_BODIES = {
+    "code": "```python\n" + "\n".join(f"value_{n} = {'x' * 90}  # {n}" for n in range(12)) + "\n```",
+    "table": "| | Task | Hours |\n|---|---|---|\n" + "\n".join(f"| [ ] | task {n} | {n} |" for n in range(6)),
+    "headings": "# Risks\n\n## Parsing\n\nwords\n\n## Rendering\n\nmore words\n\n### Details\n\n- one\n- two",
+    "image": "![a chart](http://127.0.0.1:1/missing.png)\n\nbelow the image",
+    "token": "a" * 400,
+    "quote": "> " + "\n> ".join(f"line {n}" for n in range(8)) + "\n\n1. [x] done\n2. [ ] open",
+}
+
+
+async def test_cards_of_every_markdown_kind_are_measured_on_the_stage_which_keeps_nothing(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: nothing on the board.
+    Act: the agent puts, one by one, a code block with long lines, a table of task boxes, headings, an image that does
+    not load, one unbreakable token of four hundred characters, and a quote with task items.
+    Assert: after each put every card has a place, the cards are clear of each other, the cards on one row are a gap
+    apart, which holds when the stage measured each card at the width it shows, and the stage keeps no element."""
+    written: list[str] = []
+    for card_id, md in STRESS_BODIES.items():
+        await agent.write_board(make_put(card_id, md))
+        written.append(card_id)
+        await expect(find_card(page, card_id)).to_be_visible()
+        placed = await await_positions(agent, set(written).issubset)
+        assert set(written) <= set(placed), f"{card_id} has no place"
+        shown = await measure_boxes(page, *written)
+        assert find_crossings(shown) == [], f"after {card_id}: {shown}"
+        rows: defaultdict[int, list[tuple[int, int]]] = defaultdict(list)
+        for x, y, w, _ in shown.values():
+            rows[y].append((x, w))
+        for y, row in rows.items():
+            row.sort()
+            for (x1, w1), (x2, _) in pairwise(row):
+                assert x2 - (x1 + w1) == 48, f"after {card_id}, row {y}: {row}"
+        assert await page.locator("[data-stage] > *").count() == 0
+    assert await page.locator("article[data-card]").count() == len(STRESS_BODIES)
+
+
+async def test_the_agents_move_right_after_its_put_wins_over_the_pages_place(page: Page, agent: Agent) -> None:
+    """Assemble: a board that the page shows.
+    Act: the agent puts a card and, in the next write at once, moves it to 500, 500.
+    Assert: the board has the card at 500, 500, whichever of the move and the page's place came first, and the page
+    shows it there."""
+    await agent.write_board(make_put("b", "short"))
+    await agent.write_board(make_move("b", 500, 500))
+    positions = await await_positions(agent, lambda found: found.get("b") == Point(x=500, y=500))
+    assert positions["b"] == Point(x=500, y=500)
+    await expect(find_card(page, "b")).to_be_visible()
+    boxes = await measure_boxes(page, "b")
+    assert boxes["b"][:2] == (564, 564), boxes
+
+
+async def test_two_tabs_with_different_viewports_show_an_arriving_card_at_one_place(
+    page: Page, agent: Agent, browser: Browser, address: tuple[str, int]
+) -> None:
+    """Assemble: two placed cards on the first row, and a second tab 800 by 600 on the board, where the row is full.
+    Act: the agent puts a third card.
+    Assert: the two tabs place it differently at first, one of the places wins, and both tabs then show the card at
+    the board's place."""
+    await agent.write_board(make_put("a", "short"), make_put("b", "short"))
+    await await_positions(agent, lambda found: {"a", "b"} <= set(found))
+    host, port = address
+    other = await browser.new_page(viewport={"width": 800, "height": 600})
+    await other.goto(f"http://{host}:{port}/?board={BOARD}&token={TOKEN}")
+    await expect(find_card(other, "b")).to_be_visible()
+    await agent.write_board(make_put("c", "short"))
+    await expect(find_card(page, "c")).to_be_visible()
+    await expect(find_card(other, "c")).to_be_visible()
+    positions = await await_positions(agent, lambda found: "c" in found)
+    at = positions["c"]
+    await await_settled(page)
+    await await_settled(other)
+    await expect(find_card(page, "c")).to_have_css("left", f"{at.x:g}px")
+    await expect(find_card(other, "c")).to_have_css("left", f"{at.x:g}px")
+    await expect(find_card(page, "c")).to_have_css("top", f"{at.y:g}px")
+    await expect(find_card(other, "c")).to_have_css("top", f"{at.y:g}px")
+    await other.close()
+
+
+async def test_a_card_arrives_clear_of_cards_piled_at_one_point_and_at_float_coordinates(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: two cards that the agent moved to the same point and one at a fractional point over them.
+    Act: the agent puts a card.
+    Assert: the new card is clear of each of the three, inside the free view, and the board has its place."""
+    await agent.write_board(
+        make_put("a", "short"),
+        make_put("b", "1. parse\n2. render"),
+        make_put("c", "short"),
+        make_move("a", 0, 0),
+        make_move("b", 0, 0),
+        make_move("c", 10.5, 20.25),
+    )
+    await expect(find_card(page, "c")).to_be_visible()
+    await agent.write_board(make_put("d", "short"))
+    await expect(find_card(page, "d")).to_be_visible()
+    positions = await await_positions(agent, lambda found: "d" in found)
+    assert "d" in positions
+    boxes = await measure_boxes(page, "a", "b", "c", "d")
+    assert [pair for pair in find_crossings(boxes) if "d" in pair] == [], boxes
+    assert await check_in_free_area(page, "d") == []
+
+
+@pytest.mark.xfail(
+    strict=True, reason="#171: a folded card is laid out at its folded height, which is this viewer's own"
+)
+async def test_a_card_arriving_below_a_folded_card_stays_clear_once_the_card_opens(page: Page, agent: Agent) -> None:
+    """Assemble: a card of twelve lines, 900 wide at the origin, which the user folds to its first line.
+    Act: the agent puts a short card, which does not fit beside the wide card; the user opens the fold.
+    Assert: the open card and the new card are clear of each other."""
+    await agent.write_board(
+        make_put("a", "\n".join(f"{n}. step {n}" for n in range(1, 13))),
+        make_resize("a", width=900),
+        make_move("a", 0, 0),
+    )
+    await expect(find_card(page, "a")).to_contain_text("step 12")
+    open_box = await measure_boxes(page, "a")
+    await page.get_by_label("Fold card a").click()
+    folded = await measure_boxes(page, "a")
+    assert folded["a"][3] < open_box["a"][3]
+    await agent.write_board(make_put("b", "short"))
+    await expect(find_card(page, "b")).to_be_visible()
+    await await_positions(agent, lambda found: "b" in found)
+    assert (await measure_boxes(page, "b"))["b"][0] == 64, "the short card goes below the wide one"
+    await page.get_by_label("Open card a").click()
+    boxes = await measure_boxes(page, "a", "b")
+    assert find_crossings(boxes) == [], boxes
+
+
+async def test_cards_from_writes_that_race_each_other_each_get_one_place_clear_of_the_others(
+    page: Page, agent: Agent
+) -> None:
+    """Assemble: a board that the page shows.
+    Act: the agent sends six writes of one card each at once, so that their snapshots follow each other at speed.
+    Assert: each card has a place that the view shows, the cards are clear of each other, and each card's place is
+    the one the page gave it: a snapshot that came before the server had a place did not move the card."""
+    ids = [f"race{n}" for n in range(6)]
+    await asyncio.gather(
+        *(agent.write_board(make_put(card_id, f"card {card_id}\n\nwords" * (n + 1))) for n, card_id in enumerate(ids))
+    )
+    for card_id in ids:
+        await expect(find_card(page, card_id)).to_be_visible()
+    positions = await await_positions(agent, set(ids).issubset)
+    assert set(ids) <= set(positions)
+    shown = await measure_boxes(page, *ids)
+    assert find_crossings(shown) == [], shown
+    assert await check_in_free_area(page, *ids) == [], shown
+    assert {card_id: (box[0] - 64, box[1] - 64) for card_id, box in shown.items()} == {
+        card_id: (positions[card_id].x, positions[card_id].y) for card_id in ids
+    }

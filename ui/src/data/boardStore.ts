@@ -5,18 +5,22 @@ import {
   diffBoards,
   emptyLocal,
   modelOf,
+  placeArrivals,
   raise,
 } from "~/data/boardModel";
-import type { TBoardModel, TLocal } from "~/data/boardModel";
+import type {
+  TBoardModel,
+  TLocal,
+  TMeasure,
+  TSurface,
+} from "~/data/boardModel";
 import { openBoardSocket } from "~/data/boardSocket";
 import type { TBoardSocket } from "~/data/boardSocket";
 import { ActionKind } from "~/domain/actions";
 import type { TBody } from "~/domain/actions";
 import type { TPoint } from "~/domain/board";
 import type { TSnapshot } from "~/domain/events";
-import { freePlace } from "~/lib/geometry";
 import { invariant } from "~/lib/invariant";
-import type { TSize } from "~/lib/geometry";
 
 export const ConnectionStatus = z
   .enum(["connecting", "live", "offline"])
@@ -50,11 +54,15 @@ export type TBoardStore = {
   drag: (id: string, at: TPoint) => void;
   /** Moves the card where the user dropped it, and back when the server refuses. */
   drop: (id: string, at: TPoint) => void;
+  /** Puts the user's new card on the board at the point: it shows there from the start, and moves there once it is on. Resolves true when the server takes the put. */
+  create: (id: string, md: string, at: TPoint) => Promise<boolean>;
+  /** Brings a removed card back at the point, where it was: it shows there from the start, and moves there once it is on. */
+  restoreCard: (id: string, at: TPoint) => Promise<boolean>;
   /**
-   * Gives a card that has no place the free place below the cards that have one, at the sizes their elements have,
-   * and tells the server, so that every tab and reload shows the card there; the first tab to place a card wins.
+   * The whiteboard shows the board: its view and the sizes of the cards as it lays them out stand for the page's, for
+   * the places the store gives cards, until the whiteboard goes. Returns the leave.
    */
-  place: (id: string, sizes: ReadonlyMap<string, TSize>) => void;
+  attach: (surface: TSurface) => () => void;
   /** The view showed the cards: they are not fresh any more. */
   saw: (ids: string[]) => void;
   /** The user hides the changes the card shows, or edited it. */
@@ -65,13 +73,23 @@ export type TBoardStore = {
   forgetLostArrow: (id: string) => void;
 };
 
-/** The board as the server last sent it, with the page's own state of its cards, for useSyncExternalStore. */
-export const createBoardStore = (): TBoardStore => {
+/**
+ * The board as the server last sent it, with the page's own state of its cards, for useSyncExternalStore. Every card
+ * it publishes has a place: a card that arrives without one is packed into the view, measured on the stage when the
+ * page has not laid it out, and the server is told, so that every tab and reload shows the card there; the first tab
+ * to place a card wins. The surface is the page's before the whiteboard shows: the window at the home view.
+ */
+export const createBoardStore = (
+  measure: TMeasure,
+  surface: TSurface,
+  openSocket: typeof openBoardSocket = openBoardSocket,
+): TBoardStore => {
   const listeners = new Set<() => void>();
   let snapshot: TSnapshot | null = null;
   let local = emptyLocal;
   let live = false;
   let socket: TBoardSocket | null = null;
+  let shown = surface;
   let connection: TConnection = { status: ConnectionStatus.enum.connecting };
 
   const publish = () => {
@@ -99,9 +117,19 @@ export const createBoardStore = (): TBoardStore => {
         diffBoards(snapshot.board, next.board),
         next.board,
       );
+    const arrivals = placeArrivals(
+      snapshot?.board ?? null,
+      next.board,
+      local,
+      measure,
+      shown,
+    );
+    local = { ...local, placed: { ...local.placed, ...arrivals } };
     snapshot = next;
     live = true;
     publish();
+    for (const [id, at] of Object.entries(arrivals))
+      void act({ kind: ActionKind.enum.place, id, ...at });
   };
 
   /** Acts on the board; a put or an unlink by the user is expected, so that the change it brings is no news. */
@@ -125,10 +153,31 @@ export const createBoardStore = (): TBoardStore => {
     return taken;
   };
 
-  const placeOf = (id: string) =>
-    connection.status === ConnectionStatus.enum.connecting
-      ? null
-      : (connection.model.cards.find((card) => card.id === id)?.at ?? null);
+  const forgetDrop = (id: string) => {
+    update(({ dropped: { [id]: _refused, ...rest }, ...current }) => ({
+      ...current,
+      dropped: rest,
+    }));
+  };
+
+  /** Moves the card where it shows dropped, and forgets the drop when the server refuses. */
+  const move = (id: string, at: TPoint) => {
+    void act({ kind: ActionKind.enum.move, id, ...at }).then((taken) => {
+      if (!taken) forgetDrop(id);
+    });
+  };
+
+  /** Brings the card onto the board with the body, showing it at the point meanwhile, then moves it there. */
+  const bring = async (id: string, at: TPoint, body: TBody) => {
+    update((current) => ({
+      ...current,
+      dropped: { ...current.dropped, [id]: at },
+    }));
+    const taken = await act(body);
+    if (taken) move(id, at);
+    else forgetDrop(id);
+    return taken;
+  };
 
   return {
     subscribe: (listener) => {
@@ -149,7 +198,7 @@ export const createBoardStore = (): TBoardStore => {
       let delay = 1000;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const connect = () => {
-        socket = openBoardSocket(
+        socket = openSocket(
           (next) => {
             delay = 1000;
             receive(next);
@@ -187,26 +236,17 @@ export const createBoardStore = (): TBoardStore => {
         dragging: null,
         dropped: { ...current.dropped, [id]: at },
       }));
-      void act({ kind: ActionKind.enum.move, id, ...at }).then((taken) => {
-        if (taken) return;
-        update(({ dropped: { [id]: _refused, ...rest }, ...current }) => ({
-          ...current,
-          dropped: rest,
-        }));
-      });
+      move(id, at);
     },
-    place: (id, sizes) => {
-      if (placeOf(id) !== null) return;
-      const taken = [...sizes].flatMap(([other, size]) => {
-        const at = placeOf(other);
-        return at === null ? [] : [{ ...at, ...size }];
-      });
-      const at = freePlace(taken);
-      update((current) => ({
-        ...current,
-        placed: { ...current.placed, [id]: at },
-      }));
-      void act({ kind: ActionKind.enum.place, id, ...at });
+    create: (id, md, at) =>
+      bring(id, at, { kind: ActionKind.enum.put, id, md }),
+    restoreCard: (id, at) =>
+      bring(id, at, { kind: ActionKind.enum.restore, id }),
+    attach: (next) => {
+      shown = next;
+      return () => {
+        shown = surface;
+      };
     },
     saw: (ids) => {
       update((current) => ({

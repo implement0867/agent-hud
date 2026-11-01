@@ -6,6 +6,12 @@ export type TRect = TPoint & TSize;
 
 const clampScale = (scale: number) => Math.min(3, Math.max(0.2, scale));
 
+/** The space the view keeps between its edge and the cards: at the home view, when it fits all cards, and when the page places a card. */
+export const viewMargin = 64;
+
+/** The view the page opens with: the board's origin a margin in from the top left, at full scale. */
+export const homeView: TView = { x: viewMargin, y: viewMargin, scale: 1 };
+
 /** The point on the board under a point of the viewport. */
 export const toBoard = (view: TView, at: TPoint): TPoint => ({
   x: (at.x - view.x) / view.scale,
@@ -41,12 +47,11 @@ export const fitAll = (rects: TRect[], area: TRect): TView => {
   const top = Math.min(...rects.map((rect) => rect.y));
   const right = Math.max(...rects.map((rect) => rect.x + rect.width));
   const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
-  const margin = 64;
   const scale = clampScale(
     Math.min(
       1,
-      (area.width - 2 * margin) / (right - left),
-      (area.height - 2 * margin) / (bottom - top),
+      (area.width - 2 * viewMargin) / (right - left),
+      (area.height - 2 * viewMargin) / (bottom - top),
     ),
   );
   return {
@@ -55,6 +60,13 @@ export const fitAll = (rects: TRect[], area: TRect): TView => {
     y: area.y + (area.height - (bottom - top) * scale) / 2 - top * scale,
   };
 };
+
+/** The rect of the board under a rect of the viewport. */
+export const toBoardRect = (view: TView, rect: TRect): TRect => ({
+  ...toBoard(view, rect),
+  width: rect.width / view.scale,
+  height: rect.height / view.scale,
+});
 
 /** The rect of the board point and size, as the view shows it in the viewport. */
 export const onScreen = (view: TView, rect: TRect): TRect => ({
@@ -184,10 +196,7 @@ export const edgeTowards = (
   };
 };
 
-/** The space between cards that the page places. */
-export const gap = 48;
-
-/** The width of a column of the grid that the page places cards on: the widest card, which has code. */
+/** The widest a card gets without a width set: a column, which fits code. */
 export const columnWidth = 640;
 
 /** The least width of a card, which a narrow card's content takes too. */
@@ -199,19 +208,6 @@ export const leastCardHeight = 64;
 /** The width a resize gives a card: from the least width to two columns. */
 export const clampCardWidth = (width: number) =>
   Math.min(2 * columnWidth, Math.max(leastCardWidth, width));
-
-/** The top of the lowest free space in three columns of the grid, below the rects that cross each column. */
-export const freePlace = (rects: TRect[]): TPoint => {
-  return [0, 1, 2]
-    .map((column) => {
-      const x = column * (columnWidth + gap);
-      const below = rects
-        .filter((rect) => rect.x < x + columnWidth && rect.x + rect.width > x)
-        .map((rect) => rect.y + rect.height + gap);
-      return { x, y: Math.max(0, ...below) };
-    })
-    .reduce((best, place) => (place.y < best.y ? place : best));
-};
 
 const pointAt = (t: number, points: [TPoint, TPoint, TPoint, TPoint]) => {
   const [a, b, c, d] = points;
