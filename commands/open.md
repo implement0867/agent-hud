@@ -1,7 +1,0 @@
----
-description: Open the agent-hud board and follow the user's actions on it
----
-
-Pick the board: the one that the arguments below name, else one named for the project directory, in letters, digits, `_` and `-`. Call the board's `list_boards` tool, and `create_board` with the name when the list does not have it. Call `listen` with the name. When its `monitors` is above 0, another session already follows this board: tell the user, and stop unless they say that this session should take the turns too. Give the user the page URL, which is the `url` that `listen` returns with `ws://` changed to `http://` and the path changed to `/`, keeping the `board` and `token` query parameters. Open the `url` with the Monitor tool's `ws` source, with the description `board` and `timeout_ms` as long as the tool allows; when your Monitor tool takes a command only, run the `command` that `listen` returns with it instead. Either way you get each turn of the user: their actions up to the moment they send, as one event of lines with a head that names the turn. The tool caps the monitor at ten or thirty minutes and says when it expires: open it again at once on the expiry notice, one monitor at a time, and stop one that still runs with `TaskStop` before another. Then call `read` with the name and tell the user what is on the board. Name the board in each call after.
-
-$ARGUMENTS

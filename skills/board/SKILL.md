@@ -1,11 +1,21 @@
 ---
 name: board
 description: Show plans, options, tables and questions to the user on the agent-hud board in the browser, and read the user's feedback. Use when a plan, a choice between options, or a table needs the user's review, or when the user asks for the board.
+argument-hint: "[board-name]"
 ---
 
 # Board
 
 The board is a page in the browser that you and the user share. Its MCP tools are `create_board`, `list_boards`, `delete_board`, `write_board`, `read_board` and `listen_board`. A board has a name of 1 to 64 letters, digits, `_` or `-`, and `write_board`, `read_board`, `listen_board` and `delete_board` take the name of the board they act on: there is no default board. `list_boards` lists the boards with their cards and whether an agent follows each. `create_board` makes an empty board, and only it makes one. Use one board for the session: the one the user names, or one named for the project, such as `agent-hud`, created when `list_boards` does not have it; name it in every call. `delete_board` removes a board and its file for good, only when the user asks; it refuses while a monitor is open on the board. Each board is also the MCP resource `board://<name>`, which tells its subscribers of each change.
+
+## Connect when invoked
+
+When the user invokes this skill, connect to the board before anything else:
+
+1. Pick the board: the one that the arguments of the invocation name, which are `$ARGUMENTS`, else the one the user names, else one named for the project directory. Call `list_boards`, and `create_board` when the list does not have it.
+2. Call `listen_board` with the name, and open a monitor as "Read feedback" and "Keep one monitor open" tell.
+3. Call `read_board` and tell the user what is on the board.
+4. End your reply with the page URL as a markdown link that the user can click: the `url` that `listen_board` returned, with `ws://` changed to `http://` and the path changed to `/`, keeping the `board` and `token` query parameters.
 
 ## Show content
 
@@ -39,7 +49,7 @@ A quote names words of a card as the page shows them: the text without markdown,
 ## Read feedback
 
 - `read_board` returns the board: the cards, the threads by id, each with its card, its quote, its occurrence and its comments, the arrows, the chat messages and comments, and the card positions and sizes. `read_board` with `history` true also returns the earlier versions of each card with their threads. `read_board` with `cards` returns those cards alone, with what is on them. `read_changes` returns only the cards that changed since you last read them and the messages since your last read, and each call moves past what it returns; after a clear, or when unsure, `read_board` the whole board again. Use them to read less when the board is large. Cards with the author `user` are the user's own cards; a card with `edited` true has its latest version from the other author, so the user edited your card or you edited the user's card. Cards that the user placed near each other belong together for the user.
-- `listen_board` returns the websocket `url` of the user's turns on the board, a shell `command` that prints each turn as its lines, the `board` name and the `monitors` already open on the board, your own included. When `monitors` counts one you did not open, another session already follows this board and would get each turn too: tell the user so before you open a monitor, and open one only when they want this session to take the turns. Open the `url` with the Monitor tool's `ws` source, or, when your Monitor tool takes a command only, run the `command` with it. Set the description `board` and nothing more, and `timeout_ms` as long as the tool allows. Without a monitor, the user's sends wait, and the page tells the user to run `/agent-hud:open`. The user's comments, arrows, edits and checked boxes collect until the user clicks Send or sends a chat message. Then the monitor gets one turn with all of them, without moves or resizes; `read_board` has the positions and sizes. The page lists what the next turn carries, in the user's words, and marks each change as unsent until Send, so the user sees what you get. A turn sent while no monitor was open waits for the next monitor, across restarts, and the page says so.
+- `listen_board` returns the websocket `url` of the user's turns on the board, a shell `command` that prints each turn as its lines, the `board` name and the `monitors` already open on the board, your own included. When `monitors` counts one you did not open, another session already follows this board and would get each turn too: tell the user so before you open a monitor, and open one only when they want this session to take the turns. Open the `url` with the Monitor tool's `ws` source, or, when your Monitor tool takes a command only, run the `command` with it. Set the description `board` and nothing more, and `timeout_ms` as long as the tool allows. Without a monitor, the user's sends wait, and the page tells the user to run `/agent-hud:board`. The user's comments, arrows, edits and checked boxes collect until the user clicks Send or sends a chat message. Then the monitor gets one turn with all of them, without moves or resizes; `read_board` has the positions and sizes. The page lists what the next turn carries, in the user's words, and marks each change as unsent until Send, so the user sees what you get. A turn sent while no monitor was open waits for the next monitor, across restarts, and the page says so.
 
 ## Keep one monitor open
 
