@@ -22,7 +22,7 @@ export const AgentPill = () => {
     waiting === 0
       ? states[agent]
       : agent === AgentState.enum.away
-        ? `${states[agent]} · ${turns}; run /agent-hud:open in Claude Code to deliver ${waiting === 1 ? "it" : "them"}`
+        ? `${states[agent]} · ${turns}; run /agent-hud:board in Claude Code to deliver ${waiting === 1 ? "it" : "them"}`
         : `${states[agent]} · ${turns}`;
   return (
     <div
