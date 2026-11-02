@@ -1,6 +1,7 @@
 ---
 name: board
 description: Show plans, options, tables and questions to the user on the agent-hud board in the browser, and read the user's feedback. Use when a plan, a choice between options, or a table needs the user's review, or when the user asks for the board.
+argument-hint: "[board-name]"
 ---
 
 # Board
@@ -11,7 +12,7 @@ The board is a page in the browser that you and the user share. Its MCP tools ar
 
 When the user invokes this skill, connect to the board before anything else:
 
-1. Pick the board: the one the user names, else one named for the project directory. Call `list_boards`, and `create_board` when the list does not have it.
+1. Pick the board: the one that the arguments of the invocation name, which are `$ARGUMENTS`, else the one the user names, else one named for the project directory. Call `list_boards`, and `create_board` when the list does not have it.
 2. Call `listen_board` with the name, and open a monitor as "Read feedback" and "Keep one monitor open" tell.
 3. Call `read_board` and tell the user what is on the board.
 4. End your reply with the page URL as a markdown link that the user can click: the `url` that `listen_board` returned, with `ws://` changed to `http://` and the path changed to `/`, keeping the `board` and `token` query parameters.
